@@ -1,3 +1,5 @@
+pub mod post_mortem;
+
 use chrono::Local;
 use rusqlite::params;
 use serde::Serialize;
@@ -191,6 +193,24 @@ pub fn get_level_info(db: tauri::State<'_, SharedDb>) -> Result<LevelInfo, Strin
         .map_err(|e| format!("Lỗi tính tổng XP: {e}"))?;
 
     Ok(calc_level_info(total_xp))
+}
+
+#[tauri::command]
+pub fn set_cf_handle(db: tauri::State<'_, SharedDb>, handle: String) -> Result<(), String> {
+    let trimmed = handle.trim();
+    if trimmed.is_empty() {
+        return Err("CF handle không được để trống".to_string());
+    }
+
+    let conn = db.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
+    crate::db::set_setting(&conn, "cf_handle", trimmed)
+        .map_err(|e| format!("Lỗi lưu cf_handle: {e}"))
+}
+
+#[tauri::command]
+pub fn get_cf_handle(db: tauri::State<'_, SharedDb>) -> Result<Option<String>, String> {
+    let conn = db.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
+    crate::db::get_setting(&conn, "cf_handle").map_err(|e| format!("Lỗi đọc cf_handle: {e}"))
 }
 
 // ============================================================

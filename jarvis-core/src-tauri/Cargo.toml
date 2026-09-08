@@ -4,6 +4,17 @@ version = "0.1.0"
 description = "JARVIS Personal OS - Core Vertical Slice"
 edition = "2021"
 
+# Tauri v2 convention: tách logic ra lib.rs (jarvis_core_lib) để main.rs chỉ
+# là entrypoint mỏng gọi run(). Cần thiết cho mobile targets sau này, và giúp
+# test được business logic mà không cần khởi động full Tauri runtime.
+[lib]
+name = "jarvis_core_lib"
+path = "src/lib.rs"
+
+[[bin]]
+name = "jarvis-core"
+path = "src/main.rs"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
@@ -14,13 +25,23 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 # --- Database ---
-# "bundled" tự build SQLite từ source, khỏi phải cài SQLite riêng trên máy (quan trọng cho Windows)
-rusqlite = { version = "0.31", features = ["bundled"] }
+# "bundled-full" bao gồm FTS5 + R-Tree + mọi extension SQLite chuẩn, là superset
+# của "bundled" - giữ cả 2 feature khai báo tường minh cho rõ ý định dù có phần dư thừa.
+rusqlite = { version = "0.31", features = ["bundled", "bundled-full"] }
 
 # --- Local HTTP server (nhận webhook từ Chrome extension) ---
 axum = "0.7"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
 tower-http = { version = "0.5", features = ["cors"] }
+
+# --- HTTP client cho background worker gọi Codeforces API ---
+# rustls-tls thay vì native-tls: tránh phụ thuộc OpenSSL, build trên Windows
+# gọn hơn hẳn (không cần cài thêm gì ngoài MSVC Build Tools).
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+# --- Error handling: KHÔNG unwrap()/expect() ở business logic ---
+thiserror = "1"
+anyhow = "1"
 
 # --- Utils ---
 chrono = { version = "0.4", features = ["serde"] }

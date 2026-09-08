@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { DailyStats, SubmissionRecord, LevelInfo, HeatmapDay } from "../types";
+import type { PostMortemInput, PostMortemRecord, PostMortemSearchResult } from "../types/post_mortem";
 
 /**
  * Wrapper mỏng quanh invoke() để:
@@ -71,6 +72,31 @@ export async function devClearMockData(): Promise<number> {
   } catch (err) {
     console.error("[tauri-client] devClearMockData lỗi:", err);
     return 0;
+  }
+}
+
+/**
+ * Lưu ý: khác các fetch* khác ở trên, save/get post-mortem KHÔNG nuốt lỗi
+ * thành giá trị mặc định - lỗi ghi post-mortem (VD: root_cause không hợp lệ)
+ * cần hiển thị rõ cho user biết, không thể âm thầm coi như "không có gì".
+ */
+export async function savePostMortem(input: PostMortemInput): Promise<PostMortemRecord> {
+  return invoke<PostMortemRecord>("save_post_mortem", { input });
+}
+
+export async function getPostMortem(problemId: string): Promise<PostMortemRecord | null> {
+  return invoke<PostMortemRecord | null>("get_post_mortem", { problemId });
+}
+
+export async function searchPostMortems(
+  query: string,
+  limit: number = 20
+): Promise<PostMortemSearchResult[]> {
+  try {
+    return await invoke<PostMortemSearchResult[]>("search_post_mortems", { query, limit });
+  } catch (err) {
+    console.error("[tauri-client] searchPostMortems lỗi:", err);
+    return [];
   }
 }
 

@@ -1,31 +1,15 @@
-import { useEffect, useState } from "react";
-import { fetchLevelInfo } from "../lib/tauri-client";
 import type { LevelInfo } from "../types";
 
+interface LevelProgressBarProps {
+  info: LevelInfo | null;
+}
+
 /**
- * Card hiển thị Level + progress bar lên cấp tiếp theo.
- * Tự poll lại mỗi 5s để cập nhật ngay sau khi có submission mới về
- * (không cần refresh page hay lift state phức tạp - MVP ưu tiên đơn giản).
+ * PURE COMPONENT - không tự fetch, không tự tính toán XP/level.
+ * Toàn bộ số liệu (level, %, xp_needed...) đã được Rust tính sẵn qua
+ * get_level_info command. Component này chỉ render những gì nhận được.
  */
-export default function LevelProgressBar() {
-  const [info, setInfo] = useState<LevelInfo | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const tick = async () => {
-      const data = await fetchLevelInfo();
-      if (!cancelled) setInfo(data);
-    };
-
-    tick();
-    const id = setInterval(tick, 5000);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-  }, []);
-
+export default function LevelProgressBar({ info }: LevelProgressBarProps) {
   if (!info) {
     return (
       <div className="rounded-xl bg-zinc-900 border border-zinc-800 p-4 animate-pulse">
@@ -39,12 +23,14 @@ export default function LevelProgressBar() {
     <div className="rounded-xl bg-zinc-900 border border-zinc-800 p-4">
       <div className="flex items-baseline justify-between mb-2">
         <span className="text-sm font-medium text-zinc-400">Level</span>
-        <span className="text-2xl font-bold text-violet-400">Lv.{info.level}</span>
+        <span className="rounded-md bg-violet-600 px-2 py-1 font-mono text-2xl font-bold text-white shadow-[0_0_12px_rgba(139,92,246,0.4)]">
+          Lv.{info.level}
+        </span>
       </div>
 
       <div className="h-3 w-full bg-zinc-800 rounded-full overflow-hidden">
         <div
-          className="h-full bg-gradient-to-r from-violet-500 to-fuchsia-500 rounded-full transition-all duration-500 ease-out"
+          className="bg-violet-500 h-2.5 rounded-full transition-all duration-500 shadow-[0_0_12px_rgba(139,92,246,0.7)]"
           style={{ width: `${info.progress_percent}%` }}
         />
       </div>
