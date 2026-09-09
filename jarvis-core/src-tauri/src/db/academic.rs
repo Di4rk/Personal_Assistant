@@ -1,0 +1,834 @@
+//! Academic Radar — Database layer.
+//!
+//! Design principle: bảng `academic_semesters` KHÔNG lưu `actual_gpa` hay
+//! `actual_drl`. Mọi chỉ số động đều được tính LIVE qua SQL aggregates trên
+//! `academic_courses` và `academic_drl_events`. Điều này tránh denormalization
+//! drift khi user sửa điểm môn học nhưng quên cập nhật aggregate.
+
+use rusqlite::{params, Connection, Result as SqlResult};
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+// ============================================================
+//  SECTION 1: Grading Engine (ĐHQG-HCM Credit System)
+// ============================================================
+
+/// Thang điểm chữ theo quy chế ĐHQG-HCM.
+/// Sử dụng strongly-typed enum thay vì string để:
+/// 1. Trình biên dịch bắt được mọi case thiếu qua exhaustive match.
+/// 2. `to_scale_4()` không bao giờ trả sai giá trị vì không có parse string.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum GradeScale {
+    APlus,
+    A,
+    BPlus,
+    B,
+    CPlus,
+    C,
+    DPlus,
+    D,
+    F,
+}
+
+impl GradeScale {
+    /// Chuyển điểm hệ 10 sang thang điểm chữ theo quy chế ĐHQG-HCM.
+    ///
+    /// Boundary rules (QUAN TRỌNG):
+    /// - Dùng `>=` trên ngưỡng ĐỦ để số như 8.50 rơi vào A, không phải B+.
+    /// - Thứ tự kiểm tra TỪ CAO XUỐNG THẤP: nếu đảo thứ tự sẽ luôn match nhánh đầu.
+    pub fn from_score_10(score: f64) -> Self {
+        if score >= 9.0 {
+            GradeScale::APlus
+        } else if score >= 8.5 {
+            GradeScale::A
+        } else if score >= 8.0 {
+            GradeScale::BPlus
+        } else if score >= 7.0 {
+            GradeScale::B
+        } else if score >= 6.5 {
+            GradeScale::CPlus
+        } else if score >= 5.5 {
+            GradeScale::C
+        } else if score >= 5.0 {
+            GradeScale::DPlus
+        } else if score >= 4.0 {
+            GradeScale::D
+        } else {
+            GradeScale::F
+        }
+    }
+
+    /// Quy đổi sang hệ 4 theo bảng tra cứu cố định của ĐHQG-HCM.
+    pub fn to_scale_4(&self) -> f64 {
+        match self {
+            GradeScale::APlus => 4.0,
+            GradeScale::A => 3.7,
+            GradeScale::BPlus => 3.5,
+            GradeScale::B => 3.0,
+            GradeScale::CPlus => 2.5,
+            GradeScale::C => 2.0,
+            GradeScale::DPlus => 1.5,
+            GradeScale::D => 1.0,
+            GradeScale::F => 0.0,
+        }
+    }
+
+    /// Chuỗi ký tự hiển thị cho grade (A+, B+, v.v.)
+    pub fn as_char(&self) -> &'static str {
+        match self {
+            GradeScale::APlus => "A+",
+            GradeScale::A => "A",
+            GradeScale::BPlus => "B+",
+            GradeScale::B => "B",
+            GradeScale::CPlus => "C+",
+            GradeScale::C => "C",
+            GradeScale::DPlus => "D+",
+            GradeScale::D => "D",
+            GradeScale::F => "F",
+        }
+    }
+
+    /// Môn học có được tính vào GPA không (môn D trở lên mới được tính GPA
+    /// trong quy chế credit — tuy nhiên, `is_passed` là cờ riêng ở course level).
+    /// Grade F không phải môn đạt, nhưng vẫn được TÍNH vào GPA (kéo điểm xuống).
+    pub fn is_passed(&self) -> bool {
+        !matches!(self, GradeScale::F)
+    }
+}
+
+// ============================================================
+//  SECTION 2: Data Transfer Objects
+// ============================================================
+
+/// Bản ghi đầy đủ của 1 học kỳ, trả về từ IPC `get_academic_overview`.
+/// `actual_gpa_*` và `actual_drl` là COMPUTED FIELDS (tính live từ SQL aggregate),
+/// không được lưu trong DB.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SemesterOverview {
+    pub id: String,
+    pub academic_year: String,
+    pub semester_term: i64,
+    pub target_gpa: Option<f64>,
+    pub target_drl: Option<i64>,
+    pub is_completed: bool,
+    pub created_at: i64,
+    pub updated_at: i64,
+    // --- Computed live from aggregate queries ---
+    pub actual_gpa_10: Option<f64>,
+    pub actual_gpa_4: Option<f64>,
+    pub actual_drl: i64,
+    pub passed_credits: i64,
+    pub total_credits: i64,
+}
+
+/// Bản ghi 1 môn học, trả về từ IPC `get_semester_courses`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcademicCourseRecord {
+    pub id: String,
+    pub semester_id: String,
+    pub course_code: String,
+    pub course_name: String,
+    pub credits: i64,
+    pub midterm_score: Option<f64>,
+    pub final_score: Option<f64>,
+    pub other_scores: Option<String>, // JSON string
+    pub summary_score_10: Option<f64>,
+    pub summary_score_4: Option<f64>,
+    pub grade_char: Option<String>,
+    pub is_passed: bool,
+    pub is_gpa_calculated: bool,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+/// DTO để upsert 1 môn học từ frontend. `id` là optional:
+/// - None → sinh UUID v4 mới (INSERT)
+/// - Some → dùng id đã có (UPDATE, nhưng vẫn UPSERT qua ON CONFLICT)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpsertCourseDto {
+    pub id: Option<String>,
+    pub semester_id: String,
+    pub course_code: String,
+    pub course_name: String,
+    pub credits: i64,
+    pub midterm_score: Option<f64>,
+    pub final_score: Option<f64>,
+    pub other_scores: Option<String>,
+    /// Nếu None, backend tự tính từ midterm/final theo quy chế ĐHQG-HCM.
+    pub summary_score_10: Option<f64>,
+    pub is_gpa_calculated: Option<bool>, // default true
+}
+
+/// DTO để upsert học kỳ.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpsertSemesterDto {
+    pub id: String,
+    pub academic_year: String,
+    pub semester_term: i64,
+    pub target_gpa: Option<f64>,
+    pub target_drl: Option<i64>,
+    pub is_completed: Option<bool>,
+}
+
+// ============================================================
+//  SECTION 3: Schema Migration
+// ============================================================
+
+/// Tạo 3 bảng Academic Radar nếu chưa có (idempotent).
+///
+/// Quyết định kiến trúc LOCKED:
+/// - `academic_semesters` CHỈ lưu metadata + chỉ tiêu (`target_gpa`, `target_drl`).
+/// - `actual_gpa_*`, `actual_drl`, `total_credits` KHÔNG được lưu — tính động.
+/// - `academic_courses.id` dùng TEXT UUID v4 (bắt buộc theo spec).
+/// - ON DELETE CASCADE: xoá học kỳ → xoá toàn bộ môn và DRL events của học kỳ đó.
+pub fn ensure_academic_schema(conn: &Connection) -> SqlResult<()> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS academic_semesters (
+            id             TEXT PRIMARY KEY,
+            academic_year  TEXT NOT NULL,
+            semester_term  INTEGER NOT NULL,
+            target_gpa     REAL,
+            target_drl     INTEGER,
+            is_completed   INTEGER NOT NULL DEFAULT 0,
+            created_at     INTEGER NOT NULL,
+            updated_at     INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS academic_courses (
+            id                 TEXT PRIMARY KEY,
+            semester_id        TEXT NOT NULL,
+            course_code        TEXT NOT NULL,
+            course_name        TEXT NOT NULL,
+            credits            INTEGER NOT NULL,
+            midterm_score      REAL,
+            final_score        REAL,
+            other_scores       TEXT,
+            summary_score_10   REAL,
+            summary_score_4    REAL,
+            grade_char         TEXT,
+            is_passed          INTEGER NOT NULL DEFAULT 0,
+            is_gpa_calculated  INTEGER NOT NULL DEFAULT 1,
+            created_at         INTEGER NOT NULL,
+            updated_at         INTEGER NOT NULL,
+            FOREIGN KEY(semester_id) REFERENCES academic_semesters(id) ON DELETE CASCADE,
+            UNIQUE(semester_id, course_code)
+        );
+
+        CREATE TABLE IF NOT EXISTS academic_drl_events (
+            id           TEXT PRIMARY KEY,
+            semester_id  TEXT NOT NULL,
+            event_name   TEXT NOT NULL,
+            category     TEXT NOT NULL
+                CHECK (category IN ('DAO_DUC','HOC_TAP','THE_CHAT','TINH_NGUYEN','HOI_NHAP')),
+            points       INTEGER NOT NULL,
+            proof_url    TEXT,
+            status       TEXT NOT NULL DEFAULT 'PLANNED'
+                CHECK (status IN ('PLANNED','CONFIRMED','REJECTED')),
+            created_at   INTEGER NOT NULL,
+            FOREIGN KEY(semester_id) REFERENCES academic_semesters(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_courses_semester ON academic_courses(semester_id);
+        CREATE INDEX IF NOT EXISTS idx_drl_semester    ON academic_drl_events(semester_id);
+        "#,
+    )?;
+    Ok(())
+}
+
+// ============================================================
+//  SECTION 4: Repository Functions
+// ============================================================
+
+/// Tính GPA hệ 10, GPA hệ 4, số tín chỉ đạt và tổng tín chỉ của 1 học kỳ
+/// ĐỘNG qua SQL aggregate. Không bao giờ đọc từ cột lưu sẵn vì không có cột đó.
+///
+/// NULLIF(..., 0) đảm bảo không chia cho 0 khi chưa có môn nào có điểm.
+/// Trả về (gpa_10, gpa_4, passed_credits, total_credits).
+fn query_semester_stats(
+    conn: &Connection,
+    semester_id: &str,
+) -> SqlResult<(Option<f64>, Option<f64>, i64, i64)> {
+    conn.query_row(
+        r#"
+        SELECT
+            SUM(summary_score_10 * credits) /
+                NULLIF(SUM(CASE WHEN is_gpa_calculated = 1 AND summary_score_10 IS NOT NULL
+                                THEN credits ELSE 0 END), 0)  AS gpa_10,
+            SUM(summary_score_4 * credits) /
+                NULLIF(SUM(CASE WHEN is_gpa_calculated = 1 AND summary_score_4 IS NOT NULL
+                                THEN credits ELSE 0 END), 0)  AS gpa_4,
+            COALESCE(SUM(CASE WHEN is_passed = 1 THEN credits ELSE 0 END), 0) AS passed_credits,
+            COALESCE(SUM(credits), 0)                                         AS total_credits
+        FROM academic_courses
+        WHERE semester_id = ?1
+        "#,
+        params![semester_id],
+        |row| {
+            Ok((
+                row.get::<_, Option<f64>>(0)?,
+                row.get::<_, Option<f64>>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, i64>(3)?,
+            ))
+        },
+    )
+}
+
+/// Tính tổng DRL đã CONFIRMED của học kỳ.
+fn query_drl_sum(conn: &Connection, semester_id: &str) -> SqlResult<i64> {
+    conn.query_row(
+        "SELECT COALESCE(SUM(points), 0) FROM academic_drl_events
+         WHERE semester_id = ?1 AND status = 'CONFIRMED'",
+        params![semester_id],
+        |row| row.get(0),
+    )
+}
+
+/// Lấy tất cả học kỳ kèm chỉ số tính động, sắp xếp theo năm học và học kỳ.
+pub fn get_all_semesters_with_stats(conn: &Connection) -> SqlResult<Vec<SemesterOverview>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, academic_year, semester_term, target_gpa, target_drl,
+                is_completed, created_at, updated_at
+         FROM academic_semesters
+         ORDER BY academic_year DESC, semester_term ASC",
+    )?;
+
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, i64>(2)?,
+            row.get::<_, Option<f64>>(3)?,
+            row.get::<_, Option<i64>>(4)?,
+            row.get::<_, i64>(5)?,
+            row.get::<_, i64>(6)?,
+            row.get::<_, i64>(7)?,
+        ))
+    })?;
+
+    let mut result = Vec::new();
+    for row in rows {
+        let (id, academic_year, semester_term, target_gpa, target_drl, is_completed_raw, created_at, updated_at) =
+            row?;
+
+        let (actual_gpa_10, actual_gpa_4, passed_credits, total_credits) =
+            query_semester_stats(conn, &id)?;
+        let actual_drl = query_drl_sum(conn, &id)?;
+
+        result.push(SemesterOverview {
+            id,
+            academic_year,
+            semester_term,
+            target_gpa,
+            target_drl,
+            is_completed: is_completed_raw != 0,
+            created_at,
+            updated_at,
+            actual_gpa_10,
+            actual_gpa_4,
+            actual_drl,
+            passed_credits,
+            total_credits,
+        });
+    }
+
+    Ok(result)
+}
+
+/// Lấy danh sách môn học của 1 học kỳ.
+pub fn get_courses_by_semester(
+    conn: &Connection,
+    semester_id: &str,
+) -> SqlResult<Vec<AcademicCourseRecord>> {
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT id, semester_id, course_code, course_name, credits,
+               midterm_score, final_score, other_scores,
+               summary_score_10, summary_score_4, grade_char,
+               is_passed, is_gpa_calculated, created_at, updated_at
+        FROM academic_courses
+        WHERE semester_id = ?1
+        ORDER BY course_code ASC
+        "#,
+    )?;
+
+    let rows = stmt.query_map(params![semester_id], |row| {
+        Ok(AcademicCourseRecord {
+            id: row.get(0)?,
+            semester_id: row.get(1)?,
+            course_code: row.get(2)?,
+            course_name: row.get(3)?,
+            credits: row.get(4)?,
+            midterm_score: row.get(5)?,
+            final_score: row.get(6)?,
+            other_scores: row.get(7)?,
+            summary_score_10: row.get(8)?,
+            summary_score_4: row.get(9)?,
+            grade_char: row.get(10)?,
+            is_passed: row.get::<_, i64>(11)? != 0,
+            is_gpa_calculated: row.get::<_, i64>(12)? != 0,
+            created_at: row.get(13)?,
+            updated_at: row.get(14)?,
+        })
+    })?;
+
+    rows.collect::<SqlResult<Vec<_>>>()
+}
+
+/// Upsert 1 môn học. Nếu `dto.id` là None, sinh UUID v4 mới.
+/// Tính tự động `summary_score_10`, `summary_score_4`, `grade_char`, `is_passed`
+/// theo quy chế ĐHQG-HCM nếu điểm tổng kết chưa có.
+///
+/// Công thức tính điểm tổng kết (nếu chưa có `summary_score_10`):
+///   - 30% midterm + 70% final (quy chế phổ biến nhất ĐHQG-HCM).
+///   - Chỉ tính nếu CẢ HAI điểm đều không null.
+fn compute_summary(dto: &UpsertCourseDto) -> (Option<f64>, Option<f64>, Option<String>, bool) {
+    // Ưu tiên summary_score_10 đã được truyền thẳng từ frontend
+    // (VD: user nhập từ bảng điểm portal, đã biết điểm tổng kết chính xác).
+    let score_10 = dto.summary_score_10.or_else(|| {
+        match (dto.midterm_score, dto.final_score) {
+            (Some(mid), Some(fin)) => Some((mid * 0.3 + fin * 0.7).min(10.0)),
+            _ => None,
+        }
+    });
+
+    match score_10 {
+        Some(s10) => {
+            let grade = GradeScale::from_score_10(s10);
+            let s4 = grade.to_scale_4();
+            let is_gpa_calc = dto.is_gpa_calculated.unwrap_or(true);
+            let passed = if is_gpa_calc { grade.is_passed() } else { s10 >= 4.0 };
+            (Some(s10), Some(s4), Some(grade.as_char().to_string()), passed)
+        }
+        None => (None, None, None, false),
+    }
+}
+
+/// Batch upsert nhiều môn học trong 1 transaction.
+///
+/// Dùng `ON CONFLICT(semester_id, course_code) DO UPDATE SET ...` để:
+/// 1. Insert môn mới mà không có lỗi duplicate.
+/// 2. Update môn đã tồn tại (user nhập lại sau khi có điểm cuối kỳ).
+///
+/// `id` TEXT PRIMARY KEY: nếu frontend gửi id khác với id cũ nhưng cùng
+/// `(semester_id, course_code)`, ON CONFLICT sẽ giữ id cũ (vì SET không đổi id).
+pub fn upsert_courses(conn: &mut Connection, courses: &[UpsertCourseDto]) -> SqlResult<()> {
+    let now = chrono::Utc::now().timestamp();
+    let tx = conn.transaction()?;
+
+    for dto in courses {
+        let id = dto
+            .id
+            .clone()
+            .unwrap_or_else(|| Uuid::new_v4().to_string());
+        let is_gpa_calculated: i64 = if dto.is_gpa_calculated.unwrap_or(true) {
+            1
+        } else {
+            0
+        };
+
+        let (summary_10, summary_4, grade_char, is_passed) = compute_summary(dto);
+        let is_passed_int: i64 = if is_passed { 1 } else { 0 };
+
+        tx.execute(
+            r#"
+            INSERT INTO academic_courses
+                (id, semester_id, course_code, course_name, credits,
+                 midterm_score, final_score, other_scores,
+                 summary_score_10, summary_score_4, grade_char,
+                 is_passed, is_gpa_calculated, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?14)
+            ON CONFLICT(semester_id, course_code) DO UPDATE SET
+                course_name       = excluded.course_name,
+                credits           = excluded.credits,
+                midterm_score     = excluded.midterm_score,
+                final_score       = excluded.final_score,
+                other_scores      = excluded.other_scores,
+                summary_score_10  = excluded.summary_score_10,
+                summary_score_4   = excluded.summary_score_4,
+                grade_char        = excluded.grade_char,
+                is_passed         = excluded.is_passed,
+                is_gpa_calculated = excluded.is_gpa_calculated,
+                updated_at        = excluded.updated_at
+            "#,
+            params![
+                id,
+                dto.semester_id,
+                dto.course_code,
+                dto.course_name,
+                dto.credits,
+                dto.midterm_score,
+                dto.final_score,
+                dto.other_scores,
+                summary_10,
+                summary_4,
+                grade_char,
+                is_passed_int,
+                is_gpa_calculated,
+                now,
+            ],
+        )?;
+    }
+
+    tx.commit()?;
+    Ok(())
+}
+
+/// Upsert 1 học kỳ. Dùng để frontend tạo/sửa học kỳ và cập nhật chỉ tiêu.
+pub fn upsert_semester(conn: &Connection, dto: &UpsertSemesterDto) -> SqlResult<()> {
+    let now = chrono::Utc::now().timestamp();
+    let is_completed: i64 = if dto.is_completed.unwrap_or(false) { 1 } else { 0 };
+
+    conn.execute(
+        r#"
+        INSERT INTO academic_semesters
+            (id, academic_year, semester_term, target_gpa, target_drl, is_completed, created_at, updated_at)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)
+        ON CONFLICT(id) DO UPDATE SET
+            academic_year = excluded.academic_year,
+            semester_term = excluded.semester_term,
+            target_gpa    = excluded.target_gpa,
+            target_drl    = excluded.target_drl,
+            is_completed  = excluded.is_completed,
+            updated_at    = excluded.updated_at
+        "#,
+        params![
+            dto.id,
+            dto.academic_year,
+            dto.semester_term,
+            dto.target_gpa,
+            dto.target_drl,
+            is_completed,
+            now,
+        ],
+    )?;
+
+    Ok(())
+}
+
+// ============================================================
+//  SECTION 5: Unit Tests
+// ============================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // -------------------------------------------------------
+    // 5a. GradeScale boundary tests (bắt buộc theo spec)
+    // -------------------------------------------------------
+
+    #[test]
+    fn grade_8_49_is_bplus_3_5() {
+        let grade = GradeScale::from_score_10(8.49);
+        assert_eq!(grade, GradeScale::BPlus, "8.49 phải là B+ (dưới ngưỡng 8.5 của A)");
+        assert_eq!(grade.to_scale_4(), 3.5);
+        assert_eq!(grade.as_char(), "B+");
+    }
+
+    #[test]
+    fn grade_8_50_is_a_3_7() {
+        let grade = GradeScale::from_score_10(8.50);
+        assert_eq!(grade, GradeScale::A, "8.50 phải là A (chính xác ngưỡng >= 8.5)");
+        assert_eq!(grade.to_scale_4(), 3.7);
+    }
+
+    #[test]
+    fn grade_8_99_is_a_3_7() {
+        let grade = GradeScale::from_score_10(8.99);
+        assert_eq!(grade, GradeScale::A, "8.99 phải là A (dưới ngưỡng 9.0 của A+)");
+        assert_eq!(grade.to_scale_4(), 3.7);
+    }
+
+    #[test]
+    fn grade_9_00_is_aplus_4_0() {
+        let grade = GradeScale::from_score_10(9.00);
+        assert_eq!(grade, GradeScale::APlus, "9.00 phải là A+ (chính xác ngưỡng >= 9.0)");
+        assert_eq!(grade.to_scale_4(), 4.0);
+    }
+
+    #[test]
+    fn grade_f_is_not_passed() {
+        assert!(!GradeScale::F.is_passed());
+    }
+
+    #[test]
+    fn grade_d_is_passed() {
+        assert!(GradeScale::D.is_passed());
+    }
+
+    #[test]
+    fn all_boundaries_spot_check() {
+        // Kiểm tra toàn bộ ranh giới để tránh off-by-one
+        let cases: &[(f64, GradeScale, f64)] = &[
+            (10.0, GradeScale::APlus, 4.0),
+            (9.0, GradeScale::APlus, 4.0),
+            (8.99, GradeScale::A, 3.7),
+            (8.5, GradeScale::A, 3.7),
+            (8.49, GradeScale::BPlus, 3.5),
+            (8.0, GradeScale::BPlus, 3.5),
+            (7.99, GradeScale::B, 3.0),
+            (7.0, GradeScale::B, 3.0),
+            (6.99, GradeScale::CPlus, 2.5),
+            (6.5, GradeScale::CPlus, 2.5),
+            (6.49, GradeScale::C, 2.0),
+            (5.5, GradeScale::C, 2.0),
+            (5.49, GradeScale::DPlus, 1.5),
+            (5.0, GradeScale::DPlus, 1.5),
+            (4.99, GradeScale::D, 1.0),
+            (4.0, GradeScale::D, 1.0),
+            (3.99, GradeScale::F, 0.0),
+            (0.0, GradeScale::F, 0.0),
+        ];
+        for (score, expected_grade, expected_scale4) in cases {
+            let grade = GradeScale::from_score_10(*score);
+            assert_eq!(
+                grade, *expected_grade,
+                "score {score}: expected {expected_grade:?}, got {grade:?}"
+            );
+            assert_eq!(
+                grade.to_scale_4(),
+                *expected_scale4,
+                "score {score}: scale4 mismatch"
+            );
+        }
+    }
+
+    // -------------------------------------------------------
+    // 5b. Repository / aggregation integration tests
+    // -------------------------------------------------------
+
+    fn setup_test_db() -> Connection {
+        let conn = Connection::open_in_memory()
+            .expect("in-memory DB phải luôn mở được");
+        conn.pragma_update(None, "foreign_keys", "ON")
+            .expect("bật FK phải thành công");
+        ensure_academic_schema(&conn).expect("schema phải tạo được");
+        conn
+    }
+
+    fn insert_test_semester(conn: &Connection, id: &str) {
+        conn.execute(
+            "INSERT INTO academic_semesters (id, academic_year, semester_term, created_at, updated_at)
+             VALUES (?1, '2024-2025', 1, 0, 0)",
+            params![id],
+        )
+        .expect("insert test semester phải thành công");
+    }
+
+    #[test]
+    fn gpa_aggregation_returns_null_when_no_courses() {
+        let conn = setup_test_db();
+        insert_test_semester(&conn, "SEM_A");
+
+        let (gpa10, gpa4, passed, total) = query_semester_stats(&conn, "SEM_A")
+            .expect("query phải chạy được");
+        assert!(gpa10.is_none(), "GPA 10 phải None khi chưa có môn");
+        assert!(gpa4.is_none(), "GPA 4 phải None khi chưa có môn");
+        assert_eq!(passed, 0);
+        assert_eq!(total, 0);
+    }
+
+    #[test]
+    fn gpa_aggregation_correct_with_courses() {
+        let mut conn = setup_test_db();
+        insert_test_semester(&conn, "SEM_B");
+
+        // IT001: 4 tín chỉ, điểm 9.0 → A+ (4.0)
+        // MA003: 3 tín chỉ, điểm 7.5 → B  (3.0)
+        // GPA_10 = (9.0*4 + 7.5*3) / (4+3) = (36 + 22.5) / 7 = 58.5/7 ≈ 8.357
+        // GPA_4  = (4.0*4 + 3.0*3) / (4+3) = (16 + 9) / 7 = 25/7 ≈ 3.571
+        let courses = vec![
+            UpsertCourseDto {
+                id: None,
+                semester_id: "SEM_B".to_string(),
+                course_code: "IT001".to_string(),
+                course_name: "Lập trình căn bản".to_string(),
+                credits: 4,
+                midterm_score: None,
+                final_score: None,
+                other_scores: None,
+                summary_score_10: Some(9.0),
+                is_gpa_calculated: Some(true),
+            },
+            UpsertCourseDto {
+                id: None,
+                semester_id: "SEM_B".to_string(),
+                course_code: "MA003".to_string(),
+                course_name: "Giải tích".to_string(),
+                credits: 3,
+                midterm_score: None,
+                final_score: None,
+                other_scores: None,
+                summary_score_10: Some(7.5),
+                is_gpa_calculated: Some(true),
+            },
+        ];
+        upsert_courses(&mut conn, &courses).expect("upsert phải thành công");
+
+        let (gpa10, gpa4, passed, total) = query_semester_stats(&conn, "SEM_B")
+            .expect("aggregate phải chạy được");
+
+        let expected_gpa10 = 58.5 / 7.0;
+        let expected_gpa4 = 25.0 / 7.0;
+
+        assert!(
+            (gpa10.unwrap() - expected_gpa10).abs() < 0.001,
+            "GPA 10 sai: got {:.4}, expected {:.4}",
+            gpa10.unwrap(),
+            expected_gpa10
+        );
+        assert!(
+            (gpa4.unwrap() - expected_gpa4).abs() < 0.001,
+            "GPA 4 sai: got {:.4}, expected {:.4}",
+            gpa4.unwrap(),
+            expected_gpa4
+        );
+        assert_eq!(passed, 7, "Cả 2 môn đều đạt → 7 tín chỉ đã qua");
+        assert_eq!(total, 7);
+    }
+
+    #[test]
+    fn gdtc_excluded_from_gpa_calculation() {
+        let mut conn = setup_test_db();
+        insert_test_semester(&conn, "SEM_C");
+
+        // GDTC: is_gpa_calculated = false → không tính vào GPA
+        let courses = vec![
+            UpsertCourseDto {
+                id: None,
+                semester_id: "SEM_C".to_string(),
+                course_code: "GDTC1".to_string(),
+                course_name: "Giáo dục thể chất".to_string(),
+                credits: 1,
+                midterm_score: None,
+                final_score: None,
+                other_scores: None,
+                summary_score_10: Some(8.0),
+                is_gpa_calculated: Some(false), // GDTC không tính GPA
+            },
+            UpsertCourseDto {
+                id: None,
+                semester_id: "SEM_C".to_string(),
+                course_code: "IT002".to_string(),
+                course_name: "Cấu trúc dữ liệu".to_string(),
+                credits: 3,
+                midterm_score: None,
+                final_score: None,
+                other_scores: None,
+                summary_score_10: Some(9.0),
+                is_gpa_calculated: Some(true),
+            },
+        ];
+        upsert_courses(&mut conn, &courses).expect("upsert phải thành công");
+
+        let (gpa10, _, _, _) = query_semester_stats(&conn, "SEM_C").expect("aggregate phải chạy");
+        // GPA chỉ tính IT002: 9.0 * 3 / 3 = 9.0 (GDTC bị loại)
+        assert!(
+            (gpa10.unwrap() - 9.0).abs() < 0.001,
+            "GDTC phải bị loại khỏi GPA calculation, got {:.4}",
+            gpa10.unwrap()
+        );
+    }
+
+    #[test]
+    fn drl_sum_only_counts_confirmed() {
+        let conn = setup_test_db();
+        insert_test_semester(&conn, "SEM_D");
+        let now = chrono::Utc::now().timestamp();
+
+        conn.execute_batch(&format!(
+            r#"
+            INSERT INTO academic_drl_events (id, semester_id, event_name, category, points, status, created_at)
+            VALUES
+                ('d1','SEM_D','Tình nguyện hè','TINH_NGUYEN',10,'CONFIRMED',{now}),
+                ('d2','SEM_D','Nghiên cứu KH','HOC_TAP',20,'PLANNED',{now}),
+                ('d3','SEM_D','Thể thao','THE_CHAT',5,'REJECTED',{now}),
+                ('d4','SEM_D','Lớp trưởng','DAO_DUC',15,'CONFIRMED',{now});
+            "#
+        ))
+        .expect("insert DRL events phải thành công");
+
+        let drl = query_drl_sum(&conn, "SEM_D").expect("DRL sum phải chạy được");
+        assert_eq!(drl, 25, "Chỉ CONFIRMED mới tính: 10+15 = 25 (PLANNED và REJECTED bị loại)");
+    }
+
+    #[test]
+    fn upsert_deduplicates_same_course_code() {
+        let mut conn = setup_test_db();
+        insert_test_semester(&conn, "SEM_E");
+
+        let first = vec![UpsertCourseDto {
+            id: None,
+            semester_id: "SEM_E".to_string(),
+            course_code: "IT001".to_string(),
+            course_name: "Old Name".to_string(),
+            credits: 3,
+            midterm_score: Some(6.0),
+            final_score: None,
+            other_scores: None,
+            summary_score_10: None,
+            is_gpa_calculated: Some(true),
+        }];
+        upsert_courses(&mut conn, &first).expect("insert lần 1 phải thành công");
+
+        let second = vec![UpsertCourseDto {
+            id: None,
+            semester_id: "SEM_E".to_string(),
+            course_code: "IT001".to_string(),
+            course_name: "New Name".to_string(),
+            credits: 3,
+            midterm_score: Some(6.0),
+            final_score: Some(8.0),
+            other_scores: None,
+            summary_score_10: None,
+            is_gpa_calculated: Some(true),
+        }];
+        upsert_courses(&mut conn, &second).expect("upsert lần 2 phải thành công");
+
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM academic_courses WHERE semester_id = 'SEM_E'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("count phải chạy được");
+        assert_eq!(count, 1, "ON CONFLICT phải dedup, không tạo 2 row");
+
+        let name: String = conn
+            .query_row(
+                "SELECT course_name FROM academic_courses WHERE semester_id = 'SEM_E'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("query name phải chạy được");
+        assert_eq!(name, "New Name", "Tên phải được cập nhật từ lần upsert thứ 2");
+    }
+
+    #[test]
+    fn compute_summary_from_midterm_and_final() {
+        // 30% mid + 70% final = 0.3*6 + 0.7*8 = 1.8 + 5.6 = 7.4 → B (3.0)
+        let dto = UpsertCourseDto {
+            id: None,
+            semester_id: "X".to_string(),
+            course_code: "X".to_string(),
+            course_name: "X".to_string(),
+            credits: 3,
+            midterm_score: Some(6.0),
+            final_score: Some(8.0),
+            other_scores: None,
+            summary_score_10: None,
+            is_gpa_calculated: Some(true),
+        };
+        let (s10, s4, grade, passed) = compute_summary(&dto);
+        assert!((s10.unwrap() - 7.4).abs() < 0.001);
+        assert_eq!(s4.unwrap(), 3.0); // B
+        assert_eq!(grade.unwrap(), "B");
+        assert!(passed);
+    }
+}

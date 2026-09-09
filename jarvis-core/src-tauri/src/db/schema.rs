@@ -32,6 +32,7 @@ pub fn init_db(db_path: &Path) -> SqlResult<Connection> {
     run_migrations(&conn)?;
     ensure_worker_schema(&conn)?;
     ensure_post_mortem_schema(&conn)?;
+    crate::db::academic::ensure_academic_schema(&conn)?;
 
     Ok(conn)
 }

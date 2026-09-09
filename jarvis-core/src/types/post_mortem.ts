@@ -19,7 +19,14 @@ export const ROOT_CAUSE_LABELS: Record<RootCauseType, string> = {
   MISREAD: "Đọc sai đề",
 };
 
-/** Payload gửi lên khi tạo/sửa post-mortem, khớp PostMortemInput ở Rust. */
+/**
+ * Payload gửi lên khi tạo/sửa post-mortem, khớp PostMortemInput ở Rust.
+ *
+ * QUAN TRỌNG: Rust PostMortemInput dùng snake_case fields và Tauri IPC nhận
+ * arguments dưới dạng camelCase object key từ JS (invoke argument mapping).
+ * Nhưng struct này được gửi như 1 nested object `{ input: ... }` nên Tauri
+ * sẽ deserialize theo snake_case. Giữ snake_case ở đây đúng với Rust struct.
+ */
 export interface PostMortemInput {
   problem_id: string;
   problem_name: string;
@@ -31,17 +38,25 @@ export interface PostMortemInput {
   tags: string;
 }
 
-/** Record đầy đủ nhận về từ Rust, khớp PostMortemRecord. */
+/**
+ * Record đầy đủ nhận về từ Rust, khớp PostMortemRecord.
+ *
+ * Rust struct dùng `#[serde(rename_all = "camelCase")]` nên TẤT CẢ field
+ * trong JSON response đều là camelCase: `problemId`, `problemName`, v.v.
+ * Interface này PHẢI dùng camelCase để runtime data binding hoạt động đúng.
+ */
 export interface PostMortemRecord {
   id: number;
-  problem_id: string;
-  problem_name: string;
+  problemId: string;
+  problemName: string;
   platform: string;
-  root_cause: RootCauseType;
-  key_insight: string;
+  rootCause: RootCauseType;
+  keyInsight: string;
+  /** Comma-separated normalized tags, VD: "dp,tree,bitmask". */
   tags: string;
-  created_at: number; // unix timestamp (giây) - dùng new Date(created_at * 1000)
-  updated_at: number;
+  /** Unix timestamp (giây) — dùng `new Date(createdAt * 1000)` để hiển thị. */
+  createdAt: number;
+  updatedAt: number;
 }
 
 /**

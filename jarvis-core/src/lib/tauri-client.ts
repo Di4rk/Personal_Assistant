@@ -109,6 +109,20 @@ export async function getPostMortem(problemId: string): Promise<PostMortemRecord
   return invoke<PostMortemRecord | null>("get_post_mortem", { problemId });
 }
 
+/**
+ * Xoá post-mortem theo problemId. Trả về true nếu có bản ghi bị xoá,
+ * false nếu chưa từng có post-mortem cho problem đó (không phải lỗi).
+ */
+export async function deletePostMortem(problemId: string): Promise<boolean> {
+  try {
+    return await invoke<boolean>("delete_post_mortem", { problemId });
+  } catch (err) {
+    console.error("[tauri-client] deletePostMortem lỗi:", err);
+    return false;
+  }
+}
+
+
 export async function searchPostMortems(
   query: string,
   limit: number = 20

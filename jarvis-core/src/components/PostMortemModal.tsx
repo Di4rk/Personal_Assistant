@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getPostMortem, savePostMortem } from "../lib/tauri-client";
 import {
   ROOT_CAUSE_LABELS,
   type PostMortemInput,
+  type PostMortemRecord,
   type RootCauseType,
 } from "../types/post_mortem";
 
@@ -26,6 +27,17 @@ const ROOT_CAUSES: RootCauseType[] = [
   "MISREAD",
 ];
 
+function recordToInput(record: PostMortemRecord): PostMortemInput {
+  return {
+    problem_id: record.problemId,
+    problem_name: record.problemName,
+    platform: record.platform,
+    root_cause: record.rootCause,
+    key_insight: record.keyInsight,
+    tags: record.tags,
+  };
+}
+
 function createInitialForm(submission: SelectedSubmission): PostMortemInput {
   return {
     problem_id: submission.problemId,
@@ -47,6 +59,11 @@ export default function PostMortemModal({
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState("");
 
+  // Focus ref for the key_insight textarea — auto-focused when modal opens
+  // so the user can start typing the insight without clicking.
+  const insightRef = useRef<HTMLTextAreaElement>(null);
+
+  // Load existing post-mortem when modal opens; initialize form with defaults.
   useEffect(() => {
     if (!isOpen || !submission) return;
 
@@ -59,15 +76,7 @@ export default function PostMortemModal({
     getPostMortem(submission.problemId)
       .then((record) => {
         if (!record || cancelled) return;
-
-        setForm({
-          problem_id: record.problem_id,
-          problem_name: record.problem_name,
-          platform: record.platform,
-          root_cause: record.root_cause,
-          key_insight: record.key_insight,
-          tags: record.tags,
-        });
+        setForm(recordToInput(record));
       })
       .catch(() => {
         if (!cancelled) {
@@ -83,16 +92,35 @@ export default function PostMortemModal({
     };
   }, [isOpen, submission]);
 
+  // Focus the key_insight textarea when loading finishes.
+  useEffect(() => {
+    if (!isLoading && isOpen && insightRef.current) {
+      // Small defer so the textarea is actually rendered and measurable.
+      const id = setTimeout(() => insightRef.current?.focus(), 50);
+      return () => clearTimeout(id);
+    }
+  }, [isLoading, isOpen]);
+
+  // Keyboard shortcuts: Esc → close, Ctrl+Enter → save.
   useEffect(() => {
     if (!isOpen) return;
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !isSaving) onClose();
+      if (event.key === "Escape" && !isSaving) {
+        onClose();
+        return;
+      }
+      if ((event.ctrlKey || event.metaKey) && event.key === "Enter" && !isSaving && !isLoading) {
+        event.preventDefault();
+        void handleSave();
+      }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, isSaving, onClose]);
+    // handleSave is defined below; we use the functional version captured via closure.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, isSaving, isLoading, onClose]);
 
   if (!isOpen || !submission || !form) return null;
 
@@ -104,6 +132,7 @@ export default function PostMortemModal({
   };
 
   const handleSave = async () => {
+    if (!form) return;
     if (!form.key_insight.trim()) {
       setError("Hãy ghi lại ít nhất một bài học rút ra trước khi lưu.");
       return;
@@ -181,8 +210,12 @@ export default function PostMortemModal({
               <label className="block">
                 <span className="text-xs font-medium uppercase tracking-wider text-zinc-400">
                   Key insight
+                  <span className="ml-2 text-zinc-600 normal-case font-normal tracking-normal">
+                    (Ctrl+Enter để lưu nhanh)
+                  </span>
                 </span>
                 <textarea
+                  ref={insightRef}
                   className="mt-2 min-h-32 w-full resize-y rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm leading-6 text-zinc-100 outline-none transition-colors duration-150 ease-out placeholder:text-zinc-500 focus:border-violet-500"
                   onChange={(event) => updateField("key_insight", event.target.value)}
                   placeholder="What failed, why it failed, and the invariant you will check next time."
@@ -223,7 +256,8 @@ export default function PostMortemModal({
           <button
             className="rounded-md bg-violet-500 px-3 py-2 text-sm font-medium text-white transition-colors duration-150 ease-out hover:bg-violet-600 focus:outline-none focus:ring-2 focus:ring-violet-400 disabled:cursor-not-allowed disabled:opacity-50"
             disabled={isLoading || isSaving}
-            onClick={handleSave}
+            onClick={() => void handleSave()}
+            title="Ctrl+Enter"
             type="button"
           >
             {isSaving ? "Saving…" : "Save post-mortem"}

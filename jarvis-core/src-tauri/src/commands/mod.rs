@@ -1,3 +1,4 @@
+pub mod academic;
 pub mod post_mortem;
 
 use chrono::Local;
