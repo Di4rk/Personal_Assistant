@@ -1,18 +1,26 @@
 import { useEffect, useState } from "react";
 import { fetchYearlyHeatmap } from "../lib/tauri-client";
-import type { HeatmapDay, HeatmapTier } from "../types";
+import type { HeatmapDay } from "../types";
 
-const TIER_COLOR: Record<HeatmapTier, string> = {
-  rest: "bg-zinc-800",
-  productive: "bg-emerald-600",
-  god_mode: "bg-violet-500",
-};
+function getHeatmapCellClass(totalXp: number): string {
+  if (totalXp === 0) {
+    return "w-3 h-3 rounded-[3px] bg-zinc-900 border border-zinc-800/60";
+  }
 
-const TIER_LABEL: Record<HeatmapTier, string> = {
-  rest: "Rest",
-  productive: "Productive",
-  god_mode: "God Mode",
-};
+  if (totalXp < 30) {
+    return "w-3 h-3 rounded-[3px] bg-emerald-950/80 border border-emerald-800/40";
+  }
+
+  if (totalXp < 60) {
+    return "w-3 h-3 rounded-[3px] bg-emerald-600 shadow-[0_0_8px_rgba(16,185,129,0.4)]";
+  }
+
+  if (totalXp < 100) {
+    return "w-3 h-3 rounded-[3px] bg-violet-600 shadow-[0_0_10px_rgba(139,92,246,0.5)]";
+  }
+
+  return "w-3 h-3 rounded-[3px] bg-fuchsia-400 shadow-[0_0_14px_rgba(232,121,249,0.9)] border border-white/60";
+}
 
 /**
  * Chuyển mảng 365/366 ngày liên tục thành cấu trúc [tuần][thứ trong tuần]
@@ -94,34 +102,50 @@ export default function ActivityHeatmap() {
         </div>
       ) : (
         <>
-          <div className="flex gap-[3px] overflow-x-auto pb-2">
-            {weeks.map((week, wi) => (
-              <div key={wi} className="flex flex-col gap-[3px]">
-                {week.map((day, di) =>
-                  day ? (
-                    <div
-                      key={di}
-                      onMouseEnter={() => setHovered(day)}
-                      onMouseLeave={() => setHovered(null)}
-                      className={`w-[11px] h-[11px] rounded-[2px] ${TIER_COLOR[day.tier]} hover:ring-1 hover:ring-white/50 cursor-pointer transition-all`}
-                      title={`${day.date}: ${day.total_xp} XP`}
-                    />
-                  ) : (
-                    <div key={di} className="w-[11px] h-[11px]" />
-                  )
-                )}
-              </div>
-            ))}
+          <div className="overflow-x-auto pb-2">
+            <div className="flex gap-1">
+              {weeks.map((week, wi) => (
+                <div key={wi} className="flex flex-col gap-1">
+                  {week.map((day, di) =>
+                    day ? (
+                      <div
+                        key={di}
+                        onMouseEnter={() => setHovered(day)}
+                        onMouseLeave={() => setHovered(null)}
+                        className={`${getHeatmapCellClass(day.total_xp)} cursor-pointer transition-all duration-150 ease-out hover:scale-125 hover:ring-1 hover:ring-white/50`}
+                        title={`${day.date}: ${day.total_xp} XP`}
+                      />
+                    ) : (
+                      <div key={di} className="w-3 h-3" />
+                    )
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
 
           <div className="flex items-center justify-between mt-3">
-            <div className="flex items-center gap-3 text-xs text-zinc-500">
-              {(Object.keys(TIER_COLOR) as HeatmapTier[]).map((tier) => (
-                <div key={tier} className="flex items-center gap-1.5">
-                  <div className={`w-2.5 h-2.5 rounded-[2px] ${TIER_COLOR[tier]}`} />
-                  <span>{TIER_LABEL[tier]}</span>
-                </div>
-              ))}
+            <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-500">
+              <div className="flex items-center gap-1.5">
+                <div className="w-2.5 h-2.5 rounded-[3px] bg-zinc-900 border border-zinc-800/60" />
+                <span>Rest</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="w-2.5 h-2.5 rounded-[3px] bg-emerald-950/80 border border-emerald-800/40" />
+                <span>&lt;30 XP</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="w-2.5 h-2.5 rounded-[3px] bg-emerald-600 shadow-[0_0_8px_rgba(16,185,129,0.4)]" />
+                <span>&lt;60 XP</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="w-2.5 h-2.5 rounded-[3px] bg-violet-600 shadow-[0_0_10px_rgba(139,92,246,0.5)]" />
+                <span>&lt;100 XP</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="w-2.5 h-2.5 rounded-[3px] bg-fuchsia-400 shadow-[0_0_14px_rgba(232,121,249,0.9)] border border-white/60" />
+                <span>God Mode</span>
+              </div>
             </div>
 
             {hovered && (

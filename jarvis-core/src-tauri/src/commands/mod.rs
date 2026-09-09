@@ -1,9 +1,13 @@
+pub mod academic;
+pub mod post_mortem;
+
 use chrono::Local;
 use rusqlite::params;
 use serde::Serialize;
 
 use crate::db::SharedDb;
 use crate::gamification::{calc_level_info, LevelInfo};
+use crate::services::cf_worker::{self, SyncLock};
 
 #[derive(Debug, Serialize, Clone)]
 pub struct DailyStats {
@@ -24,6 +28,15 @@ pub struct SubmissionRecord {
     pub contest_id: Option<String>,
     pub xp_awarded: i64,
     pub submitted_at: String,
+}
+
+/// Payload trả về từ `trigger_cf_sync` — khớp với SyncCompletePayload trong
+/// tauri-client.ts. Dùng i64 cho count thay vì usize vì JSON/JS không có unsigned.
+#[derive(Debug, Serialize, Clone)]
+pub struct SyncCompletePayload {
+    pub success: bool,
+    pub message: String,
+    pub new_submissions_count: i64,
 }
 
 /// Lấy stats hôm nay để render lên Dashboard (XP, số AC/WA trong ngày).
@@ -193,36 +206,57 @@ pub fn get_level_info(db: tauri::State<'_, SharedDb>) -> Result<LevelInfo, Strin
     Ok(calc_level_info(total_xp))
 }
 
-// ============================================================
-// DEV-ONLY COMMANDS: chỉ compile trong debug build, biến mất
-// hoàn toàn khỏi release build (cfg attribute), an toàn tuyệt đối
-// khỏi trường hợp lỡ ship nút "xoá data" ra bản thật.
-// ============================================================
+#[tauri::command]
+pub fn set_cf_handle(db: tauri::State<'_, SharedDb>, handle: String) -> Result<(), String> {
+    let trimmed = handle.trim();
+    if trimmed.is_empty() {
+        return Err("CF handle không được để trống".to_string());
+    }
 
-#[cfg(debug_assertions)]
-#[derive(Debug, Serialize)]
-pub struct SeedResult {
-    pub inserted: usize,
+    let conn = db.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
+    crate::db::set_setting(&conn, "cf_handle", trimmed)
+        .map_err(|e| format!("Lỗi lưu cf_handle: {e}"))
 }
 
-#[cfg(debug_assertions)]
 #[tauri::command]
-pub fn dev_seed_mock_data(
+pub fn get_cf_handle(db: tauri::State<'_, SharedDb>) -> Result<Option<String>, String> {
+    let conn = db.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
+    crate::db::get_setting(&conn, "cf_handle").map_err(|e| format!("Lỗi đọc cf_handle: {e}"))
+}
+
+/// Trigger 1 sync cycle ngay lập tức từ UI, được bảo vệ bởi SyncLock để tránh
+/// chồng chéo với background worker. Trả về SyncCompletePayload để UI có thể
+/// hiển thị trạng thái sync mà không cần đợi event riêng.
+#[tauri::command]
+pub async fn trigger_cf_sync(
+    app: tauri::AppHandle,
+    client: tauri::State<'_, reqwest::Client>,
     db: tauri::State<'_, SharedDb>,
-    days_back: i64,
-) -> Result<SeedResult, String> {
-    let days_back = days_back.clamp(1, 365);
-    let mut conn = db.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
+    sync_lock: tauri::State<'_, SyncLock>,
+) -> Result<SyncCompletePayload, String> {
+    // Nếu lock đã bị giữ (background worker đang chạy hoặc IPC call khác),
+    // trả về thông báo rõ ràng thay vì đứng chờ.
+    let _guard = sync_lock.try_acquire().ok_or_else(|| {
+        "Sync đang chạy — vui lòng đợi chu kỳ hiện tại hoàn tất".to_string()
+    })?;
 
-    crate::db::seed_mock_data(&mut conn, days_back)
-        .map(|inserted| SeedResult { inserted })
-        .map_err(|e| format!("Lỗi seed mock data: {e}"))
-}
-
-#[cfg(debug_assertions)]
-#[tauri::command]
-pub fn dev_clear_mock_data(db: tauri::State<'_, SharedDb>) -> Result<usize, String> {
-    let mut conn = db.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
-
-    crate::db::clear_mock_data(&mut conn).map_err(|e| format!("Lỗi xoá mock data: {e}"))
+    match cf_worker::perform_sync(&app, &client, &db, 200).await {
+        Ok(result) => Ok(SyncCompletePayload {
+            success: true,
+            message: if result.new_submissions_count > 0 {
+                format!(
+                    "+{} submission mới, +{} XP hôm nay",
+                    result.new_submissions_count, result.total_daily_xp
+                )
+            } else {
+                "Không có submission mới".to_string()
+            },
+            new_submissions_count: result.new_submissions_count as i64,
+        }),
+        Err(e) => Ok(SyncCompletePayload {
+            success: false,
+            message: format!("Sync thất bại: {e}"),
+            new_submissions_count: 0,
+        }),
+    }
 }

@@ -12,6 +12,35 @@ use crate::db::{insert_submission_and_update_daily, SharedDb};
 
 pub const SERVER_PORT: u16 = 3030;
 
+use std::sync::{Arc, Mutex, OnceLock};
+
+static EXTRACTED_HTML: OnceLock<Arc<Mutex<Option<String>>>> = OnceLock::new();
+
+pub fn get_extracted_html_store() -> Arc<Mutex<Option<String>>> {
+    EXTRACTED_HTML
+        .get_or_init(|| Arc::new(Mutex::new(None)))
+        .clone()
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct TranscriptPayload {
+    pub html: String,
+}
+
+async fn handle_academic_transcript(
+    Json(payload): Json<TranscriptPayload>,
+) -> impl IntoResponse {
+    let store = get_extracted_html_store();
+    if let Ok(mut guard) = store.lock() {
+        *guard = Some(payload.html);
+    }
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({ "status": "ok", "message": "transcript received" })),
+    )
+        .into_response()
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SubmissionPayload {
     pub problem_id: String,
@@ -104,6 +133,7 @@ async fn handle_submission(
 fn build_router(db: SharedDb) -> Router {
     Router::new()
         .route("/api/v1/events/submission", post(handle_submission))
+        .route("/api/v1/academic/transcript", post(handle_academic_transcript))
         // permissive() vì server chỉ bind 127.0.0.1 (không expose ra mạng ngoài),
         // và caller duy nhất là Chrome extension với origin dạng chrome-extension://<id>
         // mà browser không cho set cụ thể trong CORS allow-list dễ dàng.
