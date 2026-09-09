@@ -10,6 +10,7 @@ use crate::db::{
     AcademicCourseRecord, SemesterOverview, SharedDb, UpsertCourseDto, UpsertSemesterDto,
 };
 use crate::services::uit_portal::{ingest_portal_transcript, RawPortalSemester};
+use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
 pub type AcademicOverviewDto = SemesterOverview;

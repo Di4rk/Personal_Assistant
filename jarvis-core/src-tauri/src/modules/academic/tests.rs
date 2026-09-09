@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use crate::modules::academic::parser::{
-        parse_portal_transcript, parse_semester_label, score_to_scale_4, GpaPolicy,
+        parse_portal_transcript, parse_semester_label, score_to_scale_4,
     };
 
     #[test]

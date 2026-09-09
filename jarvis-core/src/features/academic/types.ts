@@ -156,3 +156,36 @@ export type PortalSyncStatus =
   | "completed"
   | "error";
 
+export type UitSyncState =
+  | { state: "Opening"; message?: never }
+  | { state: "Authenticating"; message?: never }
+  | { state: "Extracting"; message?: never }
+  | { state: "Parsing"; message?: never }
+  | { state: "Persisting"; message?: never }
+  | { state: "Completed"; message?: never }
+  | { state: "Failed"; message: string };
+
+export interface SemesterRef {
+  id: string;
+  academicYear: string;
+  semesterTerm: number;
+}
+
+export interface ParsedCourse {
+  courseCode: string;
+  courseName: string;
+  credits: number;
+  midtermScore: number | null;
+  finalScore: number | null;
+  summaryScore10: number | null;
+  summaryScore4: number | null;
+  gradeChar: string | null;
+  isPassed: boolean;
+  isGpaCalculated: boolean;
+}
+
+export interface ParsedSemester {
+  semester: SemesterRef;
+  courses: ParsedCourse[];
+}
+

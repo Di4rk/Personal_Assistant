@@ -217,4 +217,13 @@ export async function submitPortalTranscript(
   return invoke<AcademicOverviewDto>("submit_portal_transcript", { semesters });
 }
 
+/**
+ * Quy trình đồng bộ SSO cô lập và an toàn (P0 Zero-Trust) cho Cổng UIT.
+ * Mở Webview không cấp quyền IPC, Rust tự động điều phối và trích xuất qua DOM.
+ */
+export async function syncUitPortal(): Promise<AcademicOverviewDto> {
+  return invoke<AcademicOverviewDto>("sync_uit_portal");
+}
+
+
 
