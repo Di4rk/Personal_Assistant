@@ -128,3 +128,31 @@ export interface UpsertSemesterDto {
   targetDrl?: number | null;
   isCompleted?: boolean | null;
 }
+
+// ============================================================
+//  UIT Portal Next.js Ingestion Types
+// ============================================================
+
+export interface RawPortalCourse {
+  courseCode: string;
+  courseName: string;
+  credits: number;
+  processScore?: number | null;
+  practiceScore?: number | null;
+  midtermScore?: number | null;
+  finalScore?: number | null;
+  summaryScore10: number;
+}
+
+export interface RawPortalSemester {
+  header: string; // e.g. "Học kỳ 1/2024-2025" hoặc "2024_2025_HK1"
+  courses: RawPortalCourse[];
+}
+
+export type PortalSyncStatus =
+  | "idle"
+  | "awaiting_sso"
+  | "ingesting"
+  | "completed"
+  | "error";
+

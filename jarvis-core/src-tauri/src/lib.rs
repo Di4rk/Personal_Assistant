@@ -102,6 +102,8 @@ pub fn run() {
             commands::academic::get_semester_courses,
             commands::academic::upsert_academic_courses,
             commands::academic::upsert_academic_semester,
+            commands::academic::sync_portal_uit_data,
+            commands::academic::submit_portal_transcript,
         ])
         .run(tauri::generate_context!());
 

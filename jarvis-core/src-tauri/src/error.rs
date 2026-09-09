@@ -38,6 +38,12 @@ pub enum AppError {
 
     #[error("Không tìm thấy post-mortem cho problem_id: {0}")]
     PostMortemNotFound(String),
+
+    #[error("Lỗi đồng bộ Cổng thông tin UIT: {0}")]
+    PortalSync(String),
+
+    #[error("Lỗi phân giải bảng điểm UIT: {0}")]
+    TranscriptParse(String),
 }
 
 pub type AppResult<T> = Result<T, AppError>;

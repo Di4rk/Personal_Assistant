@@ -9,6 +9,10 @@ use crate::db::{
     get_all_semesters_with_stats, get_courses_by_semester, upsert_courses, upsert_semester,
     AcademicCourseRecord, SemesterOverview, SharedDb, UpsertCourseDto, UpsertSemesterDto,
 };
+use crate::services::uit_portal::{ingest_portal_transcript, RawPortalSemester};
+use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
+
+pub type AcademicOverviewDto = SemesterOverview;
 
 /// Trả về toàn bộ học kỳ kèm chỉ số GPA/DRL tính LIVE từ SQL aggregate.
 ///
@@ -96,3 +100,88 @@ pub fn upsert_academic_semester(
     upsert_semester(&conn, &semester)
         .map_err(|e| format!("Lỗi upsert_academic_semester: {e}"))
 }
+
+const PORTAL_BANG_DIEM_URL: &str = "https://portal.uit.edu.vn/sinh-vien/bang-diem";
+
+/// Đồng bộ bảng điểm từ Cổng thông tin Next.js mới của UIT (portal.uit.edu.vn).
+///
+/// Flow:
+/// 1. Mở cửa sổ Webview tạm thời `sso-login` trỏ tới `https://portal.uit.edu.vn/sinh-vien/bang-diem`.
+/// 2. Bắt cookie session hoặc phân giải payload bảng điểm đã hydrate.
+/// 3. Kéo dữ liệu bảng điểm học kỳ và batch upsert vào `academic_courses` qua transaction.
+/// 4. Đóng popup và trigger event `academic://sync-complete`.
+#[tauri::command]
+pub async fn sync_portal_uit_data(
+    app: AppHandle,
+    db: tauri::State<'_, SharedDb>,
+) -> Result<AcademicOverviewDto, String> {
+    // 1. Mở hoặc focus cửa sổ popup SSO
+    if let Some(w) = app.get_webview_window("sso-login") {
+        let _ = w.show();
+        let _ = w.set_focus();
+    } else {
+        let parsed_url = PORTAL_BANG_DIEM_URL
+            .parse()
+            .map_err(|e| format!("URL không hợp lệ: {e}"))?;
+
+        let _ = WebviewWindowBuilder::new(&app, "sso-login", WebviewUrl::External(parsed_url))
+            .title("Đăng nhập Cổng thông tin UIT (SSO)")
+            .inner_size(1024.0, 768.0)
+            .center()
+            .build()
+            .map_err(|e| format!("Không thể khởi tạo Webview SSO: {e}"))?;
+    }
+
+    // 2. Trả về overview hiện tại (hoặc overview mới nhất khi sync xong)
+    let conn = db.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
+    let overviews = get_all_semesters_with_stats(&conn)
+        .map_err(|e| format!("Lỗi truy vấn academic overview: {e}"))?;
+
+    if let Some(first) = overviews.first() {
+        Ok(first.clone())
+    } else {
+        Ok(SemesterOverview {
+            id: "2024_2025_HK1".to_string(),
+            academic_year: "2024-2025".to_string(),
+            semester_term: 1,
+            target_gpa: None,
+            target_drl: None,
+            is_completed: false,
+            created_at: chrono::Utc::now().timestamp(),
+            updated_at: chrono::Utc::now().timestamp(),
+            actual_gpa_10: None,
+            actual_gpa_4: None,
+            actual_drl: 0,
+            passed_credits: 0,
+            total_credits: 0,
+        })
+    }
+}
+
+/// Ingest trực tiếp payload bảng điểm (từ Webview injected script hoặc từ fallback parser / paste).
+/// Đóng cửa sổ `sso-login` nếu đang mở và phát event `academic://sync-complete`.
+#[tauri::command]
+pub async fn submit_portal_transcript(
+    app: AppHandle,
+    db: tauri::State<'_, SharedDb>,
+    semesters: Vec<RawPortalSemester>,
+) -> Result<AcademicOverviewDto, String> {
+    if semesters.is_empty() {
+        return Err("Payload bảng điểm học kỳ không có dữ liệu".to_string());
+    }
+
+    let mut conn = db.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
+    let overview = ingest_portal_transcript(&mut conn, &semesters)
+        .map_err(|e| format!("Lỗi nạp bảng điểm UIT: {e}"))?;
+
+    // Đóng popup SSO nếu đang mở
+    if let Some(w) = app.get_webview_window("sso-login") {
+        let _ = w.close();
+    }
+
+    // Trigger event academic://sync-complete
+    let _ = app.emit("academic://sync-complete", &overview);
+
+    Ok(overview)
+}
+

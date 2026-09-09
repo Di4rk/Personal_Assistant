@@ -6,6 +6,7 @@ import type {
   AcademicCourseRecord,
   UpsertCourseDto,
   UpsertSemesterDto,
+  RawPortalSemester,
 } from "../features/academic/types";
 
 /**
@@ -198,4 +199,22 @@ export async function upsertAcademicCourses(courses: UpsertCourseDto[]): Promise
 export async function upsertAcademicSemester(semester: UpsertSemesterDto): Promise<void> {
   return invoke<void>("upsert_academic_semester", { semester });
 }
+
+/**
+ * Kích hoạt quy trình đồng bộ bảng điểm từ Cổng thông tin UIT (portal.uit.edu.vn).
+ * Mở Webview popup SSO để sinh viên xác thực và tải bảng điểm.
+ */
+export async function syncPortalUitData(): Promise<AcademicOverviewDto> {
+  return invoke<AcademicOverviewDto>("sync_portal_uit_data");
+}
+
+/**
+ * Gửi payload bảng điểm trích xuất trực tiếp hoặc qua DOM fallback vào SQLite.
+ */
+export async function submitPortalTranscript(
+  semesters: RawPortalSemester[]
+): Promise<AcademicOverviewDto> {
+  return invoke<AcademicOverviewDto>("submit_portal_transcript", { semesters });
+}
+
 
