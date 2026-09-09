@@ -33,6 +33,7 @@ pub fn init_db(db_path: &Path) -> SqlResult<Connection> {
     ensure_worker_schema(&conn)?;
     ensure_post_mortem_schema(&conn)?;
     crate::db::academic::ensure_academic_schema(&conn)?;
+    purge_mock_submissions(&conn)?;
 
     Ok(conn)
 }
@@ -269,6 +270,20 @@ pub fn insert_submission_and_update_daily(
     Ok(xp)
 }
 
+/// Dọn dẹp các bản ghi mock submission cũ còn sót lại từ giai đoạn test/dev.
+/// Tự động chạy trong `init_db`. Nếu có bản ghi bị xoá, thực hiện `VACUUM` để
+/// giải phóng triệt để disk space.
+pub fn purge_mock_submissions(conn: &Connection) -> SqlResult<usize> {
+    let deleted = conn.execute(
+        "DELETE FROM submissions WHERE problem_name LIKE 'Mock Problem%' OR problem_id LIKE 'mock-%'",
+        [],
+    )?;
+    if deleted > 0 {
+        let _ = conn.execute_batch("VACUUM;");
+    }
+    Ok(deleted)
+}
+
 #[cfg(test)]
 mod tests {
     use super::init_db;
@@ -292,6 +307,52 @@ mod tests {
         assert_eq!(table_exists, 1);
 
         drop(connection);
+        let _ = std::fs::remove_file(&db_path);
+        let _ = std::fs::remove_file(db_path.with_extension("sqlite3-wal"));
+        let _ = std::fs::remove_file(db_path.with_extension("sqlite3-shm"));
+    }
+
+    #[test]
+    fn purge_mock_submissions_deletes_only_mock_records() {
+        let db_path = std::env::temp_dir().join(format!(
+            "diark-purge-test-{}-{}.sqlite3",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+
+        let conn = init_db(&db_path).expect("init db failed");
+
+        // Insert mix of real and mock submissions
+        conn.execute(
+            "INSERT INTO submissions (problem_id, problem_name, verdict, submitted_at)
+             VALUES ('mock-1001A', 'Mock Problem 1001A', 'OK', '2026-03-01T10:00:00')",
+            [],
+        )
+        .unwrap();
+
+        conn.execute(
+            "INSERT INTO submissions (problem_id, problem_name, verdict, submitted_at)
+             VALUES ('1234B', 'Real Problem 1234B', 'OK', '2026-03-01T10:00:00')",
+            [],
+        )
+        .unwrap();
+
+        conn.execute(
+            "INSERT INTO submissions (problem_id, problem_name, verdict, submitted_at)
+             VALUES ('mock-9999Z', 'Something Else', 'WA', '2026-03-01T10:00:00')",
+            [],
+        )
+        .unwrap();
+
+        let deleted = super::purge_mock_submissions(&conn).expect("purge should succeed");
+        assert_eq!(deleted, 2);
+
+        let remaining: i64 = conn
+            .query_row("SELECT COUNT(*) FROM submissions", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(remaining, 1);
+
+        drop(conn);
         let _ = std::fs::remove_file(&db_path);
         let _ = std::fs::remove_file(db_path.with_extension("sqlite3-wal"));
         let _ = std::fs::remove_file(db_path.with_extension("sqlite3-shm"));
