@@ -106,6 +106,8 @@ pub fn run() {
             commands::academic::sync_portal_uit_data,
             commands::academic::sync_uit_portal,
             commands::academic::submit_portal_transcript,
+            commands::academic::get_academic_macro_metrics,
+            commands::academic::get_academic_curriculum,
         ])
         .run(tauri::generate_context!());
 

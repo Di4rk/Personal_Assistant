@@ -306,6 +306,24 @@ mod tests {
             .expect("post_mortems table query should succeed");
         assert_eq!(table_exists, 1);
 
+        let curriculum_exists: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'academic_curriculum'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("academic_curriculum table query should succeed");
+        assert_eq!(curriculum_exists, 1);
+
+        let macro_exists: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'academic_macro_metrics'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("academic_macro_metrics table query should succeed");
+        assert_eq!(macro_exists, 1);
+
         drop(connection);
         let _ = std::fs::remove_file(&db_path);
         let _ = std::fs::remove_file(db_path.with_extension("sqlite3-wal"));

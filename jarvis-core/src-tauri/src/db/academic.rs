@@ -235,6 +235,30 @@ pub fn ensure_academic_schema(conn: &Connection) -> SqlResult<()> {
 
         CREATE INDEX IF NOT EXISTS idx_courses_semester ON academic_courses(semester_id);
         CREATE INDEX IF NOT EXISTS idx_drl_semester    ON academic_drl_events(semester_id);
+
+        -- Lưu trữ danh mục môn học theo khung CTĐT (Tab 3)
+        CREATE TABLE IF NOT EXISTS academic_curriculum (
+            course_code TEXT PRIMARY KEY,
+            course_name TEXT NOT NULL,
+            credits INTEGER NOT NULL,
+            course_type TEXT NOT NULL, -- 'Bắt buộc' | 'Tự chọn'
+            ideal_term INTEGER NOT NULL, -- 1, 2, 3, 4, 5, 6, 7, 20
+            status TEXT NOT NULL, -- 'Đã qua' | 'Đang học' | 'Chưa học'
+            final_score REAL,
+            updated_at INTEGER NOT NULL
+        );
+
+        -- Lưu trữ metadata và macro metrics chính thức (Tab 1)
+        CREATE TABLE IF NOT EXISTS academic_macro_metrics (
+            semester_id TEXT PRIMARY KEY,
+            term_gpa REAL NOT NULL,
+            cumulative_gpa REAL NOT NULL,
+            classification TEXT NOT NULL,
+            term_credits INTEGER NOT NULL,
+            cumulative_credits INTEGER NOT NULL,
+            drl INTEGER,
+            updated_at INTEGER NOT NULL
+        );
         "#,
     )?;
     Ok(())
@@ -511,78 +535,205 @@ pub fn upsert_semester(conn: &Connection, dto: &UpsertSemesterDto) -> SqlResult<
     Ok(())
 }
 
+/// Persist toàn bộ 3 tập dữ liệu học vụ UIT (Macro metrics, Historical courses, Curriculum roadmap)
+/// nguyên tử trong 1 SQLite transaction duy nhất.
+pub fn persist_unified_academic_sync(
+    conn: &mut Connection,
+    data: &crate::modules::academic::parser::UnifiedAcademicData,
+) -> SqlResult<()> {
+    let tx = conn.transaction()?;
+    let now = chrono::Utc::now().timestamp();
+
+    // 1. Batch upsert Macro Metrics
+    if !data.macro_metrics.is_empty() {
+        let mut stmt = tx.prepare_cached(
+            "INSERT INTO academic_macro_metrics (
+                semester_id, term_gpa, cumulative_gpa, classification, term_credits, cumulative_credits, drl, updated_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+            ON CONFLICT(semester_id) DO UPDATE SET
+                term_gpa = excluded.term_gpa,
+                cumulative_gpa = excluded.cumulative_gpa,
+                classification = excluded.classification,
+                term_credits = excluded.term_credits,
+                cumulative_credits = excluded.cumulative_credits,
+                drl = excluded.drl,
+                updated_at = excluded.updated_at",
+        )?;
+        for m in &data.macro_metrics {
+            stmt.execute(params![
+                m.semester_id,
+                m.term_gpa,
+                m.cumulative_gpa,
+                m.classification,
+                m.term_credits,
+                m.cumulative_credits,
+                m.drl,
+                now,
+            ])?;
+        }
+    }
+
+    // 2. Batch upsert Historical Courses
+    if !data.historical_semesters.is_empty() {
+        let mut upsert_sem_stmt = tx.prepare_cached(
+            "INSERT INTO academic_semesters (id, academic_year, semester_term, is_completed, created_at, updated_at)
+             VALUES (?1, ?2, ?3, 1, ?4, ?4)
+             ON CONFLICT(id) DO UPDATE SET
+                academic_year = excluded.academic_year,
+                semester_term = excluded.semester_term,
+                updated_at    = excluded.updated_at",
+        )?;
+
+        let mut upsert_course_stmt = tx.prepare_cached(
+            "INSERT INTO academic_courses (
+                id, semester_id, course_code, course_name, credits,
+                midterm_score, final_score, summary_score_10, summary_score_4,
+                grade_char, is_passed, is_gpa_calculated, created_at, updated_at
+            ) VALUES (
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?13
+            )
+            ON CONFLICT(semester_id, course_code) DO UPDATE SET
+                course_name       = excluded.course_name,
+                credits           = excluded.credits,
+                midterm_score     = excluded.midterm_score,
+                final_score       = excluded.final_score,
+                summary_score_10  = excluded.summary_score_10,
+                summary_score_4   = excluded.summary_score_4,
+                grade_char        = excluded.grade_char,
+                is_passed         = excluded.is_passed,
+                is_gpa_calculated = excluded.is_gpa_calculated,
+                updated_at        = excluded.updated_at",
+        )?;
+
+        for sem in &data.historical_semesters {
+            upsert_sem_stmt.execute(params![
+                sem.semester.id,
+                sem.semester.academic_year,
+                sem.semester.semester_term as i64,
+                now,
+            ])?;
+
+            for c in &sem.courses {
+                let record_id = uuid::Uuid::new_v4().to_string();
+                upsert_course_stmt.execute(params![
+                    record_id,
+                    sem.semester.id,
+                    c.course_code,
+                    c.course_name,
+                    c.credits,
+                    c.midterm_score,
+                    c.final_score,
+                    c.summary_score_10,
+                    c.summary_score_4,
+                    c.grade_char,
+                    c.is_passed as i32,
+                    c.is_gpa_calculated as i32,
+                    now,
+                ])?;
+            }
+        }
+    }
+
+    // 3. Batch upsert Curriculum Roadmap
+    if !data.curriculum_courses.is_empty() {
+        let mut stmt = tx.prepare_cached(
+            "INSERT INTO academic_curriculum (
+                course_code, course_name, credits, course_type, ideal_term, status, final_score, updated_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+            ON CONFLICT(course_code) DO UPDATE SET
+                course_name = excluded.course_name,
+                credits = excluded.credits,
+                course_type = excluded.course_type,
+                ideal_term = excluded.ideal_term,
+                status = excluded.status,
+                final_score = excluded.final_score,
+                updated_at = excluded.updated_at",
+        )?;
+
+        for c in &data.curriculum_courses {
+            stmt.execute(params![
+                c.course_code,
+                c.course_name,
+                c.credits,
+                c.course_type,
+                c.ideal_term,
+                c.status,
+                c.final_score,
+                now,
+            ])?;
+        }
+    }
+
+    tx.commit()?;
+    Ok(())
+}
+
 /// Nhận `Vec<ParsedSemester>` đã validate từ pure parser,
 /// ghi nguyên tử vào database SQLite trong 1 transaction duy nhất.
 pub fn persist_portal_sync(
     conn: &mut Connection,
     semesters: &[crate::modules::academic::parser::ParsedSemester],
 ) -> SqlResult<()> {
-    let tx = conn.transaction()?;
+    let data = crate::modules::academic::parser::UnifiedAcademicData {
+        macro_metrics: Vec::new(),
+        historical_semesters: semesters.to_vec(),
+        curriculum_courses: Vec::new(),
+    };
+    persist_unified_academic_sync(conn, &data)
+}
 
-    let mut upsert_sem_stmt = tx.prepare_cached(
-        "INSERT INTO academic_semesters (id, academic_year, semester_term, is_completed, created_at, updated_at)
-         VALUES (?1, ?2, ?3, 1, ?4, ?4)
-         ON CONFLICT(id) DO UPDATE SET
-            academic_year = excluded.academic_year,
-            semester_term = excluded.semester_term,
-            updated_at    = excluded.updated_at",
+/// Lấy toàn bộ macro metrics chính thức từ `academic_macro_metrics`.
+pub fn get_all_macro_metrics(
+    conn: &Connection,
+) -> SqlResult<Vec<crate::modules::academic::parser::MacroMetricRecord>> {
+    let mut stmt = conn.prepare(
+        "SELECT semester_id, term_gpa, cumulative_gpa, classification, term_credits, cumulative_credits, drl
+         FROM academic_macro_metrics
+         ORDER BY semester_id ASC",
     )?;
 
-    let mut upsert_course_stmt = tx.prepare_cached(
-        "INSERT INTO academic_courses (
-            id, semester_id, course_code, course_name, credits,
-            midterm_score, final_score, summary_score_10, summary_score_4,
-            grade_char, is_passed, is_gpa_calculated, created_at, updated_at
-        ) VALUES (
-            ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?13
-        )
-        ON CONFLICT(semester_id, course_code) DO UPDATE SET
-            course_name       = excluded.course_name,
-            credits           = excluded.credits,
-            midterm_score     = excluded.midterm_score,
-            final_score       = excluded.final_score,
-            summary_score_10  = excluded.summary_score_10,
-            summary_score_4   = excluded.summary_score_4,
-            grade_char        = excluded.grade_char,
-            is_passed         = excluded.is_passed,
-            is_gpa_calculated = excluded.is_gpa_calculated,
-            updated_at        = excluded.updated_at",
+    let records = stmt
+        .query_map([], |row| {
+            Ok(crate::modules::academic::parser::MacroMetricRecord {
+                semester_id: row.get(0)?,
+                term_gpa: row.get(1)?,
+                cumulative_gpa: row.get(2)?,
+                classification: row.get(3)?,
+                term_credits: row.get(4)?,
+                cumulative_credits: row.get(5)?,
+                drl: row.get(6)?,
+            })
+        })?
+        .collect::<SqlResult<Vec<_>>>()?;
+
+    Ok(records)
+}
+
+/// Lấy danh mục chương trình đào tạo từ `academic_curriculum`.
+pub fn get_all_curriculum_courses(
+    conn: &Connection,
+) -> SqlResult<Vec<crate::modules::academic::parser::CurriculumCourseRecord>> {
+    let mut stmt = conn.prepare(
+        "SELECT course_code, course_name, credits, course_type, ideal_term, status, final_score
+         FROM academic_curriculum
+         ORDER BY ideal_term ASC, course_code ASC",
     )?;
 
-    let now = chrono::Utc::now().timestamp();
+    let records = stmt
+        .query_map([], |row| {
+            Ok(crate::modules::academic::parser::CurriculumCourseRecord {
+                course_code: row.get(0)?,
+                course_name: row.get(1)?,
+                credits: row.get(2)?,
+                course_type: row.get(3)?,
+                ideal_term: row.get(4)?,
+                status: row.get(5)?,
+                final_score: row.get(6)?,
+            })
+        })?
+        .collect::<SqlResult<Vec<_>>>()?;
 
-    for sem in semesters {
-        upsert_sem_stmt.execute(params![
-            sem.semester.id,
-            sem.semester.academic_year,
-            sem.semester.semester_term as i64,
-            now,
-        ])?;
-
-        for c in &sem.courses {
-            let record_id = uuid::Uuid::new_v4().to_string();
-            upsert_course_stmt.execute(params![
-                record_id,
-                sem.semester.id,
-                c.course_code,
-                c.course_name,
-                c.credits,
-                c.midterm_score,
-                c.final_score,
-                c.summary_score_10,
-                c.summary_score_4,
-                c.grade_char,
-                c.is_passed as i32,
-                c.is_gpa_calculated as i32,
-                now,
-            ])?;
-        }
-    }
-
-    drop(upsert_sem_stmt);
-    drop(upsert_course_stmt);
-    tx.commit()?;
-    Ok(())
+    Ok(records)
 }
 
 

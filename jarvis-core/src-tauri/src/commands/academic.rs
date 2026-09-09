@@ -153,8 +153,49 @@ pub async fn sync_uit_portal(
 
     // 2. Poll kiểm tra xem DOM bảng điểm đã load xong chưa bằng Rust eval (timeout 120s)
     let extraction_script = r#"
-        (function() {
+        (async function() {
             try {
+                const sleep = ms => new Promise(r => setTimeout(r, ms));
+                const tabs = Array.from(document.querySelectorAll('button[role="tab"]'));
+                const summaryBtn = tabs.find(t => t.innerText && t.innerText.includes('Tổng kết theo kỳ'));
+                const semesterBtn = tabs.find(t => t.innerText && t.innerText.includes('Chi tiết môn học'));
+                const ctdtBtn = tabs.find(t => t.innerText && t.innerText.includes('Theo CTĐT'));
+
+                if (summaryBtn && semesterBtn && ctdtBtn) {
+                    // 1. Lấy Tab Summary
+                    summaryBtn.click();
+                    await sleep(250);
+                    const summaryPanel = document.querySelector('div#radix-\\3a r0\\3a-content-summary') || document.querySelector('div[role="tabpanel"][data-state="active"]');
+                    const summaryHtml = summaryPanel ? (summaryPanel.outerHTML || summaryPanel.innerHTML) : '';
+
+                    // 2. Lấy Tab By-Semester
+                    semesterBtn.click();
+                    await sleep(350);
+                    const semesterPanel = document.querySelector('div#radix-\\3a r0\\3a-content-by-semester') || document.querySelector('div[role="tabpanel"][data-state="active"]');
+                    const semesterHtml = semesterPanel ? (semesterPanel.outerHTML || semesterPanel.innerHTML) : '';
+
+                    // 3. Lấy Tab By-CTDT
+                    ctdtBtn.click();
+                    await sleep(350);
+                    const ctdtPanel = document.querySelector('div#radix-\\3a r0\\3a-content-by-ctdt') || document.querySelector('div[role="tabpanel"][data-state="active"]');
+                    const ctdtHtml = ctdtPanel ? (ctdtPanel.outerHTML || ctdtPanel.innerHTML) : '';
+
+                    if (summaryHtml && semesterHtml && ctdtHtml) {
+                        const payload = JSON.stringify({
+                            summary: summaryHtml,
+                            by_semester: semesterHtml,
+                            by_ctdt: ctdtHtml
+                        });
+                        fetch('http://127.0.0.1:3030/api/v1/academic/transcript', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ html: payload })
+                        }).catch(() => {});
+                        return true;
+                    }
+                }
+
+                // Fallback: nếu trang đang ở chế độ xem một bảng điểm đơn lẻ
                 const table = document.querySelector('div.bang-diem-print-root') || document.querySelector('main') || document.querySelector('table');
                 if (table && document.body.innerText.includes('Mã môn') && (document.body.innerText.includes('Điểm TB') || document.body.innerText.includes('Điểm HP') || document.body.innerText.includes('Tín chỉ'))) {
                     fetch('http://127.0.0.1:3030/api/v1/academic/transcript', {
@@ -207,13 +248,13 @@ pub async fn sync_uit_portal(
         "Hết thời gian chờ đăng nhập/bảng điểm (120s)".to_string()
     })?;
 
-    let parsed_semesters = crate::modules::academic::parser::parse_portal_transcript(&raw_html)?;
+    let unified_data = crate::modules::academic::parser::parse_unified_portal_payload(&raw_html)?;
 
-    // 4. Persistence Phase (Lock DB ngắn hạn)
+    // 4. Persistence Phase (Lock DB ngắn hạn trong 1 transaction duy nhất)
     let _ = app.emit("academic://sync-state", UitSyncState::Persisting);
     {
         let mut conn = db.lock().map_err(|_| "Database lock poisoned".to_string())?;
-        crate::db::academic::persist_portal_sync(&mut conn, &parsed_semesters)
+        crate::db::academic::persist_unified_academic_sync(&mut conn, &unified_data)
             .map_err(|e| format!("Database persist error: {e}"))?;
     }
 
@@ -273,5 +314,26 @@ pub async fn submit_portal_transcript(
 
     Ok(overview)
 }
+
+/// Lấy toàn bộ macro metrics chính thức đối soát từ Cổng UIT
+#[tauri::command]
+pub fn get_academic_macro_metrics(
+    db: tauri::State<'_, SharedDb>,
+) -> Result<Vec<crate::modules::academic::parser::MacroMetricRecord>, String> {
+    let conn = db.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
+    crate::db::academic::get_all_macro_metrics(&conn)
+        .map_err(|e| format!("Lỗi get_academic_macro_metrics: {e}"))
+}
+
+/// Lấy toàn bộ danh mục chương trình đào tạo & tiến độ học tập
+#[tauri::command]
+pub fn get_academic_curriculum(
+    db: tauri::State<'_, SharedDb>,
+) -> Result<Vec<crate::modules::academic::parser::CurriculumCourseRecord>, String> {
+    let conn = db.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
+    crate::db::academic::get_all_curriculum_courses(&conn)
+        .map_err(|e| format!("Lỗi get_academic_curriculum: {e}"))
+}
+
 
 
