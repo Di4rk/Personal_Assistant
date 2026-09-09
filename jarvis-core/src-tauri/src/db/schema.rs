@@ -2,6 +2,7 @@ use chrono::Local;
 use rusqlite::{params, Connection, Result as SqlResult};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 /// Alias cho state dùng chung giữa Tauri commands và Axum server.
 /// Bọc trong Arc<Mutex<>> vì rusqlite::Connection không phải Send+Sync tự nhiên
@@ -14,9 +15,17 @@ pub type SharedDb = Arc<Mutex<Connection>>;
 pub fn init_db(db_path: &Path) -> SqlResult<Connection> {
     let conn = Connection::open(db_path)?;
 
+    // busy_timeout: SQLite menunggu hingga 5s sebelum mengembalikan SQLITE_BUSY
+    // ketika ada koneksi lain (misal DB Browser) yang sedang memegang lock.
+    // Ini mencegah worker gagal total hanya karena inspeksi sesaat.
+    conn.busy_timeout(Duration::from_millis(5000))?;
+
     // WAL mode: cho phép nhiều reader đọc song song với 1 writer,
     // giảm hẳn lỗi "database is locked" khi UI đang query mà server vừa ghi.
-    conn.pragma_update(None, "journal_mode", "WAL")?;
+    // `journal_mode = WAL` trả về mode đã được SQLite chọn. `pragma_update`
+    // dùng execute() nội bộ nên sẽ lỗi "Execute returned results" với PRAGMA
+    // này; API _and_check đọc và tiêu thụ row kết quả đúng cách.
+    let _: String = conn.pragma_update_and_check(None, "journal_mode", "WAL", |row| row.get(0))?;
     conn.pragma_update(None, "synchronous", "NORMAL")?; // an toàn đủ dùng, nhanh hơn FULL
     conn.pragma_update(None, "foreign_keys", "ON")?;
 
@@ -257,4 +266,33 @@ pub fn insert_submission_and_update_daily(
 
     tx.commit()?;
     Ok(xp)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::init_db;
+
+    #[test]
+    fn init_db_consumes_journal_mode_result_and_runs_migrations() {
+        let db_path = std::env::temp_dir().join(format!(
+            "diark-schema-init-{}-{}.sqlite3",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+
+        let connection = init_db(&db_path).expect("database initialization should succeed");
+        let table_exists: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'post_mortems'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("post_mortems table query should succeed");
+        assert_eq!(table_exists, 1);
+
+        drop(connection);
+        let _ = std::fs::remove_file(&db_path);
+        let _ = std::fs::remove_file(db_path.with_extension("sqlite3-wal"));
+        let _ = std::fs::remove_file(db_path.with_extension("sqlite3-shm"));
+    }
 }

@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use tauri::Manager;
 use tokio::sync::watch;
 
-use services::cf_worker;
+use services::cf_worker::{self, SyncLock};
 
 /// Chu kỳ sync bình thường - 60s là điểm cân bằng hợp lý: đủ nhanh để cảm
 /// giác "gần real-time" khi vừa AC 1 bài, nhưng không dồn dập tới mức có nguy
@@ -31,6 +31,17 @@ pub fn run() {
             let shared_db: db::SharedDb = Arc::new(Mutex::new(conn));
             app.manage(shared_db.clone());
 
+            // HTTP client (15s timeout) — dùng chung giữa worker và IPC command
+            // trigger_cf_sync, tránh tạo nhiều pool connection mỗi khi user bấm sync.
+            let http_client = cf_worker::build_http_client()
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            app.manage(http_client.clone());
+
+            // SyncLock — flag AtomicBool dùng chung giữa background worker và
+            // IPC command trigger_cf_sync để tránh 2 luồng sync chạy cùng lúc.
+            let sync_lock = SyncLock::new();
+            app.manage(sync_lock.clone());
+
             // Kênh shutdown: khi cửa sổ chính đóng, gửi tín hiệu `true` để worker
             // tự thoát vòng lặp NGAY ở lượt select! kế tiếp, thay vì bị kill đột
             // ngột giữa lúc đang giữ transaction SQLite dở dang (rủi ro corrupt DB).
@@ -41,10 +52,14 @@ pub fn run() {
             // tokio runtime với chính Tauri app - không cần tự tạo runtime riêng.
             let worker_app_handle = app.handle().clone();
             let worker_db = shared_db.clone();
+            let worker_client = http_client.clone();
+            let worker_lock = sync_lock.clone();
             tauri::async_runtime::spawn(async move {
                 cf_worker::start_cf_sync_worker(
                     worker_app_handle,
                     worker_db,
+                    worker_client,
+                    worker_lock,
                     DEFAULT_SYNC_INTERVAL_SECS,
                     shutdown_rx,
                 )
@@ -78,14 +93,11 @@ pub fn run() {
             commands::get_yearly_heatmap,
             commands::set_cf_handle,
             commands::get_cf_handle,
+            commands::trigger_cf_sync,
             commands::post_mortem::save_post_mortem,
             commands::post_mortem::get_post_mortem,
             commands::post_mortem::delete_post_mortem,
             commands::post_mortem::search_post_mortems,
-            #[cfg(debug_assertions)]
-            commands::dev_seed_mock_data,
-            #[cfg(debug_assertions)]
-            commands::dev_clear_mock_data,
         ])
         .run(tauri::generate_context!());
 

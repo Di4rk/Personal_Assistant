@@ -8,6 +8,18 @@ import type { PostMortemInput, PostMortemRecord, PostMortemSearchResult } from "
  * 2. Bắt lỗi tập trung 1 chỗ, dễ thêm toast/log sau này.
  */
 
+// ============================================================
+// Codeforces sync types — phải khớp với SyncCompletePayload
+// trong src-tauri/src/commands/mod.rs (tên field snake_case vì
+// Tauri serialize Rust struct thẳng không qua camelCase transform).
+// ============================================================
+
+export interface SyncCompletePayload {
+  success: boolean;
+  message: string;
+  new_submissions_count: number;
+}
+
 export async function fetchTodayStats(): Promise<DailyStats> {
   try {
     return await invoke<DailyStats>("get_today_stats");
@@ -50,28 +62,37 @@ export async function fetchYearlyHeatmap(year: number): Promise<HeatmapDay[]> {
 }
 
 /**
- * Chỉ hoạt động trong dev build (Rust command bị cfg(debug_assertions) strip
- * khỏi release) - gọi trong production sẽ reject với lỗi "command not found",
- * không crash app, chỉ là no-op an toàn.
+ * Lấy CF handle đã lưu từ settings table. Trả về null nếu chưa được set.
  */
-export async function devSeedMockData(daysBack: number = 90): Promise<number> {
+export async function getCfHandle(): Promise<string | null> {
   try {
-    const result = await invoke<{ inserted: number }>("dev_seed_mock_data", {
-      daysBack,
-    });
-    return result.inserted;
+    return await invoke<string | null>("get_cf_handle");
   } catch (err) {
-    console.error("[tauri-client] devSeedMockData lỗi (bình thường nếu đang chạy release build):", err);
-    return 0;
+    console.error("[tauri-client] getCfHandle lỗi:", err);
+    return null;
   }
 }
 
-export async function devClearMockData(): Promise<number> {
+/**
+ * Ghi CF handle vào settings table. Throw lỗi nếu handle rỗng (Rust validate).
+ */
+export async function setCfHandle(handle: string): Promise<void> {
+  await invoke<void>("set_cf_handle", { handle });
+}
+
+/**
+ * Trigger 1 sync cycle ngay lập tức — gọi trực tiếp từ CfSettingsPanel.
+ * Trả về SyncCompletePayload ngay, không cần đợi event.
+ * Lỗi sync được bọc trong payload (success: false), không throw.
+ */
+export async function triggerCfSync(): Promise<SyncCompletePayload> {
   try {
-    return await invoke<number>("dev_clear_mock_data");
+    return await invoke<SyncCompletePayload>("trigger_cf_sync");
   } catch (err) {
-    console.error("[tauri-client] devClearMockData lỗi:", err);
-    return 0;
+    // Rust trả về Err(String) khi lock đang bị giữ — ánh xạ về payload.
+    const message = typeof err === "string" ? err : "Lỗi kết nối với backend";
+    console.error("[tauri-client] triggerCfSync lỗi:", err);
+    return { success: false, message, new_submissions_count: 0 };
   }
 }
 

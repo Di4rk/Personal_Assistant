@@ -1,3 +1,7 @@
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 use std::time::Duration;
 
 use reqwest::Client;
@@ -5,44 +9,100 @@ use serde::Deserialize;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::watch;
 
-use crate::db::{batch_insert_new_submissions, get_setting, NewSubmission, SharedDb};
+use crate::db::{get_setting, ingest_cf_submissions_with_result, SharedDb, SyncResult};
 use crate::error::{AppError, AppResult};
 
 const CF_API_BASE: &str = "https://codeforces.com/api/user.status";
 /// Chỉ cần lấy N submission gần nhất mỗi cycle - đủ để bắt kịp hoạt động
 /// thực tế (không ai submit quá 30 bài/phút), không cần kéo cả lịch sử.
-const FETCH_COUNT: u32 = 30;
+const INITIAL_HISTORY_COUNT: u32 = 1_000;
+const POLL_COUNT: u32 = 20;
+const MIN_REQUEST_INTERVAL_SECS: u64 = 2;
 /// Trần backoff - dù CF API sập bao lâu, worker cũng không ngủ quá 15 phút/lần,
 /// để còn kịp phát hiện lúc server sống lại mà không cần restart app.
 const MAX_BACKOFF_SECS: u64 = 15 * 60;
 
-const EVENT_SYNC: &str = "cf://sync-event";
+const EVENT_SYNC_COMPLETE: &str = "cf-sync-complete";
+// Kept during the transition so the current dashboard listener continues to
+// refresh until it moves to `cf-sync-complete`.
+const LEGACY_EVENT_SYNC: &str = "cf://sync-event";
 const SETTING_KEY_CF_HANDLE: &str = "cf_handle";
 
-#[derive(Debug, Deserialize)]
-struct CfApiResponse {
-    status: String,
-    result: Option<Vec<CfSubmission>>,
-    comment: Option<String>,
+// ============================================================
+// RAII Concurrency Lock — ngăn API thrashing khi user bấm
+// "Sync" liên tục trong khi background worker đang chạy.
+// AtomicBool thay vì Mutex<bool> vì: không cần giữ bất kỳ
+// shared data nào bên trong — chỉ cần 1 cờ "đang chạy hay chưa".
+// ============================================================
+
+/// Handle dùng chung (clone tự do) để kiểm tra / yêu cầu lock sync.
+#[derive(Clone)]
+pub struct SyncLock(Arc<AtomicBool>);
+
+impl SyncLock {
+    pub fn new() -> Self {
+        Self(Arc::new(AtomicBool::new(false)))
+    }
+
+    /// Cố gắng chiếm lock. Trả về `Some(SyncGuard)` nếu thành công (lock còn trống),
+    /// `None` nếu đã có luồng khác đang giữ lock.
+    /// compare_exchange đảm bảo atomic test-and-set — không race condition.
+    pub fn try_acquire(&self) -> Option<SyncGuard> {
+        self.0
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Relaxed)
+            .ok()
+            .map(|_| SyncGuard(Arc::clone(&self.0)))
+    }
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct CfSubmission {
-    id: i64,
-    creation_time_seconds: i64,
-    verdict: Option<String>,
-    programming_language: String,
-    problem: CfProblem,
+/// RAII guard: khi Drop, tự động clear cờ AtomicBool.
+/// Không cần caller nhớ gọi "release" thủ công — Rust đảm bảo Drop luôn chạy,
+/// kể cả khi hàm return sớm qua `?` hoặc `return Err(...)`.
+pub struct SyncGuard(Arc<AtomicBool>);
+
+impl Drop for SyncGuard {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
 }
 
+// ============================================================
+// Codeforces API types
+// ============================================================
+
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct CfProblem {
-    contest_id: Option<i64>,
-    index: String,
-    name: String,
+pub struct CfApiResponse<T> {
+    pub status: String,
+    pub comment: Option<String>,
+    pub result: Option<T>,
 }
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct CfSubmission {
+    pub id: i64,
+    #[serde(rename = "contestId")]
+    pub contest_id: Option<i64>,
+    #[serde(rename = "creationTimeSeconds")]
+    pub creation_time_seconds: i64,
+    pub problem: CfProblem,
+    #[serde(rename = "programmingLanguage")]
+    pub programming_language: String,
+    pub verdict: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct CfProblem {
+    #[serde(rename = "contestId")]
+    pub contest_id: Option<i64>,
+    pub index: String,
+    pub name: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
+}
+
+// ============================================================
+// Background Worker
+// ============================================================
 
 /// Entry point của background worker - gọi 1 lần trong Tauri setup hook,
 /// chạy cho tới khi nhận tín hiệu shutdown qua `shutdown_rx`.
@@ -60,25 +120,38 @@ struct CfProblem {
 pub async fn start_cf_sync_worker(
     app_handle: AppHandle,
     db: SharedDb,
+    client: Client,
+    sync_lock: SyncLock,
     interval_secs: u64,
     mut shutdown_rx: watch::Receiver<bool>,
 ) {
-    let client = match build_http_client() {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("[cf-worker] Không tạo được HTTP client: {e}. Worker dừng vĩnh viễn.");
-            return;
-        }
-    };
-
-    let base_interval = interval_secs.max(5); // sàn 5s, tránh cấu hình nhầm 0 gây spam API
+    let base_interval = interval_secs.max(MIN_REQUEST_INTERVAL_SECS);
     let mut backoff_secs = base_interval;
+
+    // A configured user receives one bounded historical import before normal
+    // polling begins. Missing handles remain a non-fatal idle state.
+    // Acquire lock for initial sync — if already locked (race on startup), skip.
+    if let Some(_guard) = sync_lock.try_acquire() {
+        match perform_sync(&app_handle, &client, &db, INITIAL_HISTORY_COUNT).await {
+            Ok(_) | Err(AppError::HandleNotConfigured) => {}
+            Err(AppError::RateLimited) | Err(AppError::ServiceUnavailable) => {
+                backoff_secs = (base_interval * 2).min(MAX_BACKOFF_SECS);
+            }
+            Err(error) => eprintln!("[cf-worker] Initial sync failed (will retry): {error}"),
+        }
+    }
 
     loop {
         tokio::select! {
             _ = tokio::time::sleep(Duration::from_secs(backoff_secs)) => {
-                match run_sync_cycle(&client, &db, &app_handle).await {
-                    Ok(()) => {
+                // Try to acquire the lock; skip cycle if IPC trigger_cf_sync already holds it.
+                let Some(_guard) = sync_lock.try_acquire() else {
+                    println!("[cf-worker] Sync cycle skipped — manual sync in progress.");
+                    continue;
+                };
+
+                match perform_sync(&app_handle, &client, &db, POLL_COUNT).await {
+                    Ok(_) => {
                         // Thành công (dù có data mới hay không) -> reset về interval bình thường.
                         backoff_secs = base_interval;
                     }
@@ -111,21 +184,35 @@ pub async fn start_cf_sync_worker(
     }
 }
 
-fn build_http_client() -> AppResult<Client> {
+pub fn build_http_client() -> AppResult<Client> {
     Client::builder()
-        .timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(15))
         .user_agent("jarvis-personal-os/0.1 (+local-desktop-app)")
         .build()
         .map_err(AppError::Http)
 }
 
+// ============================================================
+// Core Sync Logic (shared between worker loop and IPC command)
+// ============================================================
+
 /// Chạy đúng 1 vòng: đọc handle -> gọi CF API -> lọc submission mới -> insert -> emit.
-/// Trả về AppResult<()> để caller (vòng lặp worker) quyết định backoff phù hợp
-/// dựa theo LOẠI lỗi cụ thể, thay vì backoff mù quáng cho mọi trường hợp.
-async fn run_sync_cycle(client: &Client, db: &SharedDb, app_handle: &AppHandle) -> AppResult<()> {
+///
+/// Hàm này được gọi từ CẢ HAI nơi:
+/// 1. Background worker (mỗi `backoff_secs`).
+/// 2. IPC command `trigger_cf_sync` (khi user bấm "Save & Sync" từ UI).
+///
+/// Lock (SyncGuard) KHÔNG được acquire ở đây — caller chịu trách nhiệm
+/// acquire trước khi gọi, đảm bảo logic lock rõ ràng và không bị double-acquire.
+pub async fn perform_sync(
+    app_handle: &AppHandle,
+    client: &Client,
+    db: &SharedDb,
+    count: u32,
+) -> AppResult<SyncResult> {
     let handle = read_cf_handle(db)?;
 
-    let url = format!("{CF_API_BASE}?handle={handle}&from=1&count={FETCH_COUNT}");
+    let url = format!("{CF_API_BASE}?handle={handle}&from=1&count={count}");
     let response = client.get(&url).send().await?;
 
     match response.status().as_u16() {
@@ -134,32 +221,29 @@ async fn run_sync_cycle(client: &Client, db: &SharedDb, app_handle: &AppHandle) 
         _ => {}
     }
 
-    let body: CfApiResponse = response.json().await?;
+    let body: CfApiResponse<Vec<CfSubmission>> = response.json().await?;
 
     if body.status != "OK" {
         let reason = body.comment.unwrap_or_else(|| "Không rõ nguyên nhân".to_string());
+        if reason.to_lowercase().contains("call limit exceeded") {
+            return Err(AppError::RateLimited);
+        }
         return Err(AppError::CfApiError(reason));
     }
 
     let raw_submissions = body.result.unwrap_or_default();
-    let new_submissions = filter_and_convert(raw_submissions);
-
-    if new_submissions.is_empty() {
-        return Ok(());
-    }
-
-    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
 
     let sync_result = {
         let mut conn = db.lock().map_err(|_| AppError::PoisonedLock)?;
-        batch_insert_new_submissions(&mut conn, &new_submissions, &today)?
+        ingest_cf_submissions_with_result(&mut conn, &raw_submissions)?
     };
 
     if sync_result.new_submissions_count > 0 {
         // Emit THẲNG SyncResult làm payload - không tạo struct payload riêng,
         // tránh việc 2 struct (kết quả DB và payload event) lệch nhau theo thời
         // gian khi 1 trong 2 chỗ bị sửa mà quên sửa chỗ còn lại.
-        app_handle.emit(EVENT_SYNC, &sync_result)?;
+        app_handle.emit(EVENT_SYNC_COMPLETE, &sync_result)?;
+        app_handle.emit(LEGACY_EVENT_SYNC, &sync_result)?;
 
         println!(
             "[cf-worker] +{} submission mới, +{} XP hôm nay, {} First AC.",
@@ -169,45 +253,10 @@ async fn run_sync_cycle(client: &Client, db: &SharedDb, app_handle: &AppHandle) 
         );
     }
 
-    Ok(())
+    Ok(sync_result)
 }
 
 fn read_cf_handle(db: &SharedDb) -> AppResult<String> {
     let conn = db.lock().map_err(|_| AppError::PoisonedLock)?;
     get_setting(&conn, SETTING_KEY_CF_HANDLE)?.ok_or(AppError::HandleNotConfigured)
-}
-
-/// Chuyển raw CfSubmission (JSON API) -> NewSubmission (DB layer), đồng thời
-/// LỌC BỎ submission chưa có verdict cuối cùng ("TESTING" hoặc null - đang chấm
-/// dở). Lần fetch kế tiếp sẽ tự bắt được verdict cuối khi đã chấm xong, vì
-/// user.status luôn trả về trạng thái mới nhất của mọi submission.
-fn filter_and_convert(raw: Vec<CfSubmission>) -> Vec<NewSubmission> {
-    raw.into_iter()
-        .filter_map(|s| {
-            let verdict = s.verdict?;
-            if verdict == "TESTING" {
-                return None;
-            }
-
-            let contest_id = s.problem.contest_id.map(|id| id.to_string());
-            let problem_id = match &contest_id {
-                Some(cid) => format!("{cid}{}", s.problem.index),
-                None => s.problem.index.clone(),
-            };
-
-            let submitted_at = chrono::DateTime::from_timestamp(s.creation_time_seconds, 0)
-                .map(|dt| dt.to_rfc3339())
-                .unwrap_or_else(|| chrono::Local::now().to_rfc3339());
-
-            Some(NewSubmission {
-                cf_submission_id: s.id,
-                problem_id,
-                problem_name: s.problem.name,
-                verdict,
-                language: s.programming_language,
-                contest_id,
-                submitted_at,
-            })
-        })
-        .collect()
 }

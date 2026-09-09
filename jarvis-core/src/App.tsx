@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchTodayStats, fetchLevelInfo, fetchRecentSubmissions } from "./lib/tauri-client";
-import { useDiarkEvents } from "./hooks/useDiarkEvents";
+import type { SyncCompletePayload } from "./lib/tauri-client";
+import { useTauriEvent } from "./hooks/useTauriEvent";
 import type { DailyStats, LevelInfo, SubmissionRecord, VerdictKind } from "./types";
 import { classifyVerdict } from "./types";
 import LevelProgressBar from "./components/LevelProgressBar";
 import ActivityHeatmap from "./components/ActivityHeatmap";
-import DevMockPanel from "./components/DevMockPanel";
+import CfSettingsPanel from "./components/CfSettingsPanel";
+import PostMortemModal from "./components/PostMortemModal";
 
 const VERDICT_STYLE: Record<VerdictKind, string> = {
   AC: "text-emerald-400 bg-emerald-950/40",
@@ -32,10 +34,12 @@ export default function App() {
   const [levelInfo, setLevelInfo] = useState<LevelInfo | null>(null);
   const [submissions, setSubmissions] = useState<SubmissionRecord[]>([]);
   const [toasts, setToasts] = useState<Toast[]>([]);
-
-  // Không còn setInterval - hook này hoàn toàn event-driven, chỉ đổi
-  // syncVersion khi Rust worker thật sự emit "cf://sync-event".
-  const { lastSync, syncVersion } = useDiarkEvents();
+  const [selectedSubmission, setSelectedSubmission] = useState<{
+    problemId: string;
+    problemName: string;
+    verdict: string;
+  } | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
   const refetchAll = useCallback(async () => {
     const [statsData, levelData, submissionsData] = await Promise.all([
@@ -54,50 +58,93 @@ export default function App() {
     refetchAll();
   }, [refetchAll]);
 
-  // Refetch MỖI KHI syncVersion tăng - tức là mỗi khi Rust worker vừa insert
-  // xong submission mới và emit event. Đây là điểm thay thế hoàn toàn cho
-  // setInterval cũ: không polling mù quáng, chỉ refetch khi THẬT SỰ có gì mới.
-  const isFirstSyncRender = useRef(true);
-  useEffect(() => {
-    if (isFirstSyncRender.current) {
-      // syncVersion bắt đầu ở 0, effect này chạy 1 lần lúc mount do React
-      // strict effect semantics - bỏ qua lần đầu vì refetchAll() ở effect
-      // trên đã lo phần fetch ban đầu rồi, tránh gọi trùng 2 lần.
-      isFirstSyncRender.current = false;
-      return;
-    }
-    refetchAll();
-  }, [syncVersion, refetchAll]);
+  // ============================================================
+  // Event-driven refresh: lắng nghe cả 2 event channel từ Rust worker.
+  // - "cf-sync-complete" → payload đầy đủ, dùng cho toast + refetch
+  // - "cf://sync-event"  → legacy channel, refetch only (backward compat)
+  // useTauriEvent tự cleanup khi unmount, safe với React 18 StrictMode.
+  // ============================================================
 
-  // Bắn toast mỗi khi có sync event mới - tách riêng khỏi refetchAll vì đây
-  // là side-effect thuần UI (thông báo), không liên quan gì tới việc lấy data.
-  useEffect(() => {
-    if (!lastSync) return;
+  // Flag để bỏ qua lần chạy đầu tiên của handler (tương đương isFirstSyncRender cũ).
+  const initialRender = useRef(true);
 
-    const message = lastSync.first_ac_count > 0
-      ? `🎉 First AC! +${lastSync.total_daily_xp} XP hôm nay (${lastSync.new_submissions_count} submission mới)`
-      : `+${lastSync.new_submissions_count} submission mới, +${lastSync.total_daily_xp} XP hôm nay`;
+  const handleSyncComplete = useCallback(
+    (payload: SyncCompletePayload) => {
+      if (initialRender.current) {
+        // React StrictMode có thể fire listener ngay sau mount do pending events.
+        // Bỏ qua lần đầu nếu payload trống (new_submissions_count === 0).
+        if (payload.new_submissions_count === 0) return;
+      }
+      initialRender.current = false;
 
-    const toast: Toast = {
-      id: ++toastIdCounter,
-      message,
-      isFirstAc: lastSync.first_ac_count > 0,
-    };
+      // Refetch data mỗi khi có sync mới (dù có submission mới hay không,
+      // để đảm bảo heatmap và level bar luôn up-to-date sau IPC trigger).
+      refetchAll();
 
-    setToasts((prev) => [...prev, toast]);
+      // Chỉ bắn toast khi có data mới thực sự
+      if (payload.new_submissions_count > 0) {
+        const message = `+${payload.new_submissions_count} submission mới, +${payload.new_submissions_count} XP hôm nay`;
+        const toast: Toast = {
+          id: ++toastIdCounter,
+          message,
+          isFirstAc: false, // full_ac_count not in SyncCompletePayload; use SyncResult event for that
+        };
+        setToasts((prev) => [...prev, toast]);
+        const timer = setTimeout(() => {
+          setToasts((prev) => prev.filter((t) => t.id !== toast.id));
+        }, 5000);
+        // Note: timer is intentionally not cleared here because toast cleanup
+        // is keyed by ID and the component stays mounted for the app lifetime.
+        void timer;
+      }
+    },
+    [refetchAll]
+  );
 
-    const timer = setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== toast.id));
-    }, 5000);
+  // SyncResult from worker carries first_ac_count — use for rich toast.
+  const handleLegacySync = useCallback(
+    (payload: { new_submissions_count: number; total_daily_xp: number; first_ac_count: number }) => {
+      if (payload.new_submissions_count === 0) return;
 
-    return () => clearTimeout(timer);
-  }, [lastSync]);
+      refetchAll();
+
+      const message =
+        payload.first_ac_count > 0
+          ? `🎉 First AC! +${payload.total_daily_xp} XP hôm nay (${payload.new_submissions_count} submission mới)`
+          : `+${payload.new_submissions_count} submission mới, +${payload.total_daily_xp} XP hôm nay`;
+
+      const toast: Toast = {
+        id: ++toastIdCounter,
+        message,
+        isFirstAc: payload.first_ac_count > 0,
+      };
+      setToasts((prev) => [...prev, toast]);
+      setTimeout(() => {
+        setToasts((prev) => prev.filter((t) => t.id !== toast.id));
+      }, 5000);
+    },
+    [refetchAll]
+  );
+
+  useTauriEvent<SyncCompletePayload>("cf-sync-complete", handleSyncComplete);
+  useTauriEvent<{
+    new_submissions_count: number;
+    total_daily_xp: number;
+    first_ac_count: number;
+  }>("cf://sync-event", handleLegacySync);
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 p-6">
       <header className="mb-6">
-        <h1 className="text-xl font-bold text-zinc-100">JARVIS Personal OS</h1>
-        <p className="text-sm text-zinc-500">Diark Core Dashboard</p>
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div>
+            <h1 className="text-xl font-bold text-zinc-100">JARVIS Personal OS</h1>
+            <p className="text-sm text-zinc-500">Diark Core Dashboard</p>
+          </div>
+          <div className="w-full sm:w-80">
+            <CfSettingsPanel onSyncComplete={handleSyncComplete} />
+          </div>
+        </div>
       </header>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -118,9 +165,8 @@ export default function App() {
 
         <LevelProgressBar info={levelInfo} />
 
-        <div className="lg:col-span-1">
-          {import.meta.env.DEV && <DevMockPanel />}
-        </div>
+        {/* Third column intentionally left for future widgets */}
+        <div className="lg:col-span-1" />
       </div>
 
       <div className="mt-4">
@@ -131,7 +177,9 @@ export default function App() {
       <div className="mt-4 rounded-xl bg-zinc-900 border border-zinc-800 p-4">
         <h3 className="text-sm font-medium text-zinc-400 mb-3">Recent Submissions</h3>
         {submissions.length === 0 ? (
-          <p className="text-sm text-zinc-600">Chưa có submission nào. Chờ worker sync hoặc seed mock data.</p>
+          <p className="text-sm text-zinc-600">
+            Chưa có submission nào. Nhập CF handle và bấm &quot;Save &amp; Sync&quot; để bắt đầu.
+          </p>
         ) : (
           <div className="space-y-1.5">
             {submissions.map((sub) => {
@@ -139,7 +187,28 @@ export default function App() {
               return (
                 <div
                   key={sub.id}
-                  className="flex items-center justify-between text-sm py-1.5 px-2 rounded-lg hover:bg-zinc-800/50"
+                  className="flex cursor-pointer items-center justify-between rounded-lg px-2 py-1.5 text-sm transition-colors hover:bg-zinc-800/40 focus:outline-none focus:ring-2 focus:ring-violet-500"
+                  onClick={() => {
+                    setSelectedSubmission({
+                      problemId: sub.problem_id,
+                      problemName: sub.problem_name,
+                      verdict: sub.verdict,
+                    });
+                    setIsModalOpen(true);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      setSelectedSubmission({
+                        problemId: sub.problem_id,
+                        problemName: sub.problem_name,
+                        verdict: sub.verdict,
+                      });
+                      setIsModalOpen(true);
+                    }
+                  }}
+                  role="button"
+                  tabIndex={0}
                 >
                   <div className="flex items-center gap-2 min-w-0">
                     <span className={`px-1.5 py-0.5 rounded text-xs font-medium shrink-0 ${VERDICT_STYLE[tier]}`}>
@@ -157,6 +226,12 @@ export default function App() {
           </div>
         )}
       </div>
+
+      <PostMortemModal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        submission={selectedSubmission}
+      />
 
       {/* --- Toast notifications --- */}
       <div className="fixed bottom-4 right-4 flex flex-col gap-2 z-50">

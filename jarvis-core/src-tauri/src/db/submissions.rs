@@ -4,12 +4,12 @@ use chrono::Local;
 use rusqlite::{params, Connection};
 
 use crate::db::schema::calc_xp;
-use crate::error::AppResult;
+use crate::services::cf_worker::CfSubmission;
 
 /// Bonus XP khi AC 1 problem_id LẦN ĐẦU TIÊN (chưa từng AC trước đó, kể cả ở
 /// những lần sync trước). Thưởng cao hơn AC thường để khuyến khích làm bài mới
 /// thay vì chỉ resubmit lại bài cũ để cày XP.
-const FIRST_AC_BONUS_XP: i64 = 15;
+const FIRST_AC_BONUS_XP: i64 = 10;
 
 /// Struct trung gian, tách biệt hoàn toàn khỏi format JSON của Codeforces API.
 /// cf_worker.rs chịu trách nhiệm convert CfSubmission (raw API) -> NewSubmission
@@ -46,6 +46,36 @@ pub struct SyncResult {
     pub first_ac_count: usize,
 }
 
+/// Ingest raw Codeforces submissions in one SQLite transaction. Pending
+/// verdicts and malformed timestamps are skipped; duplicate submission IDs are
+/// ignored by the partial unique index created during migration.
+pub fn ingest_cf_submissions(
+    conn: &mut Connection,
+    submissions: &[CfSubmission],
+) -> rusqlite::Result<usize> {
+    Ok(ingest_cf_submissions_with_result(conn, submissions)?.new_submissions_count)
+}
+
+/// Variant used by the sync worker when it needs the XP delta for its frontend
+/// event payload.
+pub fn ingest_cf_submissions_with_result(
+    conn: &mut Connection,
+    submissions: &[CfSubmission],
+) -> rusqlite::Result<SyncResult> {
+    let today = Local::now().format("%Y-%m-%d").to_string();
+    // Codeforces returns newest-first. Process oldest-first so a historical
+    // sync awards the 20 XP first-AC bonus to the actual first accepted run.
+    let mut ordered = submissions.to_vec();
+    ordered.sort_by_key(|submission| submission.creation_time_seconds);
+
+    let normalized = ordered
+        .iter()
+        .filter_map(NewSubmission::from_codeforces)
+        .collect::<Vec<_>>();
+
+    batch_insert_new_submissions(conn, &normalized, &today)
+}
+
 /// Insert hàng loạt submission mới trong 1 transaction duy nhất:
 /// 1. Query trước danh sách problem_id đã từng AC (để xác định First AC chính xác,
 ///    kể cả AC đó xảy ra ở lần sync trước đó rồi, không chỉ trong batch hiện tại).
@@ -57,7 +87,7 @@ pub fn batch_insert_new_submissions(
     conn: &mut Connection,
     subs: &[NewSubmission],
     today: &str,
-) -> AppResult<SyncResult> {
+) -> rusqlite::Result<SyncResult> {
     if subs.is_empty() {
         return Ok(SyncResult::default());
     }
@@ -99,9 +129,11 @@ pub fn batch_insert_new_submissions(
                 ac_problem_set.insert(sub.problem_id.clone());
             }
 
-            let base_xp = calc_xp(&sub.verdict);
-            let bonus_xp = if is_first_ac { FIRST_AC_BONUS_XP } else { 0 };
-            let xp = base_xp + bonus_xp;
+            let xp = if is_ac {
+                calc_xp(&sub.verdict) + if is_first_ac { FIRST_AC_BONUS_XP } else { 0 }
+            } else {
+                2
+            };
 
             let changes = stmt.execute(params![
                 sub.cf_submission_id,
@@ -170,4 +202,127 @@ pub fn batch_insert_new_submissions(
         total_daily_xp: today_xp,
         first_ac_count,
     })
+}
+
+impl NewSubmission {
+    fn from_codeforces(submission: &CfSubmission) -> Option<Self> {
+        let verdict = submission.verdict.as_deref()?;
+        if matches!(verdict, "TESTING" | "SUBMITTED") {
+            return None;
+        }
+
+        let submitted_at = chrono::DateTime::from_timestamp(submission.creation_time_seconds, 0)?
+            .to_rfc3339();
+        let contest_id = submission.contest_id.or(submission.problem.contest_id);
+        let contest_id_string = contest_id.map(|id| id.to_string());
+        let problem_id = contest_id_string
+            .as_ref()
+            .map(|id| format!("{id}{}", submission.problem.index))
+            .unwrap_or_else(|| submission.problem.index.clone());
+
+        Some(Self {
+            cf_submission_id: submission.id,
+            problem_id,
+            problem_name: submission.problem.name.clone(),
+            verdict: verdict.to_string(),
+            language: submission.programming_language.clone(),
+            contest_id: contest_id_string,
+            submitted_at,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rusqlite::Connection;
+
+    use super::ingest_cf_submissions;
+    use crate::services::cf_worker::{CfProblem, CfSubmission};
+
+    fn test_submission(id: i64, timestamp: i64, verdict: &str) -> CfSubmission {
+        CfSubmission {
+            id,
+            contest_id: Some(1),
+            creation_time_seconds: timestamp,
+            problem: CfProblem {
+                contest_id: Some(1),
+                index: "A".to_string(),
+                name: "Test problem".to_string(),
+                tags: Vec::new(),
+            },
+            programming_language: "GNU C++17".to_string(),
+            verdict: Some(verdict.to_string()),
+        }
+    }
+
+    fn test_connection() -> Connection {
+        let connection = Connection::open_in_memory().expect("in-memory SQLite should open");
+        connection
+            .execute_batch(
+                r#"
+                CREATE TABLE submissions (
+                    id INTEGER PRIMARY KEY,
+                    cf_submission_id INTEGER,
+                    problem_id TEXT NOT NULL,
+                    problem_name TEXT NOT NULL,
+                    verdict TEXT NOT NULL,
+                    language TEXT,
+                    contest_id TEXT,
+                    xp_awarded INTEGER NOT NULL,
+                    submitted_at TEXT NOT NULL,
+                    raw_payload TEXT,
+                    is_first_ac INTEGER NOT NULL DEFAULT 0
+                );
+                CREATE UNIQUE INDEX idx_submissions_cf_id
+                    ON submissions(cf_submission_id) WHERE cf_submission_id IS NOT NULL;
+                CREATE TABLE daily_activity (
+                    date TEXT PRIMARY KEY,
+                    total_xp INTEGER NOT NULL DEFAULT 0,
+                    ac_count INTEGER NOT NULL DEFAULT 0,
+                    wa_count INTEGER NOT NULL DEFAULT 0,
+                    other_count INTEGER NOT NULL DEFAULT 0,
+                    updated_at TEXT NOT NULL
+                );
+                "#,
+            )
+            .expect("test schema should initialize");
+        connection
+    }
+
+    #[test]
+    fn ingestion_orders_history_awards_xp_and_deduplicates() {
+        let mut connection = test_connection();
+        let newest_first = vec![
+            test_submission(2, 200, "OK"),
+            test_submission(1, 100, "OK"),
+            test_submission(3, 300, "WRONG_ANSWER"),
+        ];
+
+        assert_eq!(ingest_cf_submissions(&mut connection, &newest_first).unwrap(), 3);
+
+        let first_ac_xp: i64 = connection
+            .query_row(
+                "SELECT xp_awarded FROM submissions WHERE cf_submission_id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let later_ac_xp: i64 = connection
+            .query_row(
+                "SELECT xp_awarded FROM submissions WHERE cf_submission_id = 2",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let rejected_xp: i64 = connection
+            .query_row(
+                "SELECT xp_awarded FROM submissions WHERE cf_submission_id = 3",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        assert_eq!((first_ac_xp, later_ac_xp, rejected_xp), (20, 10, 2));
+        assert_eq!(ingest_cf_submissions(&mut connection, &newest_first).unwrap(), 0);
+    }
 }
