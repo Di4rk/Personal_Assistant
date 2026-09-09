@@ -98,6 +98,10 @@ pub fn run() {
             commands::post_mortem::get_post_mortem,
             commands::post_mortem::delete_post_mortem,
             commands::post_mortem::search_post_mortems,
+            commands::academic::get_academic_overview,
+            commands::academic::get_semester_courses,
+            commands::academic::upsert_academic_courses,
+            commands::academic::upsert_academic_semester,
         ])
         .run(tauri::generate_context!());
 

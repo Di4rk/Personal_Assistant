@@ -256,10 +256,10 @@ fn query_semester_stats(
     conn.query_row(
         r#"
         SELECT
-            SUM(summary_score_10 * credits) /
+            SUM(CASE WHEN is_gpa_calculated = 1 THEN summary_score_10 * credits ELSE 0 END) /
                 NULLIF(SUM(CASE WHEN is_gpa_calculated = 1 AND summary_score_10 IS NOT NULL
                                 THEN credits ELSE 0 END), 0)  AS gpa_10,
-            SUM(summary_score_4 * credits) /
+            SUM(CASE WHEN is_gpa_calculated = 1 THEN summary_score_4 * credits ELSE 0 END) /
                 NULLIF(SUM(CASE WHEN is_gpa_calculated = 1 AND summary_score_4 IS NOT NULL
                                 THEN credits ELSE 0 END), 0)  AS gpa_4,
             COALESCE(SUM(CASE WHEN is_passed = 1 THEN credits ELSE 0 END), 0) AS passed_credits,

@@ -1,0 +1,130 @@
+/**
+ * TypeScript definitions mapped 1:1 with Rust DTOs in
+ * `src-tauri/src/db/academic.rs`.
+ *
+ * All field names follow camelCase to match `#[serde(rename_all = "camelCase")]`
+ * in the Rust backend.
+ */
+
+// ============================================================
+//  Thang điểm chữ theo quy chế ĐHQG-HCM
+// ============================================================
+
+export type GradeScale =
+  | "APlus"
+  | "A"
+  | "BPlus"
+  | "B"
+  | "CPlus"
+  | "C"
+  | "DPlus"
+  | "D"
+  | "F";
+
+export const GRADE_SCALE_MAP: Record<GradeScale, { char: string; scale4: number; minScore10: number }> = {
+  APlus: { char: "A+", scale4: 4.0, minScore10: 9.0 },
+  A: { char: "A", scale4: 3.7, minScore10: 8.5 },
+  BPlus: { char: "B+", scale4: 3.5, minScore10: 8.0 },
+  B: { char: "B", scale4: 3.0, minScore10: 7.0 },
+  CPlus: { char: "C+", scale4: 2.5, minScore10: 6.5 },
+  C: { char: "C", scale4: 2.0, minScore10: 5.5 },
+  DPlus: { char: "D+", scale4: 1.5, minScore10: 5.0 },
+  D: { char: "D", scale4: 1.0, minScore10: 4.0 },
+  F: { char: "F", scale4: 0.0, minScore10: 0.0 },
+};
+
+// ============================================================
+//  Academic Semester Record & Overview DTO
+// ============================================================
+
+/**
+ * Bản ghi metadata học kỳ lưu trong SQLite `academic_semesters`.
+ * Chú ý: bảng này KHÔNG lưu `actual_gpa_*` hay `actual_drl`.
+ */
+export interface AcademicSemesterRecord {
+  id: string;
+  academicYear: string;
+  semesterTerm: number;
+  targetGpa: number | null;
+  targetDrl: number | null;
+  isCompleted: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/**
+ * DTO trả về từ IPC command `get_academic_overview`.
+ * Gồm metadata học kỳ và các chỉ số GPA/DRL được tính động từ SQL aggregate.
+ */
+export interface AcademicOverviewDto {
+  id: string;
+  academicYear: string;
+  semesterTerm: number;
+  targetGpa: number | null;
+  targetDrl: number | null;
+  isCompleted: boolean;
+  createdAt: number;
+  updatedAt: number;
+  // Dynamic computed fields (không lưu cứng trong DB)
+  actualGpa10: number | null;
+  actualGpa4: number | null;
+  actualDrl: number;
+  passedCredits: number;
+  totalCredits: number;
+}
+
+/** Alias tương đương với struct SemesterOverview trong db/academic.rs */
+export type SemesterOverview = AcademicOverviewDto;
+
+// ============================================================
+//  Academic Course Record & Input DTOs
+// ============================================================
+
+/**
+ * Bản ghi môn học lưu trong SQLite `academic_courses`.
+ */
+export interface AcademicCourseRecord {
+  id: string;
+  semesterId: string;
+  courseCode: string;
+  courseName: string;
+  credits: number;
+  midtermScore: number | null;
+  finalScore: number | null;
+  otherScores: string | null;
+  summaryScore10: number | null;
+  summaryScore4: number | null;
+  gradeChar: string | null;
+  isPassed: boolean;
+  isGpaCalculated: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/**
+ * DTO gửi lên Rust backend để batch upsert môn học.
+ */
+export interface UpsertCourseDto {
+  id?: string | null;
+  semesterId: string;
+  courseCode: string;
+  courseName: string;
+  credits: number;
+  midtermScore?: number | null;
+  finalScore?: number | null;
+  otherScores?: string | null;
+  summaryScore10?: number | null;
+  isGpaCalculated?: boolean | null;
+}
+
+/**
+ * DTO tạo hoặc cập nhật metadata học kỳ.
+ */
+export interface UpsertSemesterDto {
+  id: string;
+  academicYear: string;
+  semesterTerm: number;
+  targetGpa?: number | null;
+  targetDrl?: number | null;
+  isCompleted?: boolean | null;
+}

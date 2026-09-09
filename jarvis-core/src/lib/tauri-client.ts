@@ -1,6 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { DailyStats, SubmissionRecord, LevelInfo, HeatmapDay } from "../types";
 import type { PostMortemInput, PostMortemRecord, PostMortemSearchResult } from "../types/post_mortem";
+import type {
+  AcademicOverviewDto,
+  AcademicCourseRecord,
+  UpsertCourseDto,
+  UpsertSemesterDto,
+} from "../features/academic/types";
 
 /**
  * Wrapper mỏng quanh invoke() để:
@@ -160,3 +166,36 @@ export function startPolling(
   const id = setInterval(tick, intervalMs);
   return () => clearInterval(id);
 }
+
+// ============================================================
+//  Academic Radar IPC wrappers
+// ============================================================
+
+/**
+ * Lấy toàn bộ danh sách học kỳ kèm thống kê động (GPA hệ 10, GPA hệ 4, DRL, tín chỉ).
+ */
+export async function getAcademicOverview(): Promise<AcademicOverviewDto[]> {
+  return invoke<AcademicOverviewDto[]>("get_academic_overview");
+}
+
+/**
+ * Lấy danh sách các môn học trong 1 học kỳ cụ thể.
+ */
+export async function getSemesterCourses(semesterId: string): Promise<AcademicCourseRecord[]> {
+  return invoke<AcademicCourseRecord[]>("get_semester_courses", { semesterId });
+}
+
+/**
+ * Batch upsert danh sách môn học (tự động tính điểm tổng kết và quy đổi sang hệ 4).
+ */
+export async function upsertAcademicCourses(courses: UpsertCourseDto[]): Promise<void> {
+  return invoke<void>("upsert_academic_courses", { courses });
+}
+
+/**
+ * Tạo hoặc cập nhật metadata học kỳ (target GPA, target DRL, isCompleted).
+ */
+export async function upsertAcademicSemester(semester: UpsertSemesterDto): Promise<void> {
+  return invoke<void>("upsert_academic_semester", { semester });
+}
+
