@@ -511,6 +511,81 @@ pub fn upsert_semester(conn: &Connection, dto: &UpsertSemesterDto) -> SqlResult<
     Ok(())
 }
 
+/// Nhận `Vec<ParsedSemester>` đã validate từ pure parser,
+/// ghi nguyên tử vào database SQLite trong 1 transaction duy nhất.
+pub fn persist_portal_sync(
+    conn: &mut Connection,
+    semesters: &[crate::modules::academic::parser::ParsedSemester],
+) -> SqlResult<()> {
+    let tx = conn.transaction()?;
+
+    let mut upsert_sem_stmt = tx.prepare_cached(
+        "INSERT INTO academic_semesters (id, academic_year, semester_term, is_completed, created_at, updated_at)
+         VALUES (?1, ?2, ?3, 1, ?4, ?4)
+         ON CONFLICT(id) DO UPDATE SET
+            academic_year = excluded.academic_year,
+            semester_term = excluded.semester_term,
+            updated_at    = excluded.updated_at",
+    )?;
+
+    let mut upsert_course_stmt = tx.prepare_cached(
+        "INSERT INTO academic_courses (
+            id, semester_id, course_code, course_name, credits,
+            midterm_score, final_score, summary_score_10, summary_score_4,
+            grade_char, is_passed, is_gpa_calculated, created_at, updated_at
+        ) VALUES (
+            ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?13
+        )
+        ON CONFLICT(semester_id, course_code) DO UPDATE SET
+            course_name       = excluded.course_name,
+            credits           = excluded.credits,
+            midterm_score     = excluded.midterm_score,
+            final_score       = excluded.final_score,
+            summary_score_10  = excluded.summary_score_10,
+            summary_score_4   = excluded.summary_score_4,
+            grade_char        = excluded.grade_char,
+            is_passed         = excluded.is_passed,
+            is_gpa_calculated = excluded.is_gpa_calculated,
+            updated_at        = excluded.updated_at",
+    )?;
+
+    let now = chrono::Utc::now().timestamp();
+
+    for sem in semesters {
+        upsert_sem_stmt.execute(params![
+            sem.semester.id,
+            sem.semester.academic_year,
+            sem.semester.semester_term as i64,
+            now,
+        ])?;
+
+        for c in &sem.courses {
+            let record_id = uuid::Uuid::new_v4().to_string();
+            upsert_course_stmt.execute(params![
+                record_id,
+                sem.semester.id,
+                c.course_code,
+                c.course_name,
+                c.credits,
+                c.midterm_score,
+                c.final_score,
+                c.summary_score_10,
+                c.summary_score_4,
+                c.grade_char,
+                c.is_passed as i32,
+                c.is_gpa_calculated as i32,
+                now,
+            ])?;
+        }
+    }
+
+    drop(upsert_sem_stmt);
+    drop(upsert_course_stmt);
+    tx.commit()?;
+    Ok(())
+}
+
+
 // ============================================================
 //  SECTION 5: Unit Tests
 // ============================================================

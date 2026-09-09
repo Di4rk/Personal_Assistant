@@ -2,6 +2,7 @@ pub mod commands;
 pub mod db;
 pub mod error;
 pub mod gamification;
+pub mod modules;
 pub mod server;
 pub mod services;
 
