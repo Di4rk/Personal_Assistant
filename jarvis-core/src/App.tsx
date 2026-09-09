@@ -25,7 +25,12 @@ interface Toast {
 
 let toastIdCounter = 0;
 
+import { AcademicDashboard } from "./features/academic";
+import { Code2, GraduationCap } from "lucide-react";
+
 export default function App() {
+  const [activeTab, setActiveTab] = useState<"cp" | "academic">("academic");
+
   // ============================================================
   // SINGLE SOURCE OF TRUTH: mọi state hiển thị dồn về đây, các
   // component con (LevelProgressBar...) chỉ nhận props, KHÔNG tự fetch.
@@ -137,41 +142,76 @@ export default function App() {
     <div className="min-h-screen bg-zinc-950 text-zinc-100 p-6">
       <header className="mb-6">
         <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div>
-            <h1 className="text-xl font-bold text-zinc-100">JARVIS Personal OS</h1>
-            <p className="text-sm text-zinc-500">Diark Core Dashboard</p>
+          <div className="flex items-center gap-6 flex-wrap">
+            <div>
+              <h1 className="text-xl font-bold text-zinc-100">JARVIS Personal OS</h1>
+              <p className="text-sm text-zinc-500">Diark Core Dashboard</p>
+            </div>
+
+            {/* Navigation Tabs */}
+            <nav className="flex items-center bg-zinc-900 border border-zinc-800 rounded-lg p-1 text-xs">
+              <button
+                onClick={() => setActiveTab("academic")}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium transition-colors ${
+                  activeTab === "academic"
+                    ? "bg-violet-600 text-white shadow-sm"
+                    : "text-zinc-400 hover:text-zinc-200"
+                }`}
+              >
+                <GraduationCap className="w-3.5 h-3.5" />
+                <span>Academic Radar</span>
+              </button>
+              <button
+                onClick={() => setActiveTab("cp")}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium transition-colors ${
+                  activeTab === "cp"
+                    ? "bg-violet-600 text-white shadow-sm"
+                    : "text-zinc-400 hover:text-zinc-200"
+                }`}
+              >
+                <Code2 className="w-3.5 h-3.5" />
+                <span>Codeforces &amp; ICPC</span>
+              </button>
+            </nav>
           </div>
-          <div className="w-full sm:w-80">
-            <CfSettingsPanel onSyncComplete={handleSyncComplete} />
-          </div>
+
+          {activeTab === "cp" && (
+            <div className="w-full sm:w-80">
+              <CfSettingsPanel onSyncComplete={handleSyncComplete} />
+            </div>
+          )}
         </div>
       </header>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* --- Stats card hôm nay --- */}
-        <div className="rounded-xl bg-zinc-900 border border-zinc-800 p-4">
-          <h3 className="text-sm font-medium text-zinc-400 mb-3">Hôm nay</h3>
-          {stats ? (
-            <div className="grid grid-cols-2 gap-3">
-              <StatBox label="XP" value={stats.total_xp} accent="text-violet-400" />
-              <StatBox label="AC" value={stats.ac_count} accent="text-emerald-400" />
-              <StatBox label="WA" value={stats.wa_count} accent="text-red-400" />
-              <StatBox label="Khác" value={stats.other_count} accent="text-zinc-400" />
+      {activeTab === "academic" ? (
+        <AcademicDashboard />
+      ) : (
+        <>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            {/* --- Stats card hôm nay --- */}
+            <div className="rounded-xl bg-zinc-900 border border-zinc-800 p-4">
+              <h3 className="text-sm font-medium text-zinc-400 mb-3">Hôm nay</h3>
+              {stats ? (
+                <div className="grid grid-cols-2 gap-3">
+                  <StatBox label="XP" value={stats.total_xp} accent="text-violet-400" />
+                  <StatBox label="AC" value={stats.ac_count} accent="text-emerald-400" />
+                  <StatBox label="WA" value={stats.wa_count} accent="text-red-400" />
+                  <StatBox label="Khác" value={stats.other_count} accent="text-zinc-400" />
+                </div>
+              ) : (
+                <div className="h-16 animate-pulse bg-zinc-800 rounded" />
+              )}
             </div>
-          ) : (
-            <div className="h-16 animate-pulse bg-zinc-800 rounded" />
-          )}
-        </div>
 
-        <LevelProgressBar info={levelInfo} />
+            <LevelProgressBar info={levelInfo} />
 
-        {/* Third column intentionally left for future widgets */}
-        <div className="lg:col-span-1" />
-      </div>
+            {/* Third column intentionally left for future widgets */}
+            <div className="lg:col-span-1" />
+          </div>
 
-      <div className="mt-4">
-        <ActivityHeatmap />
-      </div>
+          <div className="mt-4">
+            <ActivityHeatmap />
+          </div>
 
       {/* --- Recent submissions --- */}
       <div className="mt-4 rounded-xl bg-zinc-900 border border-zinc-800 p-4">
@@ -226,6 +266,8 @@ export default function App() {
           </div>
         )}
       </div>
+      </>
+      )}
 
       <PostMortemModal
         isOpen={isModalOpen}
