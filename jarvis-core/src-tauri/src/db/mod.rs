@@ -4,6 +4,7 @@ pub mod post_mortem;
 pub mod schema;
 pub mod settings;
 pub mod submissions;
+pub mod vault_schema;
 
 pub use matrix::{query_life_matrix_range, recompute_daily_matrix_for_date, LifeMatrixEntryDto};
 

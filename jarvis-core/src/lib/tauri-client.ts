@@ -11,6 +11,7 @@ import type {
   FullPortalIngestionRequest,
 } from "../features/academic/types";
 import type { LifeMatrixEntryDto } from "../features/life-matrix/types";
+import type { VaultSearchResultDto, VaultStatsDto } from "../features/vault/types";
 
 /**
  * Wrapper mỏng quanh invoke() để:
@@ -277,6 +278,32 @@ export async function getLifeMatrixRange(
     endDate,
   });
 }
+
+// ============================================================
+//  Native Vault IPC Wrappers (Module 5)
+// ============================================================
+
+/**
+ * Trigger manual sync of markdown vault directory.
+ */
+export async function scanVault(vaultPath: string): Promise<VaultStatsDto> {
+  return invoke<VaultStatsDto>("scan_vault", { vaultPath });
+}
+
+/**
+ * Search vault notes using SQLite FTS5 with snippet highlights.
+ */
+export async function searchVault(query: string): Promise<VaultSearchResultDto[]> {
+  return invoke<VaultSearchResultDto[]>("search_vault", { query });
+}
+
+/**
+ * Retrieve summary metrics of the current vault.
+ */
+export async function getVaultStats(): Promise<VaultStatsDto> {
+  return invoke<VaultStatsDto>("get_vault_stats");
+}
+
 
 
 

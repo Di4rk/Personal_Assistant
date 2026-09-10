@@ -1,6 +1,7 @@
 pub mod academic;
 pub mod matrix;
 pub mod post_mortem;
+pub mod vault;
 pub mod workspace;
 
 use chrono::Local;
