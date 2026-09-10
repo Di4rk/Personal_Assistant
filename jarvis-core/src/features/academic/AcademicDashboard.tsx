@@ -19,6 +19,7 @@ import {
 import {
   getSemesterCourses,
   getAcademicMacroMetricsSsot,
+  syncUitPortal,
 } from "../../lib/tauri-client";
 import type { AcademicCourseRecord, AcademicMacroMetricSSOT } from "./types";
 
@@ -161,6 +162,15 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
     await Promise.all([refetchOverview(), loadMacroMetrics()]);
   }, [refetchOverview, loadMacroMetrics]);
 
+  const handleSyncPortal = useCallback(async () => {
+    try {
+      await syncUitPortal();
+      await handleRefresh();
+    } catch (err) {
+      console.error("Lỗi sync UIT portal:", err);
+    }
+  }, [handleRefresh]);
+
   const isRefreshing = isLoadingOverview || isLoadingMacro;
 
   return (
@@ -201,7 +211,11 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
       </div>
 
       {/* 2. Cumulative Summary Cards (SSOT: cGPA 10, cGPA 4, Cumulative Credits, Average DRL) */}
-      <AcademicSummaryCards metrics={macroMetrics} totalCurriculumCredits={126} />
+      <AcademicSummaryCards
+        metrics={macroMetrics}
+        totalCurriculumCredits={126}
+        onSyncClick={handleSyncPortal}
+      />
 
       {error && (
         <div className="rounded-lg bg-rose-950/40 border border-rose-800/50 p-3 text-xs text-rose-300">

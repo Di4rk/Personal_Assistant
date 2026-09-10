@@ -29,17 +29,19 @@ export const SemesterTabs: React.FC<SemesterTabsProps> = ({
 
       {metrics.length === 0 ? (
         <div className="text-center py-6 text-xs text-zinc-500">
-          Chưa có dữ liệu học kỳ nào. Hãy nhấn &quot;Đồng bộ Portal&quot; hoặc nạp lại để lấy dữ liệu.
+          Chưa có dữ liệu học kỳ nào. Hãy nhấn &quot;Nạp dữ liệu cổng UIT&quot; để lấy dữ liệu.
         </div>
       ) : (
         <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-zinc-800">
           {metrics.map((m) => {
             const isSelected = m.semesterId === selectedSemesterId;
             
-            // Format label: ví dụ "HK1 (2025-2026)" từ "2025-2026.1"
+            // Format label: ưu tiên semester_label từ DB hoặc tạo fallback "HK{num} ({year})"
             const parts = m.semesterId.split(".");
             const termNum = parts.length > 1 ? parts[1] : "1";
-            const tabTitle = `HK${termNum} (${m.yearName})`;
+            const tabTitle = m.semesterLabel && m.semesterLabel.trim().length > 0
+              ? m.semesterLabel
+              : `HK${termNum} (${m.yearName})`;
 
             return (
               <button

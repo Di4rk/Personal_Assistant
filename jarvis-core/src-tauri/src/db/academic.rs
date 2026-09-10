@@ -282,8 +282,8 @@ pub fn ensure_academic_schema(conn: &Connection) -> SqlResult<()> {
             term_credits INTEGER NOT NULL DEFAULT 0,
             cumulative_credits INTEGER NOT NULL DEFAULT 0,
             drl_score INTEGER NOT NULL DEFAULT 0,    -- 95, 100
-            rank_label TEXT NOT NULL DEFAULT 'Giỏi',     -- "Giỏi", "Xuất sắc"
-            classification TEXT NOT NULL DEFAULT 'Giỏi',
+            rank_label TEXT NOT NULL DEFAULT 'Chưa xếp loại',     -- "Giỏi", "Xuất sắc"
+            classification TEXT NOT NULL DEFAULT 'Chưa xếp loại',
             drl INTEGER,
             updated_at INTEGER NOT NULL
         );
@@ -317,8 +317,8 @@ pub fn ensure_academic_schema(conn: &Connection) -> SqlResult<()> {
     ensure_column("academic_macro_metrics", "semester_label", "TEXT NOT NULL DEFAULT ''")?;
     ensure_column("academic_macro_metrics", "year_name", "TEXT NOT NULL DEFAULT ''")?;
     ensure_column("academic_macro_metrics", "drl_score", "INTEGER NOT NULL DEFAULT 0")?;
-    ensure_column("academic_macro_metrics", "rank_label", "TEXT NOT NULL DEFAULT 'Giỏi'")?;
-    ensure_column("academic_macro_metrics", "classification", "TEXT NOT NULL DEFAULT 'Giỏi'")?;
+    ensure_column("academic_macro_metrics", "rank_label", "TEXT NOT NULL DEFAULT 'Chưa xếp loại'")?;
+    ensure_column("academic_macro_metrics", "classification", "TEXT NOT NULL DEFAULT 'Chưa xếp loại'")?;
     ensure_column("academic_macro_metrics", "drl", "INTEGER")?;
 
     ensure_column("academic_courses", "process_point", "REAL")?;
@@ -332,6 +332,11 @@ pub fn ensure_academic_schema(conn: &Connection) -> SqlResult<()> {
     ensure_column("academic_courses", "note", "TEXT")?;
 
     Ok(())
+}
+
+/// Khởi tạo module học vụ: chỉ đảm bảo schema bảng tồn tại, ZERO-STATE không tự ý seed dữ liệu.
+pub fn init_academic_module(conn: &Connection) -> SqlResult<()> {
+    ensure_academic_schema(conn)
 }
 
 // ============================================================

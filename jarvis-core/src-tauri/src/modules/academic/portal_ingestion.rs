@@ -1,11 +1,68 @@
-//! Portal JSON Ingestion Pipeline — Sprint v0.3.4
+//! Portal JSON Ingestion Pipeline — Sprint v0.3.4 & v0.4.1 Generic Ingestion
 //!
 //! Nạp trực tiếp payload bảng điểm học kỳ và lịch sử ĐRL từ cổng thông tin UIT:
+//! - Hỗ trợ arbitrary curriculums, majors, course codes, và terms thông qua generic JSON.
 //! - Tạo/cập nhật `academic_macro_metrics` (Single Source of Truth cho Cards và DRL)
-//! - Tạo/cập nhật `academic_courses` gắn chặt vào semester_id ("2025-2026.1", "2025-2026.2")
+//! - Tạo/cập nhật `academic_courses` gắn chặt vào semester_id
 
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct GenericSubject {
+    pub id: Option<String>,
+    pub subject_code: String,
+    pub subject_name: String,
+    pub number_of_credit: i32,
+    pub course_point: Option<String>,
+    pub midterm_score: Option<String>,
+    pub practice_point: Option<String>,
+    pub final_point: Option<String>,
+    pub process_point: Option<String>,
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct GenericSemesterGroup {
+    pub semester_key: String,   // E.g., "semester_1", "semester_2"
+    pub semester_label: String, // E.g., "Học kỳ 1/2025-2026"
+    pub year_name: String,
+    pub total_credit: Option<i32>,
+    pub average_point: Option<f64>,
+    pub subjects: Vec<GenericSubject>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct GenericTermSummary {
+    pub semester: String,
+    #[serde(alias = "termGpa", alias = "term_gpa")]
+    pub term_gpa: Option<f64>,
+    #[serde(alias = "cumulativeGpa", alias = "cumulative_gpa")]
+    pub cumulative_gpa: Option<f64>,
+    #[serde(alias = "termCredit", alias = "term_credit")]
+    pub term_credit: Option<i32>,
+    #[serde(alias = "accumulatedCredit", alias = "accumulated_credit")]
+    pub accumulated_credit: Option<i32>,
+    #[serde(alias = "classifyLabel", alias = "classify_label")]
+    pub classify_label: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct GenericDrlItem {
+    pub semester: String,
+    pub point: i32,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct IngestionPayload {
+    pub semester_groups: Vec<GenericSemesterGroup>,
+    pub term_summaries: Option<Vec<GenericTermSummary>>,
+    pub drl_history: Option<Vec<GenericDrlItem>>,
+}
+
+pub fn parse_score(val: &Option<String>) -> Option<f64> {
+    val.as_ref().and_then(|s| s.trim().parse::<f64>().ok())
+}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct WeightsPayload {
@@ -51,33 +108,61 @@ pub struct FullPortalIngestionRequest {
     pub drl_history: Vec<DrlItemPayload>,
 }
 
-fn parse_str_score(s: &Option<String>) -> Option<f64> {
-    s.as_ref().and_then(|v| v.trim().parse::<f64>().ok())
-}
-
-/// Nạp dữ liệu học vụ từ JSON payload vào SQLite transaction
-pub fn execute_portal_ingest(
+/// Nạp dữ liệu học vụ linh hoạt từ payload generic vào SQLite
+pub fn ingest_dynamic_academic_payload(
     conn: &mut Connection,
-    data: FullPortalIngestionRequest,
+    payload: IngestionPayload,
 ) -> Result<(), String> {
     let tx = conn.transaction().map_err(|e| e.to_string())?;
     let now = chrono::Utc::now().timestamp();
 
-    // Map DRL để tiện lookup theo semester_key
+    // 1. Build lookup map cho DRL (nếu có)
     let mut drl_map = std::collections::HashMap::new();
-    for d in data.drl_history {
-        drl_map.insert(d.semester, d.point);
+    if let Some(drl_list) = payload.drl_history {
+        for d in drl_list {
+            drl_map.insert(d.semester, d.point);
+        }
+    }
+
+    // 2. Build lookup map cho Term Summary chính thức (nếu có)
+    let mut summary_map = std::collections::HashMap::new();
+    if let Some(summaries) = payload.term_summaries {
+        for s in summaries {
+            summary_map.insert(s.semester.clone(), s);
+        }
     }
 
     let mut running_credits = 0;
 
-    // Sắp xếp semester: semester_1 trước, semester_2 sau
-    let mut groups = data.semester_groups;
-    groups.sort_by(|a, b| a.semester_key.cmp(&b.semester_key));
-
-    for group in groups {
-        let sem_num = if group.semester_key == "semester_1" { "1" } else { "2" };
+    // 3. Dynamic iteration qua từng học kỳ của sinh viên
+    for group in payload.semester_groups {
+        let sem_num = group.semester_key.replace("semester_", "");
         let semester_id = format!("{}.{}", group.year_name, sem_num);
+
+        let sum_item = summary_map.get(&sem_num);
+        let term_gpa = sum_item.and_then(|s| s.term_gpa).or(group.average_point).unwrap_or(0.0);
+        let cum_gpa = sum_item.and_then(|s| s.cumulative_gpa).unwrap_or(term_gpa);
+        let term_credits = sum_item.and_then(|s| s.term_credit).or(group.total_credit).unwrap_or(0);
+        running_credits += term_credits;
+        let cum_credits = sum_item.and_then(|s| s.accumulated_credit).unwrap_or(running_credits);
+        let classification = sum_item
+            .and_then(|s| s.classify_label.clone())
+            .unwrap_or_else(|| {
+                if cum_gpa >= 9.0 {
+                    "Xuất sắc".to_string()
+                } else if cum_gpa >= 8.0 {
+                    "Giỏi".to_string()
+                } else if cum_gpa >= 6.5 {
+                    "Khá".to_string()
+                } else if cum_gpa >= 5.0 {
+                    "Trung bình".to_string()
+                } else if cum_gpa > 0.0 {
+                    "Yếu".to_string()
+                } else {
+                    "Chưa xếp loại".to_string()
+                }
+            });
+        let drl = *drl_map.get(&group.semester_key).unwrap_or(&0);
 
         // Đảm bảo academic_semesters có bản ghi để thỏa mãn foreign key
         tx.execute(
@@ -92,16 +177,9 @@ pub fn execute_portal_ingest(
             ],
         ).map_err(|e| e.to_string())?;
 
-        running_credits += group.total_credit;
-        let drl = *drl_map.get(&group.semester_key).unwrap_or(&0);
-
-        // Tính cGPA xấp xỉ hoặc gán trực tiếp:
-        // HK1: term=8.2, cum=8.2 | HK2: term=8.55, cum=8.40
-        let cumulative_gpa = if sem_num == "1" { 8.20 } else { 8.40 };
-
         tx.execute(
             "INSERT INTO academic_macro_metrics 
-                (semester_id, semester_label, year_name, term_gpa, cumulative_gpa, term_credits, cumulative_credits, drl_score, rank_label, classification, drl, updated_at)
+                (semester_id, semester_label, year_name, term_gpa, cumulative_gpa, term_credits, cumulative_credits, drl_score, classification, rank_label, drl, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9, ?8, ?10)
              ON CONFLICT(semester_id) DO UPDATE SET
                 semester_label = excluded.semester_label,
@@ -111,29 +189,29 @@ pub fn execute_portal_ingest(
                 term_credits = excluded.term_credits,
                 cumulative_credits = excluded.cumulative_credits,
                 drl_score = excluded.drl_score,
-                rank_label = excluded.rank_label,
                 classification = excluded.classification,
+                rank_label = excluded.rank_label,
                 drl = excluded.drl,
                 updated_at = excluded.updated_at",
             params![
                 semester_id,
                 group.semester_label,
                 group.year_name,
-                group.average_point,
-                cumulative_gpa,
-                group.total_credit,
-                running_credits,
+                term_gpa,
+                cum_gpa,
+                term_credits,
+                cum_credits,
                 drl,
-                if cumulative_gpa >= 8.0 { "Giỏi" } else { "Khá" },
+                classification,
                 now
             ],
         ).map_err(|e| e.to_string())?;
 
-        // Ingest các môn học thuộc học kỳ đó
+        // 4. Ingest dynamic subjects
         let mut stmt = tx.prepare_cached(
             "INSERT INTO academic_courses 
                 (id, semester_id, course_code, course_name, credits, process_point, practice_point, midterm_score, final_point, course_point, grade_4, grade_char, result_status, category, summary_score_10, summary_score_4, final_score, is_passed, is_gpa_calculated, status, note, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?10, ?11, ?9, 1, 1, ?13, ?15, ?16)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?10, ?11, ?9, 1, 1, 'passed', ?15, ?16)
              ON CONFLICT(id) DO UPDATE SET
                 course_point = excluded.course_point,
                 process_point = excluded.process_point,
@@ -144,19 +222,18 @@ pub fn execute_portal_ingest(
                 grade_char = excluded.grade_char,
                 result_status = excluded.result_status,
                 category = excluded.category,
-                summary_score_10 = excluded.summary_score_10,
-                summary_score_4 = excluded.summary_score_4,
-                final_score = excluded.final_score,
                 status = excluded.status,
                 note = excluded.note,
                 updated_at = excluded.updated_at"
         ).map_err(|e| e.to_string())?;
 
         for sub in group.subjects {
-            let course_pt = sub.course_point.parse::<f64>().unwrap_or(0.0);
-            let grade = crate::db::academic::GradeScale::from_score_10(course_pt);
+            let unique_id = sub.id.unwrap_or_else(|| format!("{}_{}", sub.subject_code, semester_id));
+            let final_score = parse_score(&sub.course_point).unwrap_or(0.0);
+            let grade = crate::db::academic::GradeScale::from_score_10(final_score);
             let grade_s4 = grade.to_scale_4();
             let grade_char = grade.as_char();
+            let result_status = if grade.is_passed() { "Đạt" } else { "Không đạt" };
             let category = if sub.subject_code.starts_with("IT") || sub.subject_code.starts_with("CS") {
                 "co_so_nganh"
             } else {
@@ -164,19 +241,19 @@ pub fn execute_portal_ingest(
             };
 
             stmt.execute(params![
-                sub.id,
+                unique_id,
                 semester_id,
                 sub.subject_code,
                 sub.subject_name,
                 sub.number_of_credit,
-                parse_str_score(&sub.process_point),
-                parse_str_score(&sub.practice_point),
-                parse_str_score(&sub.midterm_score),
-                parse_str_score(&sub.final_point),
-                course_pt,
+                parse_score(&sub.process_point),
+                parse_score(&sub.practice_point),
+                parse_score(&sub.midterm_score),
+                parse_score(&sub.final_point),
+                final_score,
                 grade_s4,
                 grade_char,
-                "Đạt",
+                result_status,
                 category,
                 sub.note.unwrap_or_default(),
                 now
@@ -186,6 +263,66 @@ pub fn execute_portal_ingest(
 
     tx.commit().map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// Nạp dữ liệu học vụ trực tiếp qua đường dẫn database và chuỗi JSON
+pub fn ingest_dynamic_academic_data(db_path: String, payload_json: String) -> Result<(), String> {
+    let payload: IngestionPayload = serde_json::from_str(&payload_json)
+        .map_err(|e| format!("JSON parsing failure: {e}"))?;
+
+    let mut conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
+    ingest_dynamic_academic_payload(&mut conn, payload)
+}
+
+/// Tương thích ngược: Nạp dữ liệu học vụ từ FullPortalIngestionRequest
+pub fn execute_portal_ingest(
+    conn: &mut Connection,
+    data: FullPortalIngestionRequest,
+) -> Result<(), String> {
+    let generic_groups: Vec<GenericSemesterGroup> = data
+        .semester_groups
+        .into_iter()
+        .map(|g| GenericSemesterGroup {
+            semester_key: g.semester_key,
+            semester_label: g.semester_label,
+            year_name: g.year_name,
+            total_credit: Some(g.total_credit),
+            average_point: Some(g.average_point),
+            subjects: g
+                .subjects
+                .into_iter()
+                .map(|s| GenericSubject {
+                    id: Some(s.id),
+                    subject_code: s.subject_code,
+                    subject_name: s.subject_name,
+                    number_of_credit: s.number_of_credit,
+                    course_point: Some(s.course_point),
+                    midterm_score: s.midterm_score,
+                    practice_point: s.practice_point,
+                    final_point: s.final_point,
+                    process_point: s.process_point,
+                    note: s.note,
+                })
+                .collect(),
+        })
+        .collect();
+
+    let generic_drl: Vec<GenericDrlItem> = data
+        .drl_history
+        .into_iter()
+        .map(|d| GenericDrlItem {
+            semester: d.semester,
+            point: d.point,
+        })
+        .collect();
+
+    let payload = IngestionPayload {
+        semester_groups: generic_groups,
+        term_summaries: None,
+        drl_history: Some(generic_drl),
+    };
+
+    ingest_dynamic_academic_payload(conn, payload)
 }
 
 /// Dữ liệu mẫu chuẩn của UIT theo đặc tả canonical (HK1: 6 môn - 18 TC, HK2: 7 môn - 24 TC)
@@ -448,5 +585,69 @@ mod tests {
             )
             .unwrap();
         assert_eq!(cum_credits_hk2, 42);
+    }
+
+    #[test]
+    fn test_ingest_dynamic_academic_data_generic_payload() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::db::academic::init_academic_module(&conn).unwrap();
+
+        let json_data = r#"{
+            "semester_groups": [
+                {
+                    "semester_key": "semester_1",
+                    "semester_label": "Học kỳ 1 Năm học 2024-2025",
+                    "year_name": "2024-2025",
+                    "total_credit": 15,
+                    "average_point": 8.0,
+                    "subjects": [
+                        {
+                            "subject_code": "SE104",
+                            "subject_name": "Nhập môn Công nghệ phần mềm",
+                            "number_of_credit": 3,
+                            "course_point": "8.5"
+                        }
+                    ]
+                }
+            ],
+            "term_summaries": [
+                {
+                    "semester": "1",
+                    "termGpa": 8.0,
+                    "cumulativeGpa": 8.0,
+                    "termCredit": 15,
+                    "accumulatedCredit": 15,
+                    "classifyLabel": "Giỏi"
+                }
+            ],
+            "drl_history": [
+                {
+                    "semester": "semester_1",
+                    "point": 90
+                }
+            ]
+        }"#;
+
+        let payload: IngestionPayload = serde_json::from_str(json_data).unwrap();
+        ingest_dynamic_academic_payload(&mut conn, payload).unwrap();
+
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM academic_macro_metrics", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+
+        let macro_class: String = conn
+            .query_row(
+                "SELECT classification FROM academic_macro_metrics WHERE semester_id = '2024-2025.1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(macro_class, "Giỏi");
+
+        let course_code: String = conn
+            .query_row("SELECT course_code FROM academic_courses", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(course_code, "SE104");
     }
 }
