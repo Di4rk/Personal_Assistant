@@ -14,6 +14,7 @@ import { useAcademicRadar } from "./hooks/useAcademicRadar";
 import { AcademicRadarChart } from "./components/AcademicRadarChart";
 import { GpaSimulatorCard } from "./components/GpaSimulatorCard";
 import { SyncPortalButton } from "./components/SyncPortalButton";
+import { useAppVersion } from "@/shared/hooks/useAppVersion";
 import {
   classifyCourseCategory,
   computeCategoryRadarData,
@@ -29,6 +30,7 @@ interface AcademicDashboardProps {
 export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
   className = "",
 }) => {
+  const appVersion = useAppVersion();
   const {
     overview,
     selectedSemesterId,
@@ -163,8 +165,8 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
             <div>
               <h2 className="text-lg font-bold text-zinc-100 flex items-center gap-2">
                 UIT Academic Radar
-                <span className="text-xs px-2 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700 font-mono">
-                  v0.3.2
+                <span className="text-xs font-mono px-2 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700/50">
+                  {appVersion}
                 </span>
               </h2>
               <p className="text-xs text-zinc-500">
