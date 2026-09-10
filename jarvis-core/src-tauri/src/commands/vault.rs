@@ -47,15 +47,10 @@ pub async fn search_vault(
     query: String,
     db: tauri::State<'_, SharedDb>,
 ) -> Result<Vec<VaultSearchResultDto>, String> {
-    let trimmed = query.trim().to_string();
-    if trimmed.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    // Clean query to avoid syntax crash with raw FTS5 operators like unclosed quotes
-    // Sanitize query by wrapping words or escaping quotes
-    let sanitized_query = trimmed.replace('"', "\"\"");
-    let fts_query = format!("\"{}\"*", sanitized_query);
+    let fts_query = match crate::modules::vault::build_safe_fts5_query(&query) {
+        Some(q) => q,
+        None => return Ok(Vec::new()),
+    };
 
     let db_arc = db.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {

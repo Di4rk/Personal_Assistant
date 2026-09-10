@@ -43,16 +43,54 @@ pub fn init_vault_tables(conn: &Connection) -> SqlResult<()> {
         r#"
         CREATE TABLE IF NOT EXISTS vault_links (
             source_id TEXT NOT NULL,
-            target_id TEXT NOT NULL,
-            PRIMARY KEY (source_id, target_id),
+            target_id TEXT,                          -- NULL nếu chưa resolve được đường dẫn
+            unresolved_target TEXT NOT NULL DEFAULT '', -- Tên gốc được viết trong wikilink [[...]]
+            PRIMARY KEY (source_id, unresolved_target),
             FOREIGN KEY(source_id) REFERENCES vault_notes(id) ON DELETE CASCADE
         )
         "#,
         [],
     )?;
 
+    // Migration guard: check if vault_links table exists with unresolved_target column
+    let needs_migration: bool = {
+        let table_sql: Option<String> = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='vault_links'",
+                [],
+                |r| r.get(0),
+            )
+            .ok();
+
+        match table_sql {
+            Some(sql) => !sql.contains("unresolved_target"),
+            None => false,
+        }
+    };
+
+    if needs_migration {
+        // Table existed with old schema (source_id, target_id); migrate it
+        conn.execute_batch(
+            r#"
+            DROP TABLE IF EXISTS vault_links;
+            CREATE TABLE vault_links (
+                source_id TEXT NOT NULL,
+                target_id TEXT,
+                unresolved_target TEXT NOT NULL DEFAULT '',
+                PRIMARY KEY (source_id, unresolved_target),
+                FOREIGN KEY(source_id) REFERENCES vault_notes(id) ON DELETE CASCADE
+            );
+            "#,
+        )?;
+    }
+
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_vault_links_target ON vault_links(target_id)",
+        [],
+    )?;
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_vault_links_unresolved ON vault_links(unresolved_target) WHERE target_id IS NULL",
         [],
     )?;
 

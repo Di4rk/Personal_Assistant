@@ -28,6 +28,11 @@ pub fn init_db(db_path: &Path) -> SqlResult<Connection> {
     let _: String = conn.pragma_update_and_check(None, "journal_mode", "WAL", |row| row.get(0))?;
     conn.pragma_update(None, "synchronous", "NORMAL")?; // an toàn đủ dùng, nhanh hơn FULL
     conn.pragma_update(None, "foreign_keys", "ON")?;
+    // Khóa cache_size ở mức ~8MB (giá trị âm tính theo KiB: -8000 = 8000 KiB)
+    conn.pragma_update(None, "cache_size", -8000)?;
+    // Vô hiệu hóa mmap để tránh phình ảo virtual memory trên Windows.
+    // Lưu ý: PRAGMA mmap_size = 0 trả về 1 row (giá trị mmap_size mới), nên dùng pragma_update_and_check để consume row.
+    let _: i64 = conn.pragma_update_and_check(None, "mmap_size", 0, |row| row.get(0))?;
 
     run_migrations(&conn)?;
     ensure_worker_schema(&conn)?;

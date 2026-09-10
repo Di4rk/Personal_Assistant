@@ -126,6 +126,125 @@ pub fn extract_wikilinks(content: &str) -> Vec<String> {
     targets
 }
 
+/// Builds a safe FTS5 query string from user input to prevent syntax errors on raw operators.
+/// - Escapes inner quotes
+/// - Surrounds each token with quotes
+/// - Joins tokens with AND
+/// - Adds wildcard '*' to the last token for live prefix search
+pub fn build_safe_fts5_query(user_input: &str) -> Option<String> {
+    let tokens: Vec<String> = user_input
+        .split_whitespace()
+        .map(|t| format!("\"{}\"", t.replace('"', "\"\"")))
+        .collect();
+
+    if tokens.is_empty() {
+        return None;
+    }
+
+    let mut query = String::new();
+    let total = tokens.len();
+
+    for (idx, token) in tokens.iter().enumerate() {
+        if idx > 0 {
+            query.push_str(" AND ");
+        }
+        query.push_str(token);
+        // Token cuối cùng được thêm prefix wildcard '*' bên ngoài dấu nháy kép để hỗ trợ live search
+        if idx == total - 1 {
+            query.push('*');
+        }
+    }
+
+    Some(query)
+}
+
+/// Resolves dangling links (where target_id IS NULL) against existing vault notes.
+/// Only queries rows with target_id IS NULL; avoids re-scanning files from disk.
+/// If exactly 1 note matches unresolved_target (by id, title, or relative path with/without .md),
+/// updates target_id. If ambiguous (>1 match), leaves target_id as NULL.
+pub fn resolve_unresolved_links(conn: &mut Connection) -> AppResult<usize> {
+    // 1. Query distinct unresolved targets
+    let mut dangling_targets: Vec<String> = Vec::new();
+    {
+        let mut stmt = conn.prepare(
+            "SELECT DISTINCT unresolved_target FROM vault_links WHERE target_id IS NULL AND unresolved_target != ''",
+        )?;
+        let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+        for r in rows {
+            dangling_targets.push(r?);
+        }
+    }
+
+    if dangling_targets.is_empty() {
+        return Ok(0);
+    }
+
+    // 2. Query all notes id & title to build lookup indices
+    // note_id (e.g. 'cs/dp.md'), note_title (e.g. 'dp')
+    let mut id_set: HashSet<String> = HashSet::new();
+    let mut title_to_ids: HashMap<String, Vec<String>> = HashMap::new();
+    {
+        let mut stmt = conn.prepare("SELECT id, title FROM vault_notes")?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+        for r in rows {
+            let (id, title) = r?;
+            id_set.insert(id.clone());
+            title_to_ids.entry(title.to_lowercase()).or_default().push(id.clone());
+        }
+    }
+
+    let mut resolved_count = 0;
+    let tx = conn.transaction()?;
+
+    for target in dangling_targets {
+        let clean_target = target.trim();
+        let target_lower = clean_target.to_lowercase();
+        let with_md = if target_lower.ends_with(".md") {
+            target_lower.clone()
+        } else {
+            format!("{}.md", target_lower)
+        };
+
+        // Attempt match:
+        // Case A: exact match against note id (or note id with .md)
+        let mut matching_ids: Vec<String> = Vec::new();
+
+        for id in &id_set {
+            let id_lower = id.to_lowercase();
+            if id_lower == target_lower || id_lower == with_md {
+                matching_ids.push(id.clone());
+            }
+        }
+
+        // Case B: If not matched by ID, try matching note title (basename)
+        if matching_ids.is_empty() {
+            let stripped_title = if target_lower.ends_with(".md") {
+                &target_lower[..target_lower.len() - 3]
+            } else {
+                &target_lower
+            };
+
+            if let Some(ids) = title_to_ids.get(stripped_title) {
+                matching_ids = ids.clone();
+            }
+        }
+
+        // Exact 1 match -> resolve link!
+        // If > 1 match, ambiguity guard keeps target_id as NULL
+        if matching_ids.len() == 1 {
+            let resolved_id = &matching_ids[0];
+            let rows_affected = tx.execute(
+                "UPDATE vault_links SET target_id = ?1 WHERE unresolved_target = ?2 AND target_id IS NULL",
+                params![resolved_id, target],
+            )?;
+            resolved_count += rows_affected;
+        }
+    }
+
+    tx.commit()?;
+    Ok(resolved_count)
+}
+
 /// Scans a directory of Markdown files and incrementally syncs them with `vault_notes`,
 /// `vault_links`, and the contentless `vault_fts` full-text index.
 pub fn scan_and_sync_vault(conn: &mut Connection, root_path: &Path) -> AppResult<VaultStatsDto> {
@@ -354,7 +473,7 @@ pub fn scan_and_sync_vault(conn: &mut Connection, root_path: &Path) -> AppResult
         )?;
         for target in parsed.links {
             tx.execute(
-                "INSERT OR IGNORE INTO vault_links(source_id, target_id) VALUES(?1, ?2)",
+                "INSERT OR IGNORE INTO vault_links(source_id, target_id, unresolved_target) VALUES(?1, NULL, ?2)",
                 params![parsed.id, target],
             )?;
         }
@@ -389,7 +508,7 @@ pub fn scan_and_sync_vault(conn: &mut Connection, root_path: &Path) -> AppResult
 
         for target in parsed.links {
             tx.execute(
-                "INSERT OR IGNORE INTO vault_links(source_id, target_id) VALUES(?1, ?2)",
+                "INSERT OR IGNORE INTO vault_links(source_id, target_id, unresolved_target) VALUES(?1, NULL, ?2)",
                 params![parsed.id, target],
             )?;
         }
@@ -397,7 +516,10 @@ pub fn scan_and_sync_vault(conn: &mut Connection, root_path: &Path) -> AppResult
 
     tx.commit()?;
 
-    // 5. Query and return VaultStatsDto
+    // 5. Re-resolve dangling links across the vault
+    let _ = resolve_unresolved_links(conn)?;
+
+    // 6. Query and return VaultStatsDto
     query_vault_stats(conn)
 }
 
@@ -575,5 +697,96 @@ Some content here."#;
             )
             .expect("search after delete");
         assert_eq!(final_count, 0);
+    }
+
+    #[test]
+    fn test_fts5_syntax_safety() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        init_vault_tables(&conn).expect("init tables");
+
+        // Insert a dummy note into vault_notes and vault_fts to query against
+        conn.execute(
+            r#"
+            INSERT INTO vault_notes(id, title, tags, frontmatter_json, file_mtime, content_cache, updated_at)
+            VALUES('test.md', 'Test', '[]', NULL, 100, 'segment tree algorithm details', 100)
+            "#,
+            [],
+        )
+        .expect("insert dummy note");
+        conn.execute(
+            "INSERT INTO vault_fts(rowid, title, content) VALUES(1, 'Test', 'segment tree algorithm details')",
+            [],
+        )
+        .expect("insert dummy fts");
+
+        // Malicious or broken user input with operators and unclosed quotes
+        let malicious_input = "segment tree ( AND NOT ";
+        let safe_query = build_safe_fts5_query(malicious_input);
+        assert!(safe_query.is_some());
+        let query_str = safe_query.expect("safe query exists");
+
+        // Assert query format matches directive
+        assert_eq!(
+            query_str,
+            "\"segment\" AND \"tree\" AND \"(\" AND \"AND\" AND \"NOT\"*"
+        );
+
+        // Execute against SQLite Rusqlite FTS5 without error
+        let mut stmt = conn
+            .prepare("SELECT rowid FROM vault_fts WHERE vault_fts MATCH ?1")
+            .expect("prepare fts query");
+        let result = stmt.query_map(params![query_str], |r| r.get::<_, i64>(0));
+        assert!(result.is_ok(), "Safe FTS5 query must not fail");
+    }
+
+    #[test]
+    fn test_dangling_link_resolution() {
+        let dir = tempdir().expect("tempdir");
+        let vault_path = dir.path();
+
+        // 1. Create A.md referencing [[B]]
+        let note_a_path = vault_path.join("A.md");
+        let mut file_a = File::create(&note_a_path).expect("create A.md");
+        write!(file_a, "# Note A\nLinks to [[B]].").expect("write A.md");
+
+        let mut conn = Connection::open_in_memory().expect("in-memory db");
+        init_vault_tables(&conn).expect("init tables");
+
+        // Scan initial state: B does not exist yet
+        let stats = scan_and_sync_vault(&mut conn, vault_path).expect("scan with dangling link");
+        assert_eq!(stats.total_notes, 1);
+        assert_eq!(stats.total_links, 1);
+
+        // Assert target_id of the link is NULL, unresolved_target is 'B'
+        let (target_id, unresolved_target): (Option<String>, String) = conn
+            .query_row(
+                "SELECT target_id, unresolved_target FROM vault_links WHERE source_id = 'A.md'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("query vault_links");
+        assert_eq!(target_id, None);
+        assert_eq!(unresolved_target, "B");
+
+        // 2. Create B.md (without modifying A.md)
+        let note_b_path = vault_path.join("B.md");
+        let mut file_b = File::create(&note_b_path).expect("create B.md");
+        write!(file_b, "# Note B\nThis is target note B.").expect("write B.md");
+
+        // Re-scan: A.md mtime is unchanged, but B.md is new and link re-resolution runs
+        let stats2 = scan_and_sync_vault(&mut conn, vault_path).expect("rescan after B created");
+        assert_eq!(stats2.total_notes, 2);
+        assert_eq!(stats2.total_links, 1);
+
+        // Assert target_id has been automatically updated to 'B.md'
+        let (resolved_target_id, unresolved_target_after): (Option<String>, String) = conn
+            .query_row(
+                "SELECT target_id, unresolved_target FROM vault_links WHERE source_id = 'A.md'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("query vault_links after resolution");
+        assert_eq!(resolved_target_id, Some("B.md".to_string()));
+        assert_eq!(unresolved_target_after, "B");
     }
 }
