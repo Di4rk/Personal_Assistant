@@ -265,14 +265,6 @@ pub fn ingest_dynamic_academic_payload(
     Ok(())
 }
 
-/// Nạp dữ liệu học vụ trực tiếp qua đường dẫn database và chuỗi JSON
-pub fn ingest_dynamic_academic_data(db_path: String, payload_json: String) -> Result<(), String> {
-    let payload: IngestionPayload = serde_json::from_str(&payload_json)
-        .map_err(|e| format!("JSON parsing failure: {e}"))?;
-
-    let mut conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
-    ingest_dynamic_academic_payload(&mut conn, payload)
-}
 
 /// Tương thích ngược: Nạp dữ liệu học vụ từ FullPortalIngestionRequest
 pub fn execute_portal_ingest(

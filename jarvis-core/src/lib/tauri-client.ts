@@ -257,12 +257,10 @@ export async function purgeAndSeedCanonicalAcademicData(): Promise<void> {
  * Nạp payload bảng điểm và DRL dạng JSON linh hoạt từ portal UIT vào SQLite.
  */
 export async function ingestDynamicAcademicData(
-  payloadJson: string,
-  dbPath?: string
+  payloadJson: string
 ): Promise<void> {
   return invoke<void>("ingest_dynamic_academic_data", {
     payloadJson,
-    dbPath: dbPath || null,
   });
 }
 

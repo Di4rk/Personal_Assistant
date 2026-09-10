@@ -472,27 +472,25 @@ pub fn ingest_full_academic_payload(
     Ok(())
 }
 
-/// Nạp dữ liệu học vụ linh hoạt từ chuỗi JSON generic
+
+/// Nạp dữ liệu học vụ linh hoạt từ chuỗi JSON generic.
+/// Luôn dùng kết nối từ AppState.db (không tạo Connection::open riêng lẻ).
 #[tauri::command]
 pub fn ingest_dynamic_academic_data(
     app: AppHandle,
     db: tauri::State<'_, SharedDb>,
     payload_json: String,
-    db_path: Option<String>,
 ) -> Result<(), String> {
     let payload: crate::modules::academic::portal_ingestion::IngestionPayload =
         serde_json::from_str(&payload_json).map_err(|e| format!("Lỗi parse JSON payload: {e}"))?;
 
-    if let Some(path) = db_path.filter(|p| !p.trim().is_empty()) {
-        crate::modules::academic::portal_ingestion::ingest_dynamic_academic_data(path, payload_json)?;
-    } else {
-        let mut conn = db.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
-        crate::modules::academic::portal_ingestion::ingest_dynamic_academic_payload(&mut conn, payload)?;
-    }
+    let mut conn = db.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
+    crate::modules::academic::portal_ingestion::ingest_dynamic_academic_payload(&mut conn, payload)?;
 
     let _ = app.emit("academic://sync-complete", ());
     Ok(())
 }
+
 
 /// Lấy danh sách macro metrics theo chuẩn SSOT (phục vụ Cards và Semester Tabs)
 #[tauri::command]

@@ -127,14 +127,26 @@ pub fn extract_wikilinks(content: &str) -> Vec<String> {
 }
 
 /// Builds a safe FTS5 query string from user input to prevent syntax errors on raw operators.
-/// - Escapes inner quotes
-/// - Surrounds each token with quotes
-/// - Joins tokens with AND
-/// - Adds wildcard '*' to the last token for live prefix search
+///
+/// Safety guarantees:
+/// - Strips any `*` the user typed inside a token (prevents `foo*"*` syntax errors).
+/// - Escapes inner `"` as `""` (FTS5 double-quote escaping).
+/// - Discards tokens that are empty after cleaning (e.g. a lone `*` or `***`).
+/// - Wraps each surviving token in double quotes.
+/// - Joins tokens with ` AND `.
+/// - Appends `*` **outside** the closing quote of the last token for live prefix search.
 pub fn build_safe_fts5_query(user_input: &str) -> Option<String> {
     let tokens: Vec<String> = user_input
         .split_whitespace()
-        .map(|t| format!("\"{}\"", t.replace('"', "\"\"")))
+        .filter_map(|t| {
+            // Strip user-supplied wildcards first, then escape inner quotes
+            let cleaned = t.replace('*', "").replace('"', "\"\"");
+            if cleaned.trim().is_empty() {
+                None
+            } else {
+                Some(format!("\"{}\"", cleaned))
+            }
+        })
         .collect();
 
     if tokens.is_empty() {
@@ -149,7 +161,7 @@ pub fn build_safe_fts5_query(user_input: &str) -> Option<String> {
             query.push_str(" AND ");
         }
         query.push_str(token);
-        // Token cuối cùng được thêm prefix wildcard '*' bên ngoài dấu nháy kép để hỗ trợ live search
+        // Wildcard appended outside the closing quote of the last token for live-search prefix
         if idx == total - 1 {
             query.push('*');
         }
@@ -737,6 +749,60 @@ Some content here."#;
             .expect("prepare fts query");
         let result = stmt.query_map(params![query_str], |r| r.get::<_, i64>(0));
         assert!(result.is_ok(), "Safe FTS5 query must not fail");
+    }
+
+    #[test]
+    fn test_fts5_wildcard_in_token_is_stripped() {
+        // Input: "foo*" -> stripped to "foo" -> safe query: "\"foo\"*"
+        let result = build_safe_fts5_query("foo*");
+        assert_eq!(result, Some("\"foo\"*".to_string()));
+
+        // Input: "foo*" must NOT produce "foo*"* (double wildcard)
+        let q = result.unwrap();
+        assert!(!q.contains("*\""), "wildcard must be outside closing quote");
+    }
+
+    #[test]
+    fn test_fts5_pure_wildcard_returns_none() {
+        // A lone '*' cleans to empty string -> None
+        assert_eq!(build_safe_fts5_query("*"), None);
+        // Multiple wildcards also clean to empty
+        assert_eq!(build_safe_fts5_query("***"), None);
+        // Mixed whitespace and wildcards
+        assert_eq!(build_safe_fts5_query("  *  ***  "), None);
+    }
+
+    #[test]
+    fn test_duplicate_wikilink_in_same_note_no_unique_constraint_error() {
+        let dir = tempdir().expect("tempdir");
+        let vault_path = dir.path();
+
+        // A note that references [[NonExistent]] twice
+        let note_path = vault_path.join("duplicate_links.md");
+        let mut file = File::create(&note_path).expect("create note");
+        write!(
+            file,
+            "# Duplicate Link Note\nSee [[NonExistent]] and again [[NonExistent]]."
+        )
+        .expect("write note");
+
+        let mut conn = Connection::open_in_memory().expect("in-memory db");
+        init_vault_tables(&conn).expect("init tables");
+
+        // Must not panic or return error due to UNIQUE constraint
+        let stats = scan_and_sync_vault(&mut conn, vault_path)
+            .expect("scan with duplicate wikilinks must not fail");
+        assert_eq!(stats.total_notes, 1);
+
+        // INSERT OR IGNORE: exactly 1 row for the (source_id, unresolved_target) pair
+        let link_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM vault_links WHERE source_id = 'duplicate_links.md' AND unresolved_target = 'NonExistent'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("query vault_links");
+        assert_eq!(link_count, 1, "duplicate wikilinks must produce exactly 1 row");
     }
 
     #[test]
