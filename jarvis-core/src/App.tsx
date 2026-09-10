@@ -27,8 +27,10 @@ let toastIdCounter = 0;
 
 import { AcademicDashboard } from "./features/academic";
 import { Code2, GraduationCap } from "lucide-react";
+import { useAppVersion } from "@/shared/hooks/useAppVersion";
 
 export default function App() {
+  const appVersion = useAppVersion();
   const [activeTab, setActiveTab] = useState<"cp" | "academic">("academic");
 
   // ============================================================
@@ -144,7 +146,12 @@ export default function App() {
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div className="flex items-center gap-6 flex-wrap">
             <div>
-              <h1 className="text-xl font-bold text-zinc-100">JARVIS Personal OS</h1>
+              <h1 className="text-xl font-bold text-zinc-100 flex items-center gap-2">
+                JARVIS Personal OS
+                <span className="text-xs font-mono px-2 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700/50">
+                  {appVersion}
+                </span>
+              </h1>
               <p className="text-sm text-zinc-500">Diark Core Dashboard</p>
             </div>
 
