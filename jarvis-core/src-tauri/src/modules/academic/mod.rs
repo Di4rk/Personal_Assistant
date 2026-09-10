@@ -1,3 +1,4 @@
+pub mod drl_ingestion;
 pub mod parser;
 
 #[cfg(test)]

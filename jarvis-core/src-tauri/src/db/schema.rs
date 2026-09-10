@@ -324,6 +324,15 @@ mod tests {
             .expect("academic_macro_metrics table query should succeed");
         assert_eq!(macro_exists, 1);
 
+        let program_summary_exists: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'academic_program_summary'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("academic_program_summary table query should succeed");
+        assert_eq!(program_summary_exists, 1, "academic_program_summary phải được tạo bởi ensure_academic_schema");
+
         drop(connection);
         let _ = std::fs::remove_file(&db_path);
         let _ = std::fs::remove_file(db_path.with_extension("sqlite3-wal"));
