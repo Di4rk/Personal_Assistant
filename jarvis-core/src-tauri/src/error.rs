@@ -44,6 +44,12 @@ pub enum AppError {
 
     #[error("Lỗi phân giải bảng điểm UIT: {0}")]
     TranscriptParse(String),
+
+    #[error("Lỗi I/O: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("Lỗi Vault: {0}")]
+    Vault(String),
 }
 
 pub type AppResult<T> = Result<T, AppError>;

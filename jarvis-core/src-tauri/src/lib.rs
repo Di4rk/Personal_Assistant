@@ -121,6 +121,9 @@ pub fn run() {
             commands::matrix::recompute_today_xp,
             commands::matrix::get_heatmap_matrix,
             commands::matrix::get_life_matrix_range,
+            commands::vault::scan_vault,
+            commands::vault::search_vault,
+            commands::vault::get_vault_stats,
         ])
         .run(tauri::generate_context!());
 

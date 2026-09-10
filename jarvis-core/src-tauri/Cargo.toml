@@ -25,8 +25,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 # --- Database ---
-# "bundled-full" bao gồm FTS5 + R-Tree + mọi extension SQLite chuẩn, là superset
-# của "bundled" - giữ cả 2 feature khai báo tường minh cho rõ ý định dù có phần dư thừa.
+# "bundled-full" bao gồm FTS5 + R-Tree + mọi extension SQLite chuẩn.
 rusqlite = { version = "0.31", features = ["bundled", "bundled-full"] }
 
 # --- Local HTTP server (nhận webhook từ Chrome extension) ---
@@ -47,9 +46,15 @@ anyhow = "1"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4"] }
 scraper = "0.22"
+walkdir = "2.4"
+serde_yaml = "0.9"
+regex = "1"
 
 # --- Chỉ dùng cho mock data seeder (dev-only, xem cfg(debug_assertions)) ---
 rand = "0.8"
+
+[dev-dependencies]
+tempfile = "3"
 
 [profile.release]
 # Tối ưu size + tốc độ cho bản release, quan trọng vì mày cần app nhẹ
