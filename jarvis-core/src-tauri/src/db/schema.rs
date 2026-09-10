@@ -36,6 +36,7 @@ pub fn init_db(db_path: &Path) -> SqlResult<Connection> {
     ensure_moodle_schema(&conn)?;
     ensure_matrix_schema(&conn)?;
     apply_legacy_compatibility_migrations(&conn)?;
+    crate::db::vault_schema::init_vault_tables(&conn)?;
     purge_mock_submissions(&conn)?;
 
     Ok(conn)
@@ -50,6 +51,7 @@ pub fn create_tables(conn: &Connection) -> SqlResult<()> {
     ensure_moodle_schema(conn)?;
     ensure_matrix_schema(conn)?;
     apply_legacy_compatibility_migrations(conn)?;
+    crate::db::vault_schema::init_vault_tables(conn)?;
 
     conn.execute_batch(
         r#"

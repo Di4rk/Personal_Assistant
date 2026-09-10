@@ -26,12 +26,13 @@ interface Toast {
 let toastIdCounter = 0;
 
 import { AcademicDashboard } from "./features/academic";
-import { Code2, GraduationCap } from "lucide-react";
+import { VaultDashboard } from "./features/vault";
+import { Code2, GraduationCap, FolderGit2 } from "lucide-react";
 import { useAppVersion } from "@/shared/hooks/useAppVersion";
 
 export default function App() {
   const appVersion = useAppVersion();
-  const [activeTab, setActiveTab] = useState<"cp" | "academic">("academic");
+  const [activeTab, setActiveTab] = useState<"cp" | "academic" | "vault">("academic");
 
   // ============================================================
   // SINGLE SOURCE OF TRUTH: mọi state hiển thị dồn về đây, các
@@ -179,6 +180,17 @@ export default function App() {
                 <Code2 className="w-3.5 h-3.5" />
                 <span>Codeforces &amp; ICPC</span>
               </button>
+              <button
+                onClick={() => setActiveTab("vault")}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium transition-colors ${
+                  activeTab === "vault"
+                    ? "bg-violet-600 text-white shadow-sm"
+                    : "text-zinc-400 hover:text-zinc-200"
+                }`}
+              >
+                <FolderGit2 className="w-3.5 h-3.5" />
+                <span>Native Vault</span>
+              </button>
             </nav>
           </div>
 
@@ -192,6 +204,8 @@ export default function App() {
 
       {activeTab === "academic" ? (
         <AcademicDashboard />
+      ) : activeTab === "vault" ? (
+        <VaultDashboard />
       ) : (
         <>
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
