@@ -40,6 +40,36 @@ pub fn init_db(db_path: &Path) -> SqlResult<Connection> {
     Ok(conn)
 }
 
+/// Khởi tạo schema hoàn chỉnh phục vụ integration tests và in-memory SQLite database.
+pub fn create_tables(conn: &Connection) -> SqlResult<()> {
+    run_migrations(conn)?;
+    ensure_worker_schema(conn)?;
+    ensure_post_mortem_schema(conn)?;
+    crate::db::academic::init_academic_module(conn)?;
+    ensure_moodle_schema(conn)?;
+    ensure_matrix_schema(conn)?;
+
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS cf_submissions (
+            id INTEGER PRIMARY KEY,
+            contest_id TEXT,
+            problem_index TEXT,
+            submission_time INTEGER,
+            verdict TEXT
+        );
+
+        CREATE TRIGGER IF NOT EXISTS trg_cf_submissions_sync AFTER INSERT ON cf_submissions
+        BEGIN
+            INSERT OR REPLACE INTO submissions (id, contest_id, problem_index, problem_id, problem_name, verdict, submission_time, submitted_at)
+            VALUES (new.id, new.contest_id, new.problem_index, COALESCE(new.contest_id, '') || new.problem_index, 'Problem ' || new.problem_index, new.verdict, new.submission_time, datetime(new.submission_time, 'unixepoch'));
+        END;
+        "#,
+    )?;
+
+    Ok(())
+}
+
 /// Migration cho hệ thống Post-Mortem + FTS5 full-text search.
 ///
 /// QUAN TRỌNG: dùng pattern "external content" của FTS5 (content='post_mortems',

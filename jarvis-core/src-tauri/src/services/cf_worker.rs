@@ -233,10 +233,26 @@ pub async fn perform_sync(
 
     let raw_submissions = body.result.unwrap_or_default();
 
-    let sync_result = {
+    let (sync_result, affected_dates) = {
         let mut conn = db.lock().map_err(|_| AppError::PoisonedLock)?;
-        ingest_cf_submissions_with_result(&mut conn, &raw_submissions)?
+        let res = ingest_cf_submissions_with_result(&mut conn, &raw_submissions)?;
+        let dates = res.affected_dates.clone();
+        (res, dates)
+        // Guard conn tự động DROP tại đây. Không giữ lock sang bước async/spawn!
     };
+
+    if !affected_dates.is_empty() {
+        let db_arc = db.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            for date_str in affected_dates {
+                if let Ok(conn) = db_arc.lock() {
+                    if let Err(e) = crate::db::matrix::recompute_daily_matrix_for_date(&conn, &date_str) {
+                        eprintln!("[Matrix Sync Error] Failed date {date_str}: {e}");
+                    }
+                }
+            }
+        });
+    }
 
     if sync_result.new_submissions_count > 0 {
         // Emit THẲNG SyncResult làm payload - không tạo struct payload riêng,

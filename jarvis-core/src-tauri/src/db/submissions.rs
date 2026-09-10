@@ -44,6 +44,8 @@ pub struct SyncResult {
     /// Số problem lần đầu AC trong batch này - hữu ích cho toast "🎉 First AC!"
     /// ở frontend, tách riêng khỏi total_daily_xp để UI dễ hiển thị nổi bật.
     pub first_ac_count: usize,
+    #[serde(default)]
+    pub affected_dates: Vec<String>,
 }
 
 /// Ingest raw Codeforces submissions in one SQLite transaction. Pending
@@ -190,10 +192,12 @@ pub fn batch_insert_new_submissions(
         )?;
     }
 
+    let affected_dates: Vec<String> = daily_deltas.keys().cloned().collect();
+
     tx.commit()?;
 
     // Cập nhật ngay lập tức Master Life Matrix cho các ngày có submission mới
-    for date_key in daily_deltas.keys() {
+    for date_key in &affected_dates {
         let _ = crate::db::matrix::recompute_daily_matrix_for_date(conn, date_key);
     }
 
@@ -206,6 +210,7 @@ pub fn batch_insert_new_submissions(
         new_submissions_count,
         total_daily_xp: today_xp,
         first_ac_count,
+        affected_dates,
     })
 }
 

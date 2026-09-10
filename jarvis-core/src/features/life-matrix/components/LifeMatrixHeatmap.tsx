@@ -1,17 +1,6 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { LifeMatrixCellData, StateTier, LifeMatrixEntryDto } from '../types';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { LifeMatrixCellData, HoveredCellState, StateTier, LifeMatrixEntryDto } from '../types';
 import { HeatmapCell } from './HeatmapCell';
-
-interface HoverState {
-  date: string;
-  xp: number;
-  tier: StateTier;
-  ac: number;
-  deadlines: number;
-  x: number;
-  y: number;
-  visible: boolean;
-}
 
 // Helper: Lấy chuỗi YYYY-MM-DD theo UTC+7
 export function getTodayICT(): string {
@@ -48,16 +37,19 @@ export interface LifeMatrixHeatmapProps {
 
 export const LifeMatrixHeatmap: React.FC<LifeMatrixHeatmapProps> = ({ entries }) => {
   const [todayKey, setTodayKey] = useState<string>(() => getTodayICT());
-  const [hoverState, setHoverState] = useState<HoverState>({
-    date: '',
-    xp: 0,
-    tier: 0,
-    ac: 0,
-    deadlines: 0,
-    x: 0,
-    y: 0,
-    visible: false,
-  });
+  const [hovered, setHovered] = useState<HoveredCellState | null>(null);
+
+  // Refs để điều phối rAF batching
+  const latestPos = useRef<{ x: number; y: number; data: LifeMatrixCellData } | null>(null);
+  const rafId = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (rafId.current !== null) {
+        cancelAnimationFrame(rafId.current);
+      }
+    };
+  }, []);
 
   // Tránh stale date sau nửa đêm
   useEffect(() => {
@@ -106,28 +98,47 @@ export const LifeMatrixHeatmap: React.FC<LifeMatrixHeatmapProps> = ({ entries })
     return result;
   }, [todayKey, dataMap]);
 
-  // Single delegated listener với seam no-op chống jitter
+  // Event Delegation với rAF batching
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    const target = (e.target as HTMLElement).closest('[data-matrix-cell]');
-    if (!target) return; // Seam/gap no-op chống jitter
+    const target = (e.target as HTMLElement).closest('[data-matrix-cell="true"]');
+    if (!target) return; // Bỏ qua seam/gap, không clear hover
 
     const ds = (target as HTMLElement).dataset;
     const rect = e.currentTarget.getBoundingClientRect();
 
-    setHoverState({
-      date: ds.date || '',
-      xp: Number(ds.xp) || 0,
-      tier: parseTier(ds.tier),
-      ac: Number(ds.ac) || 0,
-      deadlines: Number(ds.deadlines) || 0,
+    latestPos.current = {
       x: e.clientX - rect.left,
       y: e.clientY - rect.top,
-      visible: true,
-    });
+      data: {
+        date: ds.date || '',
+        acCount: Number(ds.ac) || 0,
+        deadlinesCleared: Number(ds.deadlines) || 0,
+        totalXp: Number(ds.xp) || 0,
+        stateTier: parseTier(ds.tier),
+      },
+    };
+
+    if (rafId.current === null) {
+      rafId.current = requestAnimationFrame(() => {
+        if (latestPos.current) {
+          setHovered({
+            data: latestPos.current.data,
+            x: latestPos.current.x,
+            y: latestPos.current.y,
+          });
+        }
+        rafId.current = null;
+      });
+    }
   }, []);
 
   const handleMouseLeave = useCallback(() => {
-    setHoverState((prev) => (prev.visible ? { ...prev, visible: false } : prev));
+    if (rafId.current !== null) {
+      cancelAnimationFrame(rafId.current);
+      rafId.current = null;
+    }
+    latestPos.current = null;
+    setHovered(null);
   }, []);
 
   return (
@@ -151,22 +162,22 @@ export const LifeMatrixHeatmap: React.FC<LifeMatrixHeatmapProps> = ({ entries })
 
       {/* Persistent Tooltip Node: Luôn tồn tại trong DOM, chỉ toggle visibility/opacity & GPU translate3d */}
       <div
-        aria-hidden={!hoverState.visible}
+        aria-hidden={!hovered}
         className={`pointer-events-none absolute z-50 bg-zinc-900 border border-zinc-700 text-xs px-2.5 py-1.5 rounded shadow-lg text-zinc-200 transition-opacity duration-75 ${
-          hoverState.visible ? 'opacity-100' : 'opacity-0'
+          hovered ? 'opacity-100' : 'opacity-0'
         }`}
         style={{
-          transform: `translate3d(${hoverState.x + 12}px, ${hoverState.y + 12}px, 0)`,
+          transform: `translate3d(${hovered ? hovered.x + 12 : 0}px, ${hovered ? hovered.y + 12 : 0}px, 0)`,
           top: 0,
           left: 0,
           willChange: 'transform',
-          visibility: hoverState.visible ? 'visible' : 'hidden',
+          visibility: hovered ? 'visible' : 'hidden',
         }}
       >
-        <div className="font-semibold text-zinc-100">{hoverState.date}</div>
-        <div className="text-emerald-400">Total XP: +{hoverState.xp}</div>
+        <div className="font-semibold text-zinc-100">{hovered?.data.date}</div>
+        <div className="text-emerald-400">Total XP: +{hovered?.data.totalXp}</div>
         <div className="text-zinc-400">
-          AC: {hoverState.ac} | Deadlines: {hoverState.deadlines}
+          AC: {hovered?.data.acCount} | Deadlines: {hovered?.data.deadlinesCleared}
         </div>
       </div>
     </div>

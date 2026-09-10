@@ -12,8 +12,8 @@ use rusqlite::params;
 use tauri::State;
 
 use crate::db::SharedDb;
-pub use crate::modules::gamification::matrix::DailyMatrixRecord;
-use crate::modules::gamification::matrix::compute_and_upsert_daily_matrix;
+pub use crate::modules::gamification::xp_engine::DailyMatrixRecord;
+use crate::modules::gamification::xp_engine::compute_and_upsert_daily_matrix;
 
 /// Recompute today's XP and metrics based on latest submissions and deadlines,
 /// and UPSERT the snapshot into `life_matrix_daily`.
