@@ -120,6 +120,7 @@ pub fn run() {
             commands::workspace::check_and_launch_vscode,
             commands::matrix::recompute_today_xp,
             commands::matrix::get_heatmap_matrix,
+            commands::matrix::get_life_matrix_range,
         ])
         .run(tauri::generate_context!());
 

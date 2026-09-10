@@ -1,8 +1,11 @@
 pub mod academic;
+pub mod matrix;
 pub mod post_mortem;
 pub mod schema;
 pub mod settings;
 pub mod submissions;
+
+pub use matrix::{query_life_matrix_range, recompute_daily_matrix_for_date, LifeMatrixEntryDto};
 
 pub use academic::{
     ensure_academic_schema, init_academic_module, get_all_curriculum_courses, get_all_macro_metrics,

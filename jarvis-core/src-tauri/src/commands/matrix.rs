@@ -98,3 +98,15 @@ pub fn get_heatmap_matrix(
 
     Ok(result)
 }
+
+/// Retrieve continuous daily matrix records for an arbitrary date range via recursive CTE.
+#[tauri::command]
+pub fn get_life_matrix_range(
+    db: State<'_, SharedDb>,
+    start_date: String,
+    end_date: String,
+) -> Result<Vec<crate::db::matrix::LifeMatrixEntryDto>, String> {
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    crate::db::matrix::query_life_matrix_range(&conn, &start_date, &end_date)
+        .map_err(|e| format!("Database query error: {e}"))
+}

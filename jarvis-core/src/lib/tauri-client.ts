@@ -10,6 +10,7 @@ import type {
   AcademicMacroMetricSSOT,
   FullPortalIngestionRequest,
 } from "../features/academic/types";
+import type { LifeMatrixEntryDto } from "../features/life-matrix/types";
 
 /**
  * Wrapper mỏng quanh invoke() để:
@@ -263,6 +264,20 @@ export async function ingestDynamicAcademicData(
     dbPath: dbPath || null,
   });
 }
+
+/**
+ * Lấy dải dữ liệu Life Matrix liên tục 364 ngày qua SQLite CTE.
+ */
+export async function getLifeMatrixRange(
+  startDate: string,
+  endDate: string
+): Promise<LifeMatrixEntryDto[]> {
+  return invoke<LifeMatrixEntryDto[]>("get_life_matrix_range", {
+    startDate,
+    endDate,
+  });
+}
+
 
 
 

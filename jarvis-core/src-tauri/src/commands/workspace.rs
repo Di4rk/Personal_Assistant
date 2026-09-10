@@ -178,6 +178,16 @@ pub fn mark_deadline_submitted(
         params![now, deadline_id],
     )
     .map_err(|e| format!("Lỗi update: {e}"))?;
+
+    // Đồng bộ ngay lập tức Master Life Matrix cho ngày hoàn thành deadline theo UTC+7
+    let offset_ict = chrono::FixedOffset::east_opt(7 * 3600).ok_or("Invalid UTC+7 offset")?;
+    let today_ict = chrono::DateTime::from_timestamp(now, 0)
+        .map(|dt| dt.with_timezone(&offset_ict).format("%Y-%m-%d").to_string())
+        .unwrap_or_else(|| chrono::Utc::now().with_timezone(&offset_ict).format("%Y-%m-%d").to_string());
+
+    crate::db::matrix::recompute_daily_matrix_for_date(&conn, &today_ict)
+        .map_err(|e| format!("Lỗi cập nhật life matrix: {e}"))?;
+
     Ok(())
 }
 

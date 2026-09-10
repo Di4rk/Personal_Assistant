@@ -192,6 +192,11 @@ pub fn batch_insert_new_submissions(
 
     tx.commit()?;
 
+    // Cập nhật ngay lập tức Master Life Matrix cho các ngày có submission mới
+    for date_key in daily_deltas.keys() {
+        let _ = crate::db::matrix::recompute_daily_matrix_for_date(conn, date_key);
+    }
+
     // total_daily_xp trong SyncResult chỉ tính riêng XP của HÔM NAY (không phải
     // tổng cả batch, có thể gồm cả submission của ngày trước nếu worker vừa
     // restart sau thời gian dài offline) - đúng ngữ nghĩa tên field theo spec.

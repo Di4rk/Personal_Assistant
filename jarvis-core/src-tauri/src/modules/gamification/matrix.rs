@@ -82,10 +82,10 @@ pub fn compute_daily_matrix(conn: &Connection, date: &str) -> SqlResult<DailyMat
     )?;
 
     // 3. XP calculation:
-    // - Each First-AC awards 20 XP
+    // - Each First-AC awards 15 XP
     // - On-time deadline awards 20 XP
     // - Late deadline awards 5 XP
-    let ac_xp = ac_count * 20;
+    let ac_xp = ac_count * 15;
     let deadline_xp = (on_time_count * 20) + (late_count * 5);
     let total_xp = ac_xp + deadline_xp;
 
@@ -247,8 +247,8 @@ mod tests {
         let record = compute_daily_matrix(&conn, target_date).unwrap();
         // Only 1001A was first solved on 2026-09-10!
         assert_eq!(record.ac_count, 1);
-        assert_eq!(record.total_xp, 20); // 1 AC * 20 XP
-        assert_eq!(record.state_tier, 1); // 20 XP => Tier 1 (1..=30)
+        assert_eq!(record.total_xp, 15); // 1 AC * 15 XP
+        assert_eq!(record.state_tier, 1); // 15 XP => Tier 1 (1..=30)
     }
 
     #[test]
