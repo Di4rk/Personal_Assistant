@@ -2,6 +2,7 @@ pub mod drl_ingestion;
 pub mod moodle_parser;
 pub mod parser;
 pub mod portal_ingestion;
+pub mod sync_server;
 
 #[cfg(test)]
 pub mod tests;
