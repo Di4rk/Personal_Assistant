@@ -736,6 +736,32 @@ pub fn get_all_curriculum_courses(
     Ok(records)
 }
 
+/// Cập nhật cột `drl` trong `academic_macro_metrics` từ kết quả parse trang ĐRL portal.
+///
+/// Chiến lược: UPDATE thuần, không INSERT — rows được tạo bởi `persist_unified_academic_sync`
+/// khi sync bảng điểm. Nếu chưa có row (bảng điểm chưa sync), DRL bị bỏ qua an toàn.
+/// Trả về số rows thực sự được cập nhật.
+pub fn update_drl_from_portal(
+    conn: &mut Connection,
+    drl_data: &crate::modules::academic::parser::PortalDrlOverview,
+) -> SqlResult<usize> {
+    let tx = conn.transaction()?;
+    let now = chrono::Utc::now().timestamp();
+    let mut updated_count = 0usize;
+
+    for sem in &drl_data.semesters {
+        let rows = tx.execute(
+            "UPDATE academic_macro_metrics
+             SET drl = ?1, updated_at = ?2
+             WHERE semester_id = ?3",
+            params![sem.drl_score, now, sem.semester_id],
+        )?;
+        updated_count += rows;
+    }
+
+    tx.commit()?;
+    Ok(updated_count)
+}
 
 // ============================================================
 //  SECTION 5: Unit Tests
@@ -1056,5 +1082,68 @@ mod tests {
         assert_eq!(s4.unwrap(), 3.0); // B
         assert_eq!(grade.unwrap(), "B");
         assert!(passed);
+    }
+
+    #[test]
+    fn update_drl_from_portal_updates_existing_row() {
+        use crate::modules::academic::parser::{PortalDrlOverview, SemesterDrlRecord};
+
+        let mut conn = setup_test_db();
+        let now = chrono::Utc::now().timestamp();
+
+        // Tạo row macro_metrics (thường được tạo bởi persist_unified_academic_sync)
+        conn.execute(
+            "INSERT INTO academic_macro_metrics
+             (semester_id, term_gpa, cumulative_gpa, classification, term_credits, cumulative_credits, drl, updated_at)
+             VALUES ('2025_2026_HK2', 3.8, 3.9, 'Xuất sắc', 18, 36, NULL, ?1)",
+            params![now],
+        ).expect("insert macro metric phải thành công");
+
+        let drl_data = PortalDrlOverview {
+            cumulative_drl: 97.5,
+            cumulative_classification: "Xuất sắc".to_string(),
+            semesters: vec![SemesterDrlRecord {
+                semester_id: "2025_2026_HK2".to_string(),
+                class_name: "KHMT2025.1".to_string(),
+                drl_score: 100,
+                classification: "Xuất sắc".to_string(),
+            }],
+        };
+
+        let count = update_drl_from_portal(&mut conn, &drl_data)
+            .expect("update DRL phải thành công");
+        assert_eq!(count, 1, "Phải update đúng 1 row");
+
+        let drl: Option<i64> = conn
+            .query_row(
+                "SELECT drl FROM academic_macro_metrics WHERE semester_id = '2025_2026_HK2'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("query phải chạy được");
+        assert_eq!(drl, Some(100), "Cột drl phải được cập nhật thành 100");
+    }
+
+    #[test]
+    fn update_drl_from_portal_noop_when_no_matching_row() {
+        use crate::modules::academic::parser::{PortalDrlOverview, SemesterDrlRecord};
+
+        let mut conn = setup_test_db();
+
+        // Không có row nào trong academic_macro_metrics
+        let drl_data = PortalDrlOverview {
+            cumulative_drl: 95.0,
+            cumulative_classification: "Xuất sắc".to_string(),
+            semesters: vec![SemesterDrlRecord {
+                semester_id: "9999_9999_HK9".to_string(),
+                class_name: "TEST".to_string(),
+                drl_score: 99,
+                classification: "Xuất sắc".to_string(),
+            }],
+        };
+
+        let count = update_drl_from_portal(&mut conn, &drl_data)
+            .expect("update DRL phải thành công dù không có row nào khớp");
+        assert_eq!(count, 0, "Không có row nào khớp → count phải là 0");
     }
 }

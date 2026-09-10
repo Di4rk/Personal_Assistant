@@ -709,3 +709,253 @@ pub fn parse_unified_portal_payload(raw_payload: &str) -> Result<UnifiedAcademic
         curriculum_courses: Vec::new(),
     })
 }
+// ============================================================
+//  DRL PAGE PARSER (portal.uit.edu.vn/sinh-vien/diem-ren-luyen)
+// ============================================================
+
+/// Bản ghi ĐRL của 1 học kỳ cụ thể, trích từ bảng lịch sử trang DRL.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SemesterDrlRecord {
+    pub semester_id: String,
+    pub class_name: String,
+    pub drl_score: i64,
+    pub classification: String,
+}
+
+/// Kết quả parse toàn trang ĐRL UIT.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PortalDrlOverview {
+    pub cumulative_drl: f64,
+    pub cumulative_classification: String,
+    pub semesters: Vec<SemesterDrlRecord>,
+}
+
+/// Chuyển đổi text raw của cột Học kỳ trong bảng DRL sang `semester_id` chuẩn.
+///
+/// Ví dụ: "Học kỳ 2 Năm học 2025-2026" → `"2025_2026_HK2"`
+/// Cũng xử lý dạng đơn năm: "Học kỳ 1 2024-2025" → `"2024_2025_HK1"`
+fn parse_drl_semester_id(raw: &str) -> Option<String> {
+    // Tìm số học kỳ
+    let term = if raw.contains("Học kỳ 1") || raw.contains("HK1") {
+        1u8
+    } else if raw.contains("Học kỳ 2") || raw.contains("HK2") {
+        2
+    } else if raw.contains("Học kỳ 3") || raw.contains("HK3") || raw.to_lowercase().contains("hè") {
+        3
+    } else {
+        return None;
+    };
+
+    // Tìm cặp năm học dạng YYYY-YYYY hoặc 2 token 4 chữ số
+    let years: Vec<i64> = raw
+        .split(|c: char| !c.is_ascii_digit())
+        .filter(|t| t.len() == 4)
+        .filter_map(|t| t.parse::<i64>().ok())
+        .filter(|&y| (2000..=2100).contains(&y))
+        .collect();
+
+    match years.len() {
+        0 => None,
+        1 => Some(format!("{}_{}_HK{}", years[0], years[0] + 1, term)),
+        _ => Some(format!("{}_{}_HK{}", years[0], years[1], term)),
+    }
+}
+
+/// Parse fragment HTML của trang `portal.uit.edu.vn/sinh-vien/diem-ren-luyen`.
+///
+/// Trả về `PortalDrlOverview` gồm điểm TB toàn khóa và lịch sử từng học kỳ.
+/// Nếu không tìm thấy dữ liệu nào, trả `Err` với thông điệp mô tả.
+pub fn parse_portal_drl(html_content: &str) -> Result<PortalDrlOverview, String> {
+    let document = Html::parse_fragment(html_content);
+
+    // --- 1. Điểm TB toàn khóa ---
+    // Thử nhiều selector để chống fragile nếu portal thay class
+    let cumulative_drl = [
+        "p.text-4xl.font-bold",
+        "span.text-4xl",
+        "div.text-4xl",
+    ]
+    .iter()
+    .find_map(|sel_str| {
+        let sel = Selector::parse(sel_str).ok()?;
+        document
+            .select(&sel)
+            .next()
+            .and_then(|el| el.text().collect::<String>().trim().parse::<f64>().ok())
+    })
+    .unwrap_or(0.0);
+
+    // --- 2. Xếp loại toàn khóa ---
+    let cumulative_classification = [
+        "span.bg-primary.text-primary-foreground",
+        "span.badge",
+        r"div.rounded-xl.border-primary\/20 span",
+    ]
+    .iter()
+    .find_map(|sel_str| {
+        let sel = Selector::parse(sel_str).ok()?;
+        let text = document
+            .select(&sel)
+            .next()
+            .map(|el| el.text().collect::<String>().trim().to_string())?;
+        if text.is_empty() {
+            None
+        } else {
+            Some(text)
+        }
+    })
+    .unwrap_or_else(|| "Chưa xếp loại".to_string());
+
+    // --- 3. Bảng lịch sử từng kỳ ---
+    let row_sel = Selector::parse("tbody tr")
+        .map_err(|e| format!("Selector 'tbody tr' lỗi: {e}"))?;
+    let cell_sel = Selector::parse("td")
+        .map_err(|e| format!("Selector 'td' lỗi: {e}"))?;
+
+    let mut semesters = Vec::new();
+
+    for row in document.select(&row_sel) {
+        let cells: Vec<String> = row
+            .select(&cell_sel)
+            .map(|td| td.text().collect::<Vec<_>>().join(" ").trim().to_string())
+            .collect();
+
+        // Bảng DRL cần tối thiểu 4 cột:
+        // STT | Học kỳ+Năm học | Lớp | Điểm | Xếp loại
+        // Một số portal render 5 cột (thêm cột STT ở đầu)
+        if cells.len() < 4 {
+            continue;
+        }
+
+        // Tìm cột chứa thông tin học kỳ (bỏ qua cột STT nếu là số)
+        let term_col = if cells[0].trim().parse::<i64>().is_ok() { 1 } else { 0 };
+
+        let raw_term_info = &cells[term_col];
+        let semester_id = match parse_drl_semester_id(raw_term_info) {
+            Some(id) => id,
+            None => continue, // header hoặc dòng không nhận dạng được
+        };
+
+        // Các cột còn lại tương đối với vị trí term_col
+        let class_col  = term_col + 1;
+        let score_col  = term_col + 2;
+        let classif_col = term_col + 3;
+
+        if classif_col >= cells.len() {
+            continue;
+        }
+
+        let class_name = cells[class_col].trim().to_string();
+        let drl_score: i64 = cells[score_col].trim().parse().unwrap_or(0);
+        let classification = cells[classif_col].trim().to_string();
+
+        semesters.push(SemesterDrlRecord {
+            semester_id,
+            class_name,
+            drl_score,
+            classification,
+        });
+    }
+
+    Ok(PortalDrlOverview {
+        cumulative_drl,
+        cumulative_classification,
+        semesters,
+    })
+}
+
+// ============================================================
+//  DRL PARSER UNIT TESTS
+// ============================================================
+
+#[cfg(test)]
+mod drl_tests {
+    use super::*;
+
+    fn drl_html_fixture(rows: &str) -> String {
+        format!(
+            r#"<html><body>
+            <p class="text-4xl font-bold">97.5</p>
+            <span class="bg-primary text-primary-foreground">Xuất sắc</span>
+            <table class="w-full">
+              <tbody>{rows}</tbody>
+            </table>
+            </body></html>"#
+        )
+    }
+
+    #[test]
+    fn parse_drl_single_semester_no_stt_column() {
+        let html = drl_html_fixture(
+            r#"<tr>
+                 <td>Học kỳ 2 Năm học 2025-2026</td>
+                 <td>KHMT2025.1</td>
+                 <td>100</td>
+                 <td>Xuất sắc</td>
+               </tr>""
+            "#,
+        );
+        let result = parse_portal_drl(&html).expect("parse phải thành công");
+        assert_eq!(result.cumulative_drl, 97.5);
+        assert_eq!(result.cumulative_classification, "Xuất sắc");
+        assert_eq!(result.semesters.len(), 1);
+        let sem = &result.semesters[0];
+        assert_eq!(sem.semester_id, "2025_2026_HK2");
+        assert_eq!(sem.class_name, "KHMT2025.1");
+        assert_eq!(sem.drl_score, 100);
+        assert_eq!(sem.classification, "Xuất sắc");
+    }
+
+    #[test]
+    fn parse_drl_with_stt_column() {
+        let html = drl_html_fixture(
+            r#"<tr>
+                 <td>1</td>
+                 <td>Học kỳ 1 Năm học 2024-2025</td>
+                 <td>KHMT2024.1</td>
+                 <td>95</td>
+                 <td>Xuất sắc</td>
+               </tr>""
+            "#,
+        );
+        let result = parse_portal_drl(&html).expect("parse phải thành công");
+        assert_eq!(result.semesters.len(), 1);
+        let sem = &result.semesters[0];
+        assert_eq!(sem.semester_id, "2024_2025_HK1");
+        assert_eq!(sem.drl_score, 95);
+    }
+
+    #[test]
+    fn parse_drl_skips_header_rows() {
+        let html = drl_html_fixture(
+            r#"<tr><td>STT</td><td>Học kỳ</td><td>Lớp</td><td>Điểm</td><td>Xếp loại</td></tr>
+               <tr>
+                 <td>1</td>
+                 <td>Học kỳ 2 Năm học 2025-2026</td>
+                 <td>KHMT2025.1</td>
+                 <td>100</td>
+                 <td>Xuất sắc</td>
+               </tr>""
+            "#,
+        );
+        let result = parse_portal_drl(&html).expect("parse phải thành công");
+        // Dòng header bị skip vì "Học kỳ" không chứa year pattern
+        assert_eq!(result.semesters.len(), 1);
+    }
+
+    #[test]
+    fn parse_drl_semester_id_hk1() {
+        assert_eq!(
+            parse_drl_semester_id("Học kỳ 1 Năm học 2024-2025"),
+            Some("2024_2025_HK1".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_drl_semester_id_hk3_he() {
+        assert_eq!(
+            parse_drl_semester_id("Học kỳ hè 2024-2025"),
+            Some("2024_2025_HK3".to_string())
+        );
+    }
+}

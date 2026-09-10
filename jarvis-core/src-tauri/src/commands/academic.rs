@@ -258,7 +258,100 @@ pub async fn sync_uit_portal(
             .map_err(|e| format!("Database persist error: {e}"))?;
     }
 
-    // 5. Cleanup & Emit Complete
+    // 5. Bước bổ sung: Cào trang ĐRL và cập nhật `drl` vào macro_metrics
+    //    Bước này NON-FATAL: nếu thất bại chỉ emit warning, không abort sync.
+    let _ = app.emit("academic://sync-state", UitSyncState::Extracting);
+
+    const PORTAL_DRL_URL: &str = "https://portal.uit.edu.vn/sinh-vien/diem-ren-luyen";
+
+    'drl_phase: {
+        let Ok(drl_url) = tauri::Url::parse(PORTAL_DRL_URL) else {
+            let _ = app.emit("academic://sync-warning", "URL trang ĐRL không hợp lệ");
+            break 'drl_phase;
+        };
+
+        // Navigate webview hiện tại sang trang DRL (navigate nhận url::Url)
+        if let Err(e) = sso_window.navigate(drl_url) {
+            let _ = app.emit("academic://sync-warning", format!("Navigate DRL thất bại: {e}"));
+            break 'drl_phase;
+        }
+
+        // Reset DRL store trước khi bắt đầu poll
+        let drl_store = crate::server::get_extracted_drl_html_store();
+        if let Ok(mut guard) = drl_store.lock() {
+            *guard = None;
+        }
+
+        // JS script: chờ trang hydrate xong rồi POST outerHTML qua local bridge.
+        // Dùng fetch (fire-and-forget) vì eval() không trả giá trị trong Tauri v2.
+        let drl_extraction_script = r#"
+            (async function() {
+                try {
+                    const sleep = ms => new Promise(r => setTimeout(r, ms));
+                    const main = document.querySelector('main#main-content, main, div[role="main"]');
+                    if (main && main.innerText && main.innerText.includes('r\u1ecdn luy\u1ec7n')) {
+                        fetch('http://127.0.0.1:3030/api/v1/academic/drl', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ html: main.outerHTML })
+                        }).catch(() => {});
+                    }
+                } catch(e) {}
+            })();
+        "#;
+
+        // Poll store tối đa 20s (1.5s/lần)
+        let mut extracted_drl_html: Option<String> = None;
+        let drl_start = std::time::Instant::now();
+
+        while drl_start.elapsed().as_secs() < 20 {
+            tokio::time::sleep(tokio::time::Duration::from_millis(1500)).await;
+
+            // Nếu user tắt cửa sổ → abort
+            if app.get_webview_window(window_label).is_none() {
+                break;
+            }
+
+            // Kiểm tra store
+            if let Ok(mut guard) = drl_store.lock() {
+                if let Some(html) = guard.take() {
+                    extracted_drl_html = Some(html);
+                    break;
+                }
+            }
+
+            // Fire JS eval (không lấy return value)
+            let _ = sso_window.eval(drl_extraction_script);
+        }
+
+        let Some(html) = extracted_drl_html else {
+            let _ = app.emit("academic://sync-warning", "Hết thời gian chờ trang ĐRL (20s) — bỏ qua");
+            break 'drl_phase;
+        };
+
+        match crate::modules::academic::parser::parse_portal_drl(&html) {
+            Ok(drl_data) => {
+                let mut conn = db.lock().map_err(|_| "Database lock poisoned".to_string())?;
+                match crate::db::academic::update_drl_from_portal(&mut conn, &drl_data) {
+                    Ok(n) => {
+                        let _ = app.emit("academic://sync-state", UitSyncState::Persisting);
+                        let _ = app.emit(
+                            "academic://drl-updated",
+                            format!("Đã cập nhật DRL cho {n} học kỳ (điểm TB toàn khóa: {})", drl_data.cumulative_drl),
+                        );
+                    }
+                    Err(e) => {
+                        let _ = app.emit("academic://sync-warning", format!("Ghi DRL thất bại: {e}"));
+                    }
+                }
+            }
+            Err(e) => {
+                let _ = app.emit("academic://sync-warning", format!("Parse DRL thất bại: {e}"));
+            }
+        }
+    }
+
+    // 6. Cleanup & Emit Complete
     if let Some(win) = app.get_webview_window(window_label) {
         let _ = win.close();
     }

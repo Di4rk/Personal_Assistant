@@ -22,8 +22,22 @@ pub fn get_extracted_html_store() -> Arc<Mutex<Option<String>>> {
         .clone()
 }
 
+// Store tương đương cho HTML trang ĐRL — dùng cùng pattern với transcript bridge.
+static EXTRACTED_DRL_HTML: OnceLock<Arc<Mutex<Option<String>>>> = OnceLock::new();
+
+pub fn get_extracted_drl_html_store() -> Arc<Mutex<Option<String>>> {
+    EXTRACTED_DRL_HTML
+        .get_or_init(|| Arc::new(Mutex::new(None)))
+        .clone()
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TranscriptPayload {
+    pub html: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct DrlPayload {
     pub html: String,
 }
 
@@ -37,6 +51,20 @@ async fn handle_academic_transcript(
     (
         StatusCode::OK,
         Json(serde_json::json!({ "status": "ok", "message": "transcript received" })),
+    )
+        .into_response()
+}
+
+async fn handle_academic_drl(
+    Json(payload): Json<DrlPayload>,
+) -> impl IntoResponse {
+    let store = get_extracted_drl_html_store();
+    if let Ok(mut guard) = store.lock() {
+        *guard = Some(payload.html);
+    }
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({ "status": "ok", "message": "drl received" })),
     )
         .into_response()
 }
@@ -134,6 +162,7 @@ fn build_router(db: SharedDb) -> Router {
     Router::new()
         .route("/api/v1/events/submission", post(handle_submission))
         .route("/api/v1/academic/transcript", post(handle_academic_transcript))
+        .route("/api/v1/academic/drl", post(handle_academic_drl))
         // permissive() vì server chỉ bind 127.0.0.1 (không expose ra mạng ngoài),
         // và caller duy nhất là Chrome extension với origin dạng chrome-extension://<id>
         // mà browser không cho set cụ thể trong CORS allow-list dễ dàng.
