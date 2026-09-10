@@ -1,4 +1,5 @@
 pub mod drl_ingestion;
+pub mod moodle_parser;
 pub mod parser;
 
 #[cfg(test)]

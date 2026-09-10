@@ -108,6 +108,12 @@ pub fn run() {
             commands::academic::submit_portal_transcript,
             commands::academic::get_academic_macro_metrics,
             commands::academic::get_academic_curriculum,
+            commands::workspace::ingest_moodle_course_html,
+            commands::workspace::get_upcoming_deadlines,
+            commands::workspace::mark_deadline_submitted,
+            commands::workspace::upsert_workspace_config,
+            commands::workspace::get_workspace_config,
+            commands::workspace::check_and_launch_vscode,
         ])
         .run(tauri::generate_context!());
 

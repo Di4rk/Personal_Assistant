@@ -33,6 +33,7 @@ pub fn init_db(db_path: &Path) -> SqlResult<Connection> {
     ensure_worker_schema(&conn)?;
     ensure_post_mortem_schema(&conn)?;
     crate::db::academic::ensure_academic_schema(&conn)?;
+    ensure_moodle_schema(&conn)?;
     purge_mock_submissions(&conn)?;
 
     Ok(conn)
@@ -173,6 +174,38 @@ fn ensure_worker_schema(conn: &Connection) -> SqlResult<()> {
         "#,
     )?;
 
+    Ok(())
+}
+
+/// Tạo schema cho Moodle deadline tracker và workspace config (idempotent).
+pub fn ensure_moodle_schema(conn: &Connection) -> SqlResult<()> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS course_workspace_config (
+            course_code    TEXT PRIMARY KEY,
+            workspace_path TEXT NOT NULL,
+            target_score   REAL DEFAULT 8.5,
+            updated_at     INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS course_deadlines (
+            id             TEXT PRIMARY KEY,  -- Format: "{course_code}_{cmid}"
+            course_code    TEXT NOT NULL,
+            title          TEXT NOT NULL,
+            due_timestamp  INTEGER NOT NULL,  -- Unix epoch seconds (UTC)
+            due_date_raw   TEXT NOT NULL,     -- e.g. "18/09/2026 23:59"
+            source_url     TEXT NOT NULL,
+            is_submitted   INTEGER DEFAULT 0,
+            updated_at     INTEGER NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_deadlines_course
+            ON course_deadlines(course_code);
+        CREATE INDEX IF NOT EXISTS idx_deadlines_due
+            ON course_deadlines(due_timestamp)
+            WHERE is_submitted = 0;
+        "#,
+    )?;
     Ok(())
 }
 

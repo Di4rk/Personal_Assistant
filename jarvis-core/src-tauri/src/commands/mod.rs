@@ -1,5 +1,6 @@
 pub mod academic;
 pub mod post_mortem;
+pub mod workspace;
 
 use chrono::Local;
 use rusqlite::params;
