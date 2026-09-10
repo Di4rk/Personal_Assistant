@@ -44,6 +44,8 @@ pub struct SyncResult {
     /// Số problem lần đầu AC trong batch này - hữu ích cho toast "🎉 First AC!"
     /// ở frontend, tách riêng khỏi total_daily_xp để UI dễ hiển thị nổi bật.
     pub first_ac_count: usize,
+    #[serde(default)]
+    pub affected_dates: Vec<String>,
 }
 
 /// Ingest raw Codeforces submissions in one SQLite transaction. Pending
@@ -190,7 +192,16 @@ pub fn batch_insert_new_submissions(
         )?;
     }
 
+    // Gom nhóm DISTINCT date bị ảnh hưởng (N <= Days) để batch trigger recompute
+    let distinct_dates: HashSet<String> = daily_deltas.keys().cloned().collect();
+    let affected_dates: Vec<String> = distinct_dates.iter().cloned().collect();
+
     tx.commit()?;
+
+    // Cập nhật Master Life Matrix duy nhất 1 lần cho mỗi ngày duy nhất bị ảnh hưởng
+    for date_key in &distinct_dates {
+        let _ = crate::db::matrix::recompute_daily_matrix_for_date(conn, date_key);
+    }
 
     // total_daily_xp trong SyncResult chỉ tính riêng XP của HÔM NAY (không phải
     // tổng cả batch, có thể gồm cả submission của ngày trước nếu worker vừa
@@ -201,6 +212,7 @@ pub fn batch_insert_new_submissions(
         new_submissions_count,
         total_daily_xp: today_xp,
         first_ac_count,
+        affected_dates,
     })
 }
 

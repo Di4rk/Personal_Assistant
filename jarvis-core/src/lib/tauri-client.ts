@@ -10,6 +10,7 @@ import type {
   AcademicMacroMetricSSOT,
   FullPortalIngestionRequest,
 } from "../features/academic/types";
+import type { LifeMatrixEntryDto } from "../features/life-matrix/types";
 
 /**
  * Wrapper mỏng quanh invoke() để:
@@ -250,6 +251,33 @@ export async function ingestFullAcademicPayload(
 export async function purgeAndSeedCanonicalAcademicData(): Promise<void> {
   return invoke<void>("purge_and_seed_canonical_academic_data");
 }
+
+/**
+ * Nạp payload bảng điểm và DRL dạng JSON linh hoạt từ portal UIT vào SQLite.
+ */
+export async function ingestDynamicAcademicData(
+  payloadJson: string,
+  dbPath?: string
+): Promise<void> {
+  return invoke<void>("ingest_dynamic_academic_data", {
+    payloadJson,
+    dbPath: dbPath || null,
+  });
+}
+
+/**
+ * Lấy dải dữ liệu Life Matrix liên tục 364 ngày qua SQLite CTE.
+ */
+export async function getLifeMatrixRange(
+  startDate: string,
+  endDate: string
+): Promise<LifeMatrixEntryDto[]> {
+  return invoke<LifeMatrixEntryDto[]>("get_life_matrix_range", {
+    startDate,
+    endDate,
+  });
+}
+
 
 
 

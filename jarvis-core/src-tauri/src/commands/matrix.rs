@@ -12,8 +12,8 @@ use rusqlite::params;
 use tauri::State;
 
 use crate::db::SharedDb;
-pub use crate::modules::gamification::matrix::DailyMatrixRecord;
-use crate::modules::gamification::matrix::compute_and_upsert_daily_matrix;
+pub use crate::modules::gamification::xp_engine::DailyMatrixRecord;
+use crate::modules::gamification::xp_engine::compute_and_upsert_daily_matrix;
 
 /// Recompute today's XP and metrics based on latest submissions and deadlines,
 /// and UPSERT the snapshot into `life_matrix_daily`.
@@ -97,4 +97,16 @@ pub fn get_heatmap_matrix(
     }
 
     Ok(result)
+}
+
+/// Retrieve continuous daily matrix records for an arbitrary date range via recursive CTE.
+#[tauri::command]
+pub fn get_life_matrix_range(
+    db: State<'_, SharedDb>,
+    start_date: String,
+    end_date: String,
+) -> Result<Vec<crate::db::matrix::LifeMatrixEntryDto>, String> {
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    crate::db::matrix::query_life_matrix_range(&conn, &start_date, &end_date)
+        .map_err(|e| format!("Database query error: {e}"))
 }

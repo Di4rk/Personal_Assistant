@@ -440,18 +440,55 @@ pub fn ingest_full_academic_payload(
     db: tauri::State<'_, SharedDb>,
     payload: Option<serde_json::Value>,
 ) -> Result<(), String> {
-    let req: crate::modules::academic::portal_ingestion::FullPortalIngestionRequest = match payload {
+    let mut conn = db.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
+
+    match payload {
         Some(serde_json::Value::String(s)) if !s.trim().is_empty() => {
-            serde_json::from_str(&s).map_err(|e| format!("Lỗi parse JSON payload: {e}"))?
+            // Thử deserialize thành IngestionPayload trước
+            if let Ok(dyn_payload) = serde_json::from_str::<crate::modules::academic::portal_ingestion::IngestionPayload>(&s) {
+                crate::modules::academic::portal_ingestion::ingest_dynamic_academic_payload(&mut conn, dyn_payload)?;
+            } else {
+                let req: crate::modules::academic::portal_ingestion::FullPortalIngestionRequest =
+                    serde_json::from_str(&s).map_err(|e| format!("Lỗi parse JSON payload: {e}"))?;
+                crate::modules::academic::portal_ingestion::execute_portal_ingest(&mut conn, req)?;
+            }
         }
         Some(v) if !v.is_null() => {
-            serde_json::from_value(v).map_err(|e| format!("Lỗi parse object payload: {e}"))?
+            if let Ok(dyn_payload) = serde_json::from_value::<crate::modules::academic::portal_ingestion::IngestionPayload>(v.clone()) {
+                crate::modules::academic::portal_ingestion::ingest_dynamic_academic_payload(&mut conn, dyn_payload)?;
+            } else {
+                let req: crate::modules::academic::portal_ingestion::FullPortalIngestionRequest =
+                    serde_json::from_value(v).map_err(|e| format!("Lỗi parse object payload: {e}"))?;
+                crate::modules::academic::portal_ingestion::execute_portal_ingest(&mut conn, req)?;
+            }
         }
-        _ => crate::modules::academic::portal_ingestion::get_default_portal_seed(),
+        _ => {
+            let req = crate::modules::academic::portal_ingestion::get_default_portal_seed();
+            crate::modules::academic::portal_ingestion::execute_portal_ingest(&mut conn, req)?;
+        }
     };
 
-    let mut conn = db.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
-    crate::modules::academic::portal_ingestion::execute_portal_ingest(&mut conn, req)?;
+    let _ = app.emit("academic://sync-complete", ());
+    Ok(())
+}
+
+/// Nạp dữ liệu học vụ linh hoạt từ chuỗi JSON generic
+#[tauri::command]
+pub fn ingest_dynamic_academic_data(
+    app: AppHandle,
+    db: tauri::State<'_, SharedDb>,
+    payload_json: String,
+    db_path: Option<String>,
+) -> Result<(), String> {
+    let payload: crate::modules::academic::portal_ingestion::IngestionPayload =
+        serde_json::from_str(&payload_json).map_err(|e| format!("Lỗi parse JSON payload: {e}"))?;
+
+    if let Some(path) = db_path.filter(|p| !p.trim().is_empty()) {
+        crate::modules::academic::portal_ingestion::ingest_dynamic_academic_data(path, payload_json)?;
+    } else {
+        let mut conn = db.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
+        crate::modules::academic::portal_ingestion::ingest_dynamic_academic_payload(&mut conn, payload)?;
+    }
 
     let _ = app.emit("academic://sync-complete", ());
     Ok(())

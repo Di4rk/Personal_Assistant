@@ -109,6 +109,7 @@ pub fn run() {
             commands::academic::get_academic_macro_metrics,
             commands::academic::get_academic_macro_metrics_ssot,
             commands::academic::ingest_full_academic_payload,
+            commands::academic::ingest_dynamic_academic_data,
             commands::academic::purge_and_seed_canonical_academic_data,
             commands::academic::get_academic_curriculum,
             commands::workspace::ingest_moodle_course_html,
@@ -119,6 +120,7 @@ pub fn run() {
             commands::workspace::check_and_launch_vscode,
             commands::matrix::recompute_today_xp,
             commands::matrix::get_heatmap_matrix,
+            commands::matrix::get_life_matrix_range,
         ])
         .run(tauri::generate_context!());
 

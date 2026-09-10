@@ -13,7 +13,7 @@ pub type SharedDb = Arc<Mutex<Connection>>;
 /// và chạy migration tạo bảng nếu chưa tồn tại (idempotent - chạy lại
 /// bao nhiêu lần cũng an toàn).
 pub fn init_db(db_path: &Path) -> SqlResult<Connection> {
-    let mut conn = Connection::open(db_path)?;
+    let conn = Connection::open(db_path)?;
 
     // busy_timeout: SQLite menunggu hingga 5s sebelum mengembalikan SQLITE_BUSY
     // ketika ada koneksi lain (misal DB Browser) yang sedang memegang lock.
@@ -32,34 +32,82 @@ pub fn init_db(db_path: &Path) -> SqlResult<Connection> {
     run_migrations(&conn)?;
     ensure_worker_schema(&conn)?;
     ensure_post_mortem_schema(&conn)?;
-    crate::db::academic::ensure_academic_schema(&conn)?;
+    crate::db::academic::init_academic_module(&conn)?;
     ensure_moodle_schema(&conn)?;
     ensure_matrix_schema(&conn)?;
+    apply_legacy_compatibility_migrations(&conn)?;
     purge_mock_submissions(&conn)?;
 
-    // Kiểm tra và dọn dẹp triệt để dữ liệu mock học vụ cũ (PE001, PE002, CS005 ở HK2)
-    let should_seed_canonical = {
-        let has_mock: bool = conn
-            .query_row(
-                "SELECT COUNT(*) FROM academic_courses WHERE course_code LIKE 'PE00%' OR (course_code = 'CS005' AND semester_id = '2025-2026.2')",
+    Ok(conn)
+}
+
+/// Khởi tạo schema hoàn chỉnh phục vụ integration tests và in-memory SQLite database.
+pub fn create_tables(conn: &Connection) -> SqlResult<()> {
+    run_migrations(conn)?;
+    ensure_worker_schema(conn)?;
+    ensure_post_mortem_schema(conn)?;
+    crate::db::academic::init_academic_module(conn)?;
+    ensure_moodle_schema(conn)?;
+    ensure_matrix_schema(conn)?;
+    apply_legacy_compatibility_migrations(conn)?;
+
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS cf_submissions (
+            id INTEGER PRIMARY KEY,
+            contest_id TEXT,
+            problem_index TEXT,
+            submission_time INTEGER,
+            verdict TEXT
+        );
+
+        CREATE TRIGGER IF NOT EXISTS trg_cf_submissions_sync AFTER INSERT ON cf_submissions
+        BEGIN
+            INSERT OR REPLACE INTO submissions (id, contest_id, problem_index, problem_id, problem_name, verdict, submission_time, submitted_at)
+            VALUES (new.id, new.contest_id, new.problem_index, COALESCE(new.contest_id, '') || new.problem_index, 'Problem ' || new.problem_index, new.verdict, new.submission_time, datetime(new.submission_time, 'unixepoch'));
+        END;
+        "#,
+    )?;
+
+    Ok(())
+}
+
+/// Vá tương thích ngược cho các database đã tồn tại cục bộ từ các bản build trước.
+pub fn apply_legacy_compatibility_migrations(conn: &Connection) -> SqlResult<()> {
+    let has_macro_table: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'academic_macro_metrics'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|c| c > 0)
+        .unwrap_or(false);
+
+    if has_macro_table {
+        // 1. Quét và vá các bản ghi cũ có classification bị NULL hoặc rỗng
+        conn.execute(
+            "UPDATE academic_macro_metrics 
+             SET classification = 'Chưa xếp loại' 
+             WHERE classification IS NULL OR classification = '';",
+            [],
+        )?;
+
+        // 2. Bảo đảm rank_label cũng có fallback an toàn nếu tồn tại cột
+        let has_rank_label: bool = conn
+            .prepare("SELECT 1 FROM pragma_table_info('academic_macro_metrics') WHERE name = 'rank_label'")?
+            .exists([])?;
+
+        if has_rank_label {
+            conn.execute(
+                "UPDATE academic_macro_metrics 
+                 SET rank_label = 'Chưa xếp loại' 
+                 WHERE rank_label IS NULL OR rank_label = '';",
                 [],
-                |row| row.get::<_, i64>(0),
-            )
-            .map(|c| c > 0)
-            .unwrap_or(false);
-
-        let total_courses: i64 = conn
-            .query_row("SELECT COUNT(*) FROM academic_courses", [], |row| row.get(0))
-            .unwrap_or(0);
-
-        has_mock || total_courses != 13
-    };
-
-    if should_seed_canonical {
-        crate::db::academic::purge_and_seed_canonical_data(&mut conn)?;
+            )?;
+        }
     }
 
-    Ok(conn)
+    Ok(())
 }
 
 /// Migration cho hệ thống Post-Mortem + FTS5 full-text search.
@@ -523,5 +571,54 @@ mod tests {
         let _ = std::fs::remove_file(&db_path);
         let _ = std::fs::remove_file(db_path.with_extension("sqlite3-wal"));
         let _ = std::fs::remove_file(db_path.with_extension("sqlite3-shm"));
+    }
+
+    #[test]
+    fn init_db_boots_with_zero_state_academic_tables() {
+        let db_path = std::env::temp_dir().join(format!(
+            "diark-zero-state-{}-{}.sqlite3",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+
+        let conn = init_db(&db_path).expect("zero-state database initialization should succeed");
+
+        let macro_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM academic_macro_metrics", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(macro_count, 0, "Zero-state boot must have 0 macro metric rows");
+
+        let course_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM academic_courses", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(course_count, 0, "Zero-state boot must have 0 courses");
+
+        drop(conn);
+        let _ = std::fs::remove_file(&db_path);
+        let _ = std::fs::remove_file(db_path.with_extension("sqlite3-wal"));
+        let _ = std::fs::remove_file(db_path.with_extension("sqlite3-shm"));
+    }
+
+    #[test]
+    fn test_apply_legacy_compatibility_migrations_null_safety() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        super::create_tables(&conn).unwrap();
+
+        // Insert legacy row with empty string and another with null if possible
+        conn.execute(
+            "INSERT INTO academic_macro_metrics (semester_id, semester_label, classification, updated_at) 
+             VALUES ('2023-2024.1', 'HK1 2023', '', 1710000000)",
+            [],
+        ).unwrap();
+
+        super::apply_legacy_compatibility_migrations(&conn).expect("migration should succeed");
+
+        let classification: String = conn.query_row(
+            "SELECT classification FROM academic_macro_metrics WHERE semester_id = '2023-2024.1'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+
+        assert_eq!(classification, "Chưa xếp loại");
     }
 }
