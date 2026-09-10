@@ -282,8 +282,8 @@ pub fn ensure_academic_schema(conn: &Connection) -> SqlResult<()> {
             term_credits INTEGER NOT NULL DEFAULT 0,
             cumulative_credits INTEGER NOT NULL DEFAULT 0,
             drl_score INTEGER NOT NULL DEFAULT 0,    -- 95, 100
-            rank_label TEXT NOT NULL DEFAULT '',     -- "Giỏi", "Xuất sắc"
-            classification TEXT NOT NULL DEFAULT '',
+            rank_label TEXT NOT NULL DEFAULT 'Giỏi',     -- "Giỏi", "Xuất sắc"
+            classification TEXT NOT NULL DEFAULT 'Giỏi',
             drl INTEGER,
             updated_at INTEGER NOT NULL
         );
@@ -317,7 +317,9 @@ pub fn ensure_academic_schema(conn: &Connection) -> SqlResult<()> {
     ensure_column("academic_macro_metrics", "semester_label", "TEXT NOT NULL DEFAULT ''")?;
     ensure_column("academic_macro_metrics", "year_name", "TEXT NOT NULL DEFAULT ''")?;
     ensure_column("academic_macro_metrics", "drl_score", "INTEGER NOT NULL DEFAULT 0")?;
-    ensure_column("academic_macro_metrics", "rank_label", "TEXT NOT NULL DEFAULT ''")?;
+    ensure_column("academic_macro_metrics", "rank_label", "TEXT NOT NULL DEFAULT 'Giỏi'")?;
+    ensure_column("academic_macro_metrics", "classification", "TEXT NOT NULL DEFAULT 'Giỏi'")?;
+    ensure_column("academic_macro_metrics", "drl", "INTEGER")?;
 
     ensure_column("academic_courses", "process_point", "REAL")?;
     ensure_column("academic_courses", "practice_point", "REAL")?;
@@ -627,26 +629,35 @@ pub fn persist_unified_academic_sync(
     if !data.macro_metrics.is_empty() {
         let mut stmt = tx.prepare_cached(
             "INSERT INTO academic_macro_metrics (
-                semester_id, term_gpa, cumulative_gpa, classification, term_credits, cumulative_credits, drl, updated_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                semester_id, term_gpa, cumulative_gpa, classification, rank_label, term_credits, cumulative_credits, drl, drl_score, updated_at
+            ) VALUES (?1, ?2, ?3, ?4, ?4, ?5, ?6, ?7, ?8, ?9)
             ON CONFLICT(semester_id) DO UPDATE SET
                 term_gpa = excluded.term_gpa,
                 cumulative_gpa = excluded.cumulative_gpa,
                 classification = excluded.classification,
+                rank_label = excluded.rank_label,
                 term_credits = excluded.term_credits,
                 cumulative_credits = excluded.cumulative_credits,
-                drl = excluded.drl,
+                drl = COALESCE(excluded.drl, academic_macro_metrics.drl),
+                drl_score = COALESCE(excluded.drl_score, academic_macro_metrics.drl_score),
                 updated_at = excluded.updated_at",
         )?;
         for m in &data.macro_metrics {
+            let classif = if m.classification.trim().is_empty() {
+                "Giỏi"
+            } else {
+                m.classification.as_str()
+            };
+            let drl_val = m.drl.unwrap_or(0);
             stmt.execute(params![
                 m.semester_id,
                 m.term_gpa,
                 m.cumulative_gpa,
-                m.classification,
+                classif,
                 m.term_credits,
                 m.cumulative_credits,
                 m.drl,
+                drl_val,
                 now,
             ])?;
         }
@@ -865,10 +876,22 @@ pub fn purge_and_seed_canonical_data(conn: &mut Connection) -> Result<(), rusqli
     // 2. Nạp dữ liệu Macro Học Kỳ (SSOT)
     tx.execute(
         "INSERT INTO academic_macro_metrics 
-            (semester_id, semester_label, year_name, term_gpa, cumulative_gpa, term_credits, cumulative_credits, drl_score, rank_label, updated_at)
+            (semester_id, semester_label, year_name, term_gpa, cumulative_gpa, term_credits, cumulative_credits, drl_score, rank_label, classification, drl, updated_at)
          VALUES 
-            ('2025-2026.1', 'Học kỳ 1/2025-2026', '2025-2026', 8.20, 8.20, 18, 18, 95, 'Giỏi', ?1),
-            ('2025-2026.2', 'Học kỳ 2/2025-2026', '2025-2026', 8.55, 8.40, 24, 42, 100, 'Xuất sắc', ?1);",
+            ('2025-2026.1', 'Học kỳ 1/2025-2026', '2025-2026', 8.20, 8.20, 18, 18, 95, 'Giỏi', 'Giỏi', 95, ?1),
+            ('2025-2026.2', 'Học kỳ 2/2025-2026', '2025-2026', 8.55, 8.40, 24, 42, 100, 'Xuất sắc', 'Xuất sắc', 100, ?1)
+         ON CONFLICT(semester_id) DO UPDATE SET
+            semester_label = excluded.semester_label,
+            year_name = excluded.year_name,
+            term_gpa = excluded.term_gpa,
+            cumulative_gpa = excluded.cumulative_gpa,
+            term_credits = excluded.term_credits,
+            cumulative_credits = excluded.cumulative_credits,
+            drl_score = excluded.drl_score,
+            rank_label = excluded.rank_label,
+            classification = excluded.classification,
+            drl = excluded.drl,
+            updated_at = excluded.updated_at;",
         params![now],
     )?;
 
@@ -1367,5 +1390,92 @@ mod tests {
         assert_eq!(it001.course_point, Some(9.1));
         assert_eq!(it001.grade_4, Some(4.0));
         assert_eq!(it001.grade_char.as_deref(), Some("A+"));
+    }
+
+    #[test]
+    fn test_seed_academic_macro_metrics_not_null() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        // Giả lập schema cũ hoặc strict DB với `classification TEXT NOT NULL` không có DEFAULT
+        conn.execute_batch(
+            r#"
+            CREATE TABLE academic_semesters (
+                id TEXT PRIMARY KEY,
+                academic_year TEXT NOT NULL,
+                semester_term INTEGER NOT NULL,
+                is_completed INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+            CREATE TABLE academic_macro_metrics (
+                semester_id TEXT PRIMARY KEY,
+                semester_label TEXT NOT NULL,
+                year_name TEXT NOT NULL,
+                term_gpa REAL NOT NULL,
+                cumulative_gpa REAL NOT NULL,
+                term_credits INTEGER NOT NULL,
+                cumulative_credits INTEGER NOT NULL,
+                drl_score INTEGER NOT NULL DEFAULT 0,
+                rank_label TEXT NOT NULL,
+                classification TEXT NOT NULL,
+                drl INTEGER,
+                updated_at INTEGER NOT NULL
+            );
+            CREATE TABLE academic_courses (
+                id TEXT PRIMARY KEY,
+                semester_id TEXT NOT NULL,
+                course_code TEXT NOT NULL,
+                course_name TEXT NOT NULL,
+                credits INTEGER NOT NULL,
+                process_point REAL,
+                practice_point REAL,
+                midterm_score REAL,
+                final_point REAL,
+                course_point REAL NOT NULL DEFAULT 0.0,
+                grade_4 REAL,
+                grade_char TEXT,
+                result_status TEXT NOT NULL DEFAULT 'Đạt',
+                category TEXT NOT NULL DEFAULT 'dai_cuong',
+                summary_score_10 REAL,
+                summary_score_4 REAL,
+                final_score REAL,
+                is_passed INTEGER NOT NULL DEFAULT 1,
+                is_gpa_calculated INTEGER NOT NULL DEFAULT 1,
+                status TEXT NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+            "#,
+        )
+        .unwrap();
+
+        // Chạy purge và seed canonical data
+        let seed_res = purge_and_seed_canonical_data(&mut conn);
+        assert!(
+            seed_res.is_ok(),
+            "Seeding không được văng lỗi NOT NULL constraint: {:?}",
+            seed_res.err()
+        );
+
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM academic_macro_metrics", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 2, "Phải nạp thành công 2 học kỳ");
+
+        let c1: String = conn
+            .query_row(
+                "SELECT classification FROM academic_macro_metrics WHERE semester_id = '2025-2026.1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(c1, "Giỏi");
+
+        let c2: String = conn
+            .query_row(
+                "SELECT classification FROM academic_macro_metrics WHERE semester_id = '2025-2026.2'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(c2, "Xuất sắc");
     }
 }

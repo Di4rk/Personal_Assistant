@@ -210,16 +210,24 @@ pub fn persist_portal_drl(
     {
         let mut stmt = tx.prepare_cached(
             "INSERT INTO academic_macro_metrics (
-                semester_id, term_gpa, cumulative_gpa, classification,
-                term_credits, cumulative_credits, drl, updated_at
-            ) VALUES (?1, 0.0, 0.0, '', 0, 0, ?2, ?3)
+                semester_id, term_gpa, cumulative_gpa, classification, rank_label,
+                term_credits, cumulative_credits, drl, drl_score, updated_at
+            ) VALUES (?1, 0.0, 0.0, ?2, ?2, 0, 0, ?3, ?3, ?4)
             ON CONFLICT(semester_id) DO UPDATE SET
                 drl        = excluded.drl,
+                drl_score  = excluded.drl_score,
+                classification = CASE WHEN academic_macro_metrics.classification IS NULL OR academic_macro_metrics.classification = '' THEN excluded.classification ELSE academic_macro_metrics.classification END,
+                rank_label     = CASE WHEN academic_macro_metrics.rank_label IS NULL OR academic_macro_metrics.rank_label = '' THEN excluded.rank_label ELSE academic_macro_metrics.rank_label END,
                 updated_at = excluded.updated_at",
         )?;
 
         for sem in &parsed.semesters {
-            stmt.execute(params![sem.semester_id, sem.drl_score, now])?;
+            let classif = if sem.classification.trim().is_empty() {
+                "Giỏi"
+            } else {
+                sem.classification.as_str()
+            };
+            stmt.execute(params![sem.semester_id, classif, sem.drl_score, now])?;
             updated_semesters.push(sem.semester_id.clone());
         }
     }
@@ -262,12 +270,16 @@ mod tests {
 
             CREATE TABLE IF NOT EXISTS academic_macro_metrics (
                 semester_id        TEXT PRIMARY KEY,
-                term_gpa           REAL NOT NULL,
-                cumulative_gpa     REAL NOT NULL,
-                classification     TEXT NOT NULL,
-                term_credits       INTEGER NOT NULL,
-                cumulative_credits INTEGER NOT NULL,
+                semester_label     TEXT NOT NULL DEFAULT '',
+                year_name          TEXT NOT NULL DEFAULT '',
+                term_gpa           REAL NOT NULL DEFAULT 0.0,
+                cumulative_gpa     REAL NOT NULL DEFAULT 0.0,
+                classification     TEXT NOT NULL DEFAULT 'Giỏi',
+                rank_label         TEXT NOT NULL DEFAULT 'Giỏi',
+                term_credits       INTEGER NOT NULL DEFAULT 0,
+                cumulative_credits INTEGER NOT NULL DEFAULT 0,
                 drl                INTEGER,
+                drl_score          INTEGER NOT NULL DEFAULT 0,
                 updated_at         INTEGER NOT NULL
             );
             "#,
