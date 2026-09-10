@@ -13,7 +13,7 @@ pub type SharedDb = Arc<Mutex<Connection>>;
 /// và chạy migration tạo bảng nếu chưa tồn tại (idempotent - chạy lại
 /// bao nhiêu lần cũng an toàn).
 pub fn init_db(db_path: &Path) -> SqlResult<Connection> {
-    let conn = Connection::open(db_path)?;
+    let mut conn = Connection::open(db_path)?;
 
     // busy_timeout: SQLite menunggu hingga 5s sebelum mengembalikan SQLITE_BUSY
     // ketika ada koneksi lain (misal DB Browser) yang sedang memegang lock.
@@ -36,6 +36,28 @@ pub fn init_db(db_path: &Path) -> SqlResult<Connection> {
     ensure_moodle_schema(&conn)?;
     ensure_matrix_schema(&conn)?;
     purge_mock_submissions(&conn)?;
+
+    // Kiểm tra và dọn dẹp triệt để dữ liệu mock học vụ cũ (PE001, PE002, CS005 ở HK2)
+    let should_seed_canonical = {
+        let has_mock: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM academic_courses WHERE course_code LIKE 'PE00%' OR (course_code = 'CS005' AND semester_id = '2025-2026.2')",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .map(|c| c > 0)
+            .unwrap_or(false);
+
+        let total_courses: i64 = conn
+            .query_row("SELECT COUNT(*) FROM academic_courses", [], |row| row.get(0))
+            .unwrap_or(0);
+
+        has_mock || total_courses != 13
+    };
+
+    if should_seed_canonical {
+        crate::db::academic::purge_and_seed_canonical_data(&mut conn)?;
+    }
 
     Ok(conn)
 }

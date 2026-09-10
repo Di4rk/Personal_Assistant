@@ -7,6 +7,8 @@ import type {
   UpsertCourseDto,
   UpsertSemesterDto,
   RawPortalSemester,
+  AcademicMacroMetricSSOT,
+  FullPortalIngestionRequest,
 } from "../features/academic/types";
 
 /**
@@ -224,6 +226,31 @@ export async function submitPortalTranscript(
 export async function syncUitPortal(): Promise<AcademicOverviewDto> {
   return invoke<AcademicOverviewDto>("sync_uit_portal");
 }
+
+/**
+ * Lấy danh sách macro metrics theo chuẩn SSOT (academic_macro_metrics).
+ * Tự động seed dữ liệu mẫu chuẩn nếu DB đang trống.
+ */
+export async function getAcademicMacroMetricsSsot(): Promise<AcademicMacroMetricSSOT[]> {
+  return invoke<AcademicMacroMetricSSOT[]>("get_academic_macro_metrics_ssot");
+}
+
+/**
+ * Nạp payload bảng điểm và DRL trực tiếp từ JSON portal vào SQLite.
+ */
+export async function ingestFullAcademicPayload(
+  payload?: FullPortalIngestionRequest | null
+): Promise<void> {
+  return invoke<void>("ingest_full_academic_payload", { payload });
+}
+
+/**
+ * Xóa sạch dữ liệu mock cũ và nạp lại chính xác 100% dữ liệu UIT canonical.
+ */
+export async function purgeAndSeedCanonicalAcademicData(): Promise<void> {
+  return invoke<void>("purge_and_seed_canonical_academic_data");
+}
+
 
 
 

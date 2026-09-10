@@ -99,6 +99,16 @@ export interface AcademicCourseRecord {
   isGpaCalculated: boolean;
   createdAt: number;
   updatedAt: number;
+  // Canonical portal score columns
+  processPoint?: number | null;
+  practicePoint?: number | null;
+  finalPoint?: number | null;
+  coursePoint?: number | null;
+  grade4?: number | null;
+  resultStatus?: string | null;
+  category?: string | null;
+  status?: string | null;
+  note?: string | null;
 }
 
 /**
@@ -187,5 +197,54 @@ export interface ParsedCourse {
 export interface ParsedSemester {
   semester: SemesterRef;
   courses: ParsedCourse[];
+}
+
+// ============================================================
+//  Academic Macro Metrics SSOT & Ingestion Types
+// ============================================================
+
+export interface AcademicMacroMetricSSOT {
+  semesterId: string;
+  semesterLabel: string;
+  yearName: string;
+  termGpa: number;
+  cumulativeGpa: number;
+  termCredits: number;
+  cumulativeCredits: number;
+  drlScore: number;
+  rankLabel: string;
+  updatedAt: number;
+}
+
+export interface SubjectPayload {
+  id: string;
+  subject_code: string;
+  subject_name: string;
+  number_of_credit: number;
+  process_point?: string | null;
+  midterm_score?: string | null;
+  practice_point?: string | null;
+  final_point?: string | null;
+  course_point: string;
+  note?: string | null;
+}
+
+export interface SemesterGroupPayload {
+  semester_key: string;
+  semester_label: string;
+  year_name: string;
+  total_credit: number;
+  average_point: number;
+  subjects: SubjectPayload[];
+}
+
+export interface DrlItemPayload {
+  semester: string;
+  point: number;
+}
+
+export interface FullPortalIngestionRequest {
+  semester_groups: SemesterGroupPayload[];
+  drl_history: DrlItemPayload[];
 }
 
