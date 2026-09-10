@@ -35,6 +35,7 @@ pub fn init_db(db_path: &Path) -> SqlResult<Connection> {
     crate::db::academic::init_academic_module(&conn)?;
     ensure_moodle_schema(&conn)?;
     ensure_matrix_schema(&conn)?;
+    apply_legacy_compatibility_migrations(&conn)?;
     purge_mock_submissions(&conn)?;
 
     Ok(conn)
@@ -48,6 +49,7 @@ pub fn create_tables(conn: &Connection) -> SqlResult<()> {
     crate::db::academic::init_academic_module(conn)?;
     ensure_moodle_schema(conn)?;
     ensure_matrix_schema(conn)?;
+    apply_legacy_compatibility_migrations(conn)?;
 
     conn.execute_batch(
         r#"
@@ -66,6 +68,44 @@ pub fn create_tables(conn: &Connection) -> SqlResult<()> {
         END;
         "#,
     )?;
+
+    Ok(())
+}
+
+/// Vá tương thích ngược cho các database đã tồn tại cục bộ từ các bản build trước.
+pub fn apply_legacy_compatibility_migrations(conn: &Connection) -> SqlResult<()> {
+    let has_macro_table: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'academic_macro_metrics'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|c| c > 0)
+        .unwrap_or(false);
+
+    if has_macro_table {
+        // 1. Quét và vá các bản ghi cũ có classification bị NULL hoặc rỗng
+        conn.execute(
+            "UPDATE academic_macro_metrics 
+             SET classification = 'Chưa xếp loại' 
+             WHERE classification IS NULL OR classification = '';",
+            [],
+        )?;
+
+        // 2. Bảo đảm rank_label cũng có fallback an toàn nếu tồn tại cột
+        let has_rank_label: bool = conn
+            .prepare("SELECT 1 FROM pragma_table_info('academic_macro_metrics') WHERE name = 'rank_label'")?
+            .exists([])?;
+
+        if has_rank_label {
+            conn.execute(
+                "UPDATE academic_macro_metrics 
+                 SET rank_label = 'Chưa xếp loại' 
+                 WHERE rank_label IS NULL OR rank_label = '';",
+                [],
+            )?;
+        }
+    }
 
     Ok(())
 }
@@ -557,5 +597,28 @@ mod tests {
         let _ = std::fs::remove_file(&db_path);
         let _ = std::fs::remove_file(db_path.with_extension("sqlite3-wal"));
         let _ = std::fs::remove_file(db_path.with_extension("sqlite3-shm"));
+    }
+
+    #[test]
+    fn test_apply_legacy_compatibility_migrations_null_safety() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        super::create_tables(&conn).unwrap();
+
+        // Insert legacy row with empty string and another with null if possible
+        conn.execute(
+            "INSERT INTO academic_macro_metrics (semester_id, semester_label, classification, updated_at) 
+             VALUES ('2023-2024.1', 'HK1 2023', '', 1710000000)",
+            [],
+        ).unwrap();
+
+        super::apply_legacy_compatibility_migrations(&conn).expect("migration should succeed");
+
+        let classification: String = conn.query_row(
+            "SELECT classification FROM academic_macro_metrics WHERE semester_id = '2023-2024.1'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+
+        assert_eq!(classification, "Chưa xếp loại");
     }
 }

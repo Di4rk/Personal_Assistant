@@ -192,12 +192,14 @@ pub fn batch_insert_new_submissions(
         )?;
     }
 
-    let affected_dates: Vec<String> = daily_deltas.keys().cloned().collect();
+    // Gom nhóm DISTINCT date bị ảnh hưởng (N <= Days) để batch trigger recompute
+    let distinct_dates: HashSet<String> = daily_deltas.keys().cloned().collect();
+    let affected_dates: Vec<String> = distinct_dates.iter().cloned().collect();
 
     tx.commit()?;
 
-    // Cập nhật ngay lập tức Master Life Matrix cho các ngày có submission mới
-    for date_key in &affected_dates {
+    // Cập nhật Master Life Matrix duy nhất 1 lần cho mỗi ngày duy nhất bị ảnh hưởng
+    for date_key in &distinct_dates {
         let _ = crate::db::matrix::recompute_daily_matrix_for_date(conn, date_key);
     }
 
