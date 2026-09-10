@@ -34,6 +34,7 @@ pub fn init_db(db_path: &Path) -> SqlResult<Connection> {
     ensure_post_mortem_schema(&conn)?;
     crate::db::academic::ensure_academic_schema(&conn)?;
     ensure_moodle_schema(&conn)?;
+    ensure_matrix_schema(&conn)?;
     purge_mock_submissions(&conn)?;
 
     Ok(conn)
@@ -209,6 +210,81 @@ pub fn ensure_moodle_schema(conn: &Connection) -> SqlResult<()> {
     Ok(())
 }
 
+/// Tạo schema cho Master Life Matrix Daily Record và bảo đảm các cột cần thiết cho First-AC (idempotent).
+pub fn ensure_matrix_schema(conn: &Connection) -> SqlResult<()> {
+    conn.execute_batch(
+        r#"
+        -- Master Life Matrix Daily Record
+        CREATE TABLE IF NOT EXISTS life_matrix_daily (
+            date TEXT PRIMARY KEY, -- Format: 'YYYY-MM-DD' (Normalized to UTC+07:00 ICT)
+            ac_count INTEGER NOT NULL DEFAULT 0,
+            deadlines_cleared INTEGER NOT NULL DEFAULT 0,
+            total_xp INTEGER NOT NULL DEFAULT 0,
+            state_tier INTEGER NOT NULL DEFAULT 0, -- 0: Idle, 1: Low, 2: Mid, 3: High, 4: God Mode
+            updated_at INTEGER NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_life_matrix_date
+            ON life_matrix_daily(date);
+        "#,
+    )?;
+
+    // Bảo đảm bảng submissions có các cột submission_time và problem_index phục vụ P0 First-AC computation
+    let has_submissions: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'submissions'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|c| c > 0)
+        .unwrap_or(false);
+
+    if has_submissions {
+        let has_submission_time = {
+            let mut stmt = conn.prepare("PRAGMA table_info(submissions)")?;
+            let names = stmt.query_map([], |row| row.get::<_, String>(1))?;
+            let found = names.filter_map(Result::ok).any(|n| n == "submission_time");
+            found
+        };
+        if !has_submission_time {
+            conn.execute_batch("ALTER TABLE submissions ADD COLUMN submission_time INTEGER;")?;
+            let _ = conn.execute(
+                "UPDATE submissions SET submission_time = CAST(strftime('%s', submitted_at) AS INTEGER) WHERE submission_time IS NULL AND submitted_at IS NOT NULL",
+                [],
+            );
+        }
+
+        let has_problem_index = {
+            let mut stmt = conn.prepare("PRAGMA table_info(submissions)")?;
+            let names = stmt.query_map([], |row| row.get::<_, String>(1))?;
+            let found = names.filter_map(Result::ok).any(|n| n == "problem_index");
+            found
+        };
+        if !has_problem_index {
+            conn.execute_batch("ALTER TABLE submissions ADD COLUMN problem_index TEXT;")?;
+            let _ = conn.execute(
+                "UPDATE submissions SET problem_index = problem_id WHERE problem_index IS NULL AND problem_id IS NOT NULL",
+                [],
+            );
+        }
+
+        // Tạo trigger tự động đồng bộ submission_time và problem_index nếu được insert mà thiếu 2 trường này
+        conn.execute_batch(
+            r#"
+            CREATE TRIGGER IF NOT EXISTS trg_submissions_matrix_defaults AFTER INSERT ON submissions
+            BEGIN
+                UPDATE submissions
+                SET submission_time = COALESCE(new.submission_time, CAST(strftime('%s', new.submitted_at) AS INTEGER)),
+                    problem_index = COALESCE(new.problem_index, new.problem_id)
+                WHERE id = new.id AND (submission_time IS NULL OR problem_index IS NULL);
+            END;
+            "#,
+        )?;
+    }
+
+    Ok(())
+}
+
 fn run_migrations(conn: &Connection) -> SqlResult<()> {
     conn.execute_batch(
         r#"
@@ -365,6 +441,15 @@ mod tests {
             )
             .expect("academic_program_summary table query should succeed");
         assert_eq!(program_summary_exists, 1, "academic_program_summary phải được tạo bởi ensure_academic_schema");
+
+        let matrix_exists: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'life_matrix_daily'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("life_matrix_daily table query should succeed");
+        assert_eq!(matrix_exists, 1, "life_matrix_daily phải được tạo bởi ensure_matrix_schema");
 
         drop(connection);
         let _ = std::fs::remove_file(&db_path);

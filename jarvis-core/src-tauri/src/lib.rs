@@ -114,6 +114,8 @@ pub fn run() {
             commands::workspace::upsert_workspace_config,
             commands::workspace::get_workspace_config,
             commands::workspace::check_and_launch_vscode,
+            commands::matrix::recompute_today_xp,
+            commands::matrix::get_heatmap_matrix,
         ])
         .run(tauri::generate_context!());
 
