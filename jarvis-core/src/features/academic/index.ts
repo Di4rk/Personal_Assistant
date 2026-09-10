@@ -4,5 +4,8 @@ export * from "./components/SyncPortalModal";
 export * from "./components/SyncPortalButton";
 export * from "./components/AcademicRadarChart";
 export * from "./components/GpaSimulatorCard";
+export * from "./components/AcademicSummaryCards";
+export * from "./components/SemesterTabs";
+export * from "./components/AcademicCourseTable";
 export * from "./AcademicDashboard";
 export * from "./utils/forecastEngine";

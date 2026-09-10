@@ -418,6 +418,127 @@ pub fn get_academic_macro_metrics(
         .map_err(|e| format!("Lỗi get_academic_macro_metrics: {e}"))
 }
 
+#[derive(Debug, Clone, Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcademicMacroMetricSSOT {
+    pub semester_id: String,
+    pub semester_label: String,
+    pub year_name: String,
+    pub term_gpa: f64,
+    pub cumulative_gpa: f64,
+    pub term_credits: i64,
+    pub cumulative_credits: i64,
+    pub drl_score: i64,
+    pub rank_label: String,
+    pub updated_at: i64,
+}
+
+/// Nạp toàn bộ bảng điểm và lịch sử ĐRL từ JSON payload
+#[tauri::command]
+pub fn ingest_full_academic_payload(
+    app: AppHandle,
+    db: tauri::State<'_, SharedDb>,
+    payload: Option<serde_json::Value>,
+) -> Result<(), String> {
+    let req: crate::modules::academic::portal_ingestion::FullPortalIngestionRequest = match payload {
+        Some(serde_json::Value::String(s)) if !s.trim().is_empty() => {
+            serde_json::from_str(&s).map_err(|e| format!("Lỗi parse JSON payload: {e}"))?
+        }
+        Some(v) if !v.is_null() => {
+            serde_json::from_value(v).map_err(|e| format!("Lỗi parse object payload: {e}"))?
+        }
+        _ => crate::modules::academic::portal_ingestion::get_default_portal_seed(),
+    };
+
+    let mut conn = db.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
+    crate::modules::academic::portal_ingestion::execute_portal_ingest(&mut conn, req)?;
+
+    let _ = app.emit("academic://sync-complete", ());
+    Ok(())
+}
+
+/// Lấy danh sách macro metrics theo chuẩn SSOT (phục vụ Cards và Semester Tabs)
+#[tauri::command]
+pub fn get_academic_macro_metrics_ssot(
+    db: tauri::State<'_, SharedDb>,
+) -> Result<Vec<AcademicMacroMetricSSOT>, String> {
+    let mut conn = db.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
+
+    let query_fn = |c: &rusqlite::Connection| -> Result<Vec<AcademicMacroMetricSSOT>, String> {
+        let mut stmt = c
+            .prepare(
+                r#"
+                SELECT semester_id, 
+                       COALESCE(NULLIF(semester_label, ''), 'Học kỳ ' || semester_id),
+                       COALESCE(NULLIF(year_name, ''), '2025-2026'),
+                       term_gpa, cumulative_gpa, term_credits, cumulative_credits,
+                       COALESCE(NULLIF(drl_score, 0), drl, 0),
+                       COALESCE(NULLIF(rank_label, ''), classification, 'Giỏi'),
+                       updated_at
+                FROM academic_macro_metrics
+                ORDER BY semester_id ASC
+                "#,
+            )
+            .map_err(|e| format!("Lỗi prepare query: {e}"))?;
+
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(AcademicMacroMetricSSOT {
+                    semester_id: row.get(0)?,
+                    semester_label: row.get(1)?,
+                    year_name: row.get(2)?,
+                    term_gpa: row.get(3)?,
+                    cumulative_gpa: row.get(4)?,
+                    term_credits: row.get(5)?,
+                    cumulative_credits: row.get(6)?,
+                    drl_score: row.get(7)?,
+                    rank_label: row.get(8)?,
+                    updated_at: row.get(9)?,
+                })
+            })
+            .map_err(|e| format!("Lỗi query: {e}"))?;
+
+        let mut list = Vec::new();
+        for r in rows {
+            list.push(r.map_err(|e| e.to_string())?);
+        }
+        Ok(list)
+    };
+
+    let has_mock: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM academic_courses WHERE course_code LIKE 'PE00%' OR (course_code = 'CS005' AND semester_id = '2025-2026.2')",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|cnt| cnt > 0)
+        .unwrap_or(false);
+
+    let mut list = query_fn(&conn)?;
+
+    // Tự động dọn dẹp mock và seed dữ liệu chuẩn nếu phát hiện mock courses hoặc DB trống
+    if list.is_empty() || has_mock {
+        crate::db::academic::purge_and_seed_canonical_data(&mut conn)
+            .map_err(|e| format!("Lỗi purge_and_seed_canonical_data: {e}"))?;
+        list = query_fn(&conn)?;
+    }
+
+    Ok(list)
+}
+
+/// Lệnh gọi trực tiếp để dọn sạch toàn bộ mock courses và nạp lại dữ liệu chuẩn xác 100% của UIT
+#[tauri::command]
+pub fn purge_and_seed_canonical_academic_data(
+    app: tauri::AppHandle,
+    db: tauri::State<'_, SharedDb>,
+) -> Result<(), String> {
+    let mut conn = db.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
+    crate::db::academic::purge_and_seed_canonical_data(&mut conn)
+        .map_err(|e| format!("Lỗi purge_and_seed_canonical_data: {e}"))?;
+    let _ = app.emit("academic://sync-complete", ());
+    Ok(())
+}
+
 /// Lấy toàn bộ danh mục chương trình đào tạo & tiến độ học tập
 #[tauri::command]
 pub fn get_academic_curriculum(
@@ -427,6 +548,3 @@ pub fn get_academic_curriculum(
     crate::db::academic::get_all_curriculum_courses(&conn)
         .map_err(|e| format!("Lỗi get_academic_curriculum: {e}"))
 }
-
-
-

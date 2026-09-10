@@ -141,6 +141,24 @@ pub struct AcademicCourseRecord {
     pub is_gpa_calculated: bool,
     pub created_at: i64,
     pub updated_at: i64,
+    #[serde(default)]
+    pub process_point: Option<f64>,
+    #[serde(default)]
+    pub practice_point: Option<f64>,
+    #[serde(default)]
+    pub final_point: Option<f64>,
+    #[serde(default)]
+    pub course_point: Option<f64>,
+    #[serde(default)]
+    pub grade_4: Option<f64>,
+    #[serde(default)]
+    pub result_status: Option<String>,
+    #[serde(default)]
+    pub category: Option<String>,
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub note: Option<String>,
 }
 
 /// DTO để upsert 1 môn học từ frontend. `id` là optional:
@@ -205,7 +223,13 @@ pub fn ensure_academic_schema(conn: &Connection) -> SqlResult<()> {
             course_code        TEXT NOT NULL,
             course_name        TEXT NOT NULL,
             credits            INTEGER NOT NULL,
+            process_point      REAL,
             midterm_score      REAL,
+            practice_point     REAL,
+            final_point        REAL,
+            course_point       REAL NOT NULL DEFAULT 0.0,
+            status             TEXT NOT NULL DEFAULT 'normal',
+            note               TEXT,
             final_score        REAL,
             other_scores       TEXT,
             summary_score_10   REAL,
@@ -213,7 +237,7 @@ pub fn ensure_academic_schema(conn: &Connection) -> SqlResult<()> {
             grade_char         TEXT,
             is_passed          INTEGER NOT NULL DEFAULT 0,
             is_gpa_calculated  INTEGER NOT NULL DEFAULT 1,
-            created_at         INTEGER NOT NULL,
+            created_at         INTEGER NOT NULL DEFAULT 0,
             updated_at         INTEGER NOT NULL,
             FOREIGN KEY(semester_id) REFERENCES academic_semesters(id) ON DELETE CASCADE,
             UNIQUE(semester_id, course_code)
@@ -248,14 +272,18 @@ pub fn ensure_academic_schema(conn: &Connection) -> SqlResult<()> {
             updated_at INTEGER NOT NULL
         );
 
-        -- Lưu trữ metadata và macro metrics chính thức (Tab 1)
+        -- Macro snapshot theo từng học kỳ (Single Source of Truth cho Cards và DRL)
         CREATE TABLE IF NOT EXISTS academic_macro_metrics (
-            semester_id TEXT PRIMARY KEY,
-            term_gpa REAL NOT NULL,
-            cumulative_gpa REAL NOT NULL,
-            classification TEXT NOT NULL,
-            term_credits INTEGER NOT NULL,
-            cumulative_credits INTEGER NOT NULL,
+            semester_id TEXT PRIMARY KEY,        -- "2025-2026.1", "2025-2026.2"
+            semester_label TEXT NOT NULL DEFAULT '', -- "Học kỳ 1/2025-2026", "Học kỳ 2/2025-2026"
+            year_name TEXT NOT NULL DEFAULT '',      -- "2025-2026"
+            term_gpa REAL NOT NULL DEFAULT 0.0,
+            cumulative_gpa REAL NOT NULL DEFAULT 0.0,
+            term_credits INTEGER NOT NULL DEFAULT 0,
+            cumulative_credits INTEGER NOT NULL DEFAULT 0,
+            drl_score INTEGER NOT NULL DEFAULT 0,    -- 95, 100
+            rank_label TEXT NOT NULL DEFAULT '',     -- "Giỏi", "Xuất sắc"
+            classification TEXT NOT NULL DEFAULT '',
             drl INTEGER,
             updated_at INTEGER NOT NULL
         );
@@ -274,6 +302,33 @@ pub fn ensure_academic_schema(conn: &Connection) -> SqlResult<()> {
         );
         "#,
     )?;
+
+    // Migration helper: bảo đảm các cột cần thiết nếu bảng đã tồn tại từ trước
+    let ensure_column = |table: &str, column: &str, col_def: &str| -> SqlResult<()> {
+        let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+        let names = stmt.query_map([], |row| row.get::<_, String>(1))?;
+        let exists = names.filter_map(Result::ok).any(|n| n == column);
+        if !exists {
+            let _ = conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {col_def};"));
+        }
+        Ok(())
+    };
+
+    ensure_column("academic_macro_metrics", "semester_label", "TEXT NOT NULL DEFAULT ''")?;
+    ensure_column("academic_macro_metrics", "year_name", "TEXT NOT NULL DEFAULT ''")?;
+    ensure_column("academic_macro_metrics", "drl_score", "INTEGER NOT NULL DEFAULT 0")?;
+    ensure_column("academic_macro_metrics", "rank_label", "TEXT NOT NULL DEFAULT ''")?;
+
+    ensure_column("academic_courses", "process_point", "REAL")?;
+    ensure_column("academic_courses", "practice_point", "REAL")?;
+    ensure_column("academic_courses", "final_point", "REAL")?;
+    ensure_column("academic_courses", "course_point", "REAL NOT NULL DEFAULT 0.0")?;
+    ensure_column("academic_courses", "grade_4", "REAL")?;
+    ensure_column("academic_courses", "result_status", "TEXT NOT NULL DEFAULT 'Đạt'")?;
+    ensure_column("academic_courses", "category", "TEXT NOT NULL DEFAULT 'dai_cuong'")?;
+    ensure_column("academic_courses", "status", "TEXT NOT NULL DEFAULT 'normal'")?;
+    ensure_column("academic_courses", "note", "TEXT")?;
+
     Ok(())
 }
 
@@ -387,7 +442,9 @@ pub fn get_courses_by_semester(
         SELECT id, semester_id, course_code, course_name, credits,
                midterm_score, final_score, other_scores,
                summary_score_10, summary_score_4, grade_char,
-               is_passed, is_gpa_calculated, created_at, updated_at
+               is_passed, is_gpa_calculated, created_at, updated_at,
+               process_point, practice_point, final_point, course_point,
+               grade_4, result_status, category, status, note
         FROM academic_courses
         WHERE semester_id = ?1
         ORDER BY course_code ASC
@@ -411,6 +468,15 @@ pub fn get_courses_by_semester(
             is_gpa_calculated: row.get::<_, i64>(12)? != 0,
             created_at: row.get(13)?,
             updated_at: row.get(14)?,
+            process_point: row.get(15)?,
+            practice_point: row.get(16)?,
+            final_point: row.get(17)?,
+            course_point: row.get(18)?,
+            grade_4: row.get(19)?,
+            result_status: row.get(20)?,
+            category: row.get(21)?,
+            status: row.get(22)?,
+            note: row.get(23)?,
         })
     })?;
 
@@ -774,6 +840,74 @@ pub fn update_drl_from_portal(
 
     tx.commit()?;
     Ok(updated_count)
+}
+
+/// Xóa sổ toàn bộ mock courses cũ trong SQLite và nạp bộ dữ liệu chuẩn xác 100%
+/// theo đặc tả của UIT (HK1: 6 môn - 18 TC, HK2: 7 môn - 24 TC).
+pub fn purge_and_seed_canonical_data(conn: &mut Connection) -> Result<(), rusqlite::Error> {
+    let tx = conn.transaction()?;
+    let now = chrono::Utc::now().timestamp();
+
+    // 0. Đảm bảo academic_semesters tồn tại để thỏa mãn foreign key
+    tx.execute(
+        "INSERT INTO academic_semesters (id, academic_year, semester_term, is_completed, created_at, updated_at)
+         VALUES 
+            ('2025-2026.1', '2025-2026', 1, 1, ?1, ?1),
+            ('2025-2026.2', '2025-2026', 2, 1, ?1, ?1)
+         ON CONFLICT(id) DO UPDATE SET updated_at = excluded.updated_at;",
+        params![now],
+    )?;
+
+    // 1. Dọn dẹp dữ liệu mock
+    tx.execute("DELETE FROM academic_courses;", [])?;
+    tx.execute("DELETE FROM academic_macro_metrics;", [])?;
+
+    // 2. Nạp dữ liệu Macro Học Kỳ (SSOT)
+    tx.execute(
+        "INSERT INTO academic_macro_metrics 
+            (semester_id, semester_label, year_name, term_gpa, cumulative_gpa, term_credits, cumulative_credits, drl_score, rank_label, updated_at)
+         VALUES 
+            ('2025-2026.1', 'Học kỳ 1/2025-2026', '2025-2026', 8.20, 8.20, 18, 18, 95, 'Giỏi', ?1),
+            ('2025-2026.2', 'Học kỳ 2/2025-2026', '2025-2026', 8.55, 8.40, 24, 42, 100, 'Xuất sắc', ?1);",
+        params![now],
+    )?;
+
+    // 3. Nạp danh sách môn học HK1 (18 TC)
+    let hk1_courses = [
+        ("CS005-1", "2025-2026.1", "CS005", "Giới thiệu ngành Khoa học Máy tính", 1, Some(10.0), None, None, Some(9.5), 9.7, 4.0, "A+", "Đạt", "co_so_nganh"),
+        ("ENG01-2", "2025-2026.1", "ENG01", "Anh văn 1", 4, Some(8.0), None, None, Some(7.5), 7.7, 3.0, "B", "Đạt", "dai_cuong"),
+        ("IT001-3", "2025-2026.1", "IT001", "Nhập môn lập trình", 4, Some(10.0), Some(9.5), None, Some(8.5), 9.1, 4.0, "A+", "Đạt", "co_so_nganh"),
+        ("MA003-4", "2025-2026.1", "MA003", "Đại số tuyến tính", 3, Some(10.0), None, Some(9.5), Some(10.0), 9.9, 4.0, "A+", "Đạt", "dai_cuong"),
+        ("MA006-5", "2025-2026.1", "MA006", "Giải tích", 4, Some(10.0), None, Some(6.5), Some(7.0), 7.5, 3.0, "B", "Đạt", "dai_cuong"),
+        ("SS006-6", "2025-2026.1", "SS006", "Pháp luật đại cương", 2, None, None, Some(5.5), Some(5.5), 5.5, 2.0, "C", "Đạt", "dai_cuong"),
+    ];
+
+    // 4. Nạp danh sách môn học HK2 (24 TC)
+    let hk2_courses = [
+        ("IT002-1", "2025-2026.2", "IT002", "Lập trình hướng đối tượng", 4, Some(10.0), Some(9.0), None, Some(6.5), 8.0, 3.5, "B+", "Đạt", "co_so_nganh"),
+        ("IT003-2", "2025-2026.2", "IT003", "Cấu trúc dữ liệu và giải thuật", 4, Some(10.0), Some(9.0), None, Some(7.5), 8.5, 3.7, "A", "Đạt", "co_so_nganh"),
+        ("IT012-3", "2025-2026.2", "IT012", "Tổ chức và cấu trúc máy tính 2", 4, Some(10.0), Some(9.5), Some(8.5), Some(8.5), 8.9, 3.7, "A", "Đạt", "co_so_nganh"),
+        ("MA004-4", "2025-2026.2", "MA004", "Cấu trúc rời rạc", 4, Some(10.0), None, Some(8.5), Some(10.0), 9.7, 4.0, "A+", "Đạt", "co_so_nganh"),
+        ("MA005-5", "2025-2026.2", "MA005", "Xác suất thống kê", 3, Some(10.0), None, Some(8.0), Some(9.5), 9.3, 4.0, "A+", "Đạt", "co_so_nganh"),
+        ("SS004-6", "2025-2026.2", "SS004", "Kỹ năng nghề nghiệp", 2, Some(10.0), None, None, Some(9.5), 9.7, 4.0, "A+", "Đạt", "dai_cuong"),
+        ("SS007-7", "2025-2026.2", "SS007", "Triết học Mác – Lênin", 3, Some(7.5), None, None, Some(4.0), 5.8, 2.0, "C", "Đạt", "dai_cuong"),
+    ];
+
+    let mut stmt = tx.prepare(
+        "INSERT INTO academic_courses 
+            (id, semester_id, course_code, course_name, credits, process_point, practice_point, midterm_score, final_point, course_point, grade_4, grade_char, result_status, category, summary_score_10, summary_score_4, final_score, is_passed, is_gpa_calculated, status, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?10, ?11, ?9, 1, 1, ?13, ?15);"
+    )?;
+
+    for c in hk1_courses.iter().chain(hk2_courses.iter()) {
+        stmt.execute(params![
+            c.0, c.1, c.2, c.3, c.4, c.5, c.6, c.7, c.8, c.9, c.10, c.11, c.12, c.13, now
+        ])?;
+    }
+
+    drop(stmt);
+    tx.commit()?;
+    Ok(())
 }
 
 // ============================================================
@@ -1158,5 +1292,80 @@ mod tests {
         let count = update_drl_from_portal(&mut conn, &drl_data)
             .expect("update DRL phải thành công dù không có row nào khớp");
         assert_eq!(count, 0, "Không có row nào khớp → count phải là 0");
+    }
+
+    #[test]
+    fn test_purge_and_seed_canonical_data() {
+        let mut conn = setup_test_db();
+
+        // Chạy purge và nạp dữ liệu chuẩn UIT
+        purge_and_seed_canonical_data(&mut conn).expect("purge_and_seed phải thành công");
+
+        // 1. Kiểm tra không có bất kỳ môn rác PE nào
+        let pe_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM academic_courses WHERE course_code LIKE 'PE00%'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(pe_count, 0, "Không được tồn tại môn PE nào");
+
+        // 2. Kiểm tra HK1 có đúng 6 môn và 18 tín chỉ
+        let hk1_courses: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM academic_courses WHERE semester_id = '2025-2026.1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(hk1_courses, 6, "HK1 phải có đúng 6 môn học");
+
+        let hk1_credits: i64 = conn
+            .query_row(
+                "SELECT SUM(credits) FROM academic_courses WHERE semester_id = '2025-2026.1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(hk1_credits, 18, "HK1 phải có đúng 18 tín chỉ");
+
+        // 3. Kiểm tra HK2 có đúng 7 môn và 24 tín chỉ
+        let hk2_courses: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM academic_courses WHERE semester_id = '2025-2026.2'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(hk2_courses, 7, "HK2 phải có đúng 7 môn học");
+
+        let hk2_credits: i64 = conn
+            .query_row(
+                "SELECT SUM(credits) FROM academic_courses WHERE semester_id = '2025-2026.2'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(hk2_credits, 24, "HK2 phải có đúng 24 tín chỉ");
+
+        // 4. Kiểm tra macro metrics của cả 2 kỳ
+        let macro_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM academic_macro_metrics", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(macro_count, 2);
+
+        // 5. Kiểm tra các trường điểm (QT, TH, GK, CK) được lưu chính xác
+        let it001 = get_courses_by_semester(&conn, "2025-2026.1")
+            .unwrap()
+            .into_iter()
+            .find(|c| c.course_code == "IT001")
+            .expect("Phải tìm thấy IT001 trong HK1");
+        assert_eq!(it001.process_point, Some(10.0));
+        assert_eq!(it001.practice_point, Some(9.5));
+        assert_eq!(it001.final_point, Some(8.5));
+        assert_eq!(it001.course_point, Some(9.1));
+        assert_eq!(it001.grade_4, Some(4.0));
+        assert_eq!(it001.grade_char.as_deref(), Some("A+"));
     }
 }
