@@ -583,3 +583,12 @@ pub fn get_academic_curriculum(
     crate::db::academic::get_all_curriculum_courses(&conn)
         .map_err(|e| format!("Lỗi get_academic_curriculum: {e}"))
 }
+
+/// Trả về sync token hiện tại (hoặc sinh mới nếu chưa có) để hiển thị
+/// trong SyncTokenDisplay và dán vào Tampermonkey script.
+#[tauri::command]
+pub fn get_sync_token(db: tauri::State<'_, SharedDb>) -> Result<String, String> {
+    let conn = db.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
+    crate::db::settings::get_or_create_sync_token(&conn)
+        .map_err(|e| format!("Lỗi get_sync_token: {e}"))
+}

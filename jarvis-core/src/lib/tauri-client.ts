@@ -302,6 +302,14 @@ export async function getVaultStats(): Promise<VaultStatsDto> {
   return invoke<VaultStatsDto>("get_vault_stats");
 }
 
+/**
+ * Trả về sync token hiện tại (hoặc sinh mới nếu chưa có).
+ * Dùng trong SyncTokenDisplay để hiển thị token cho người dùng dán vào Tampermonkey.
+ */
+export async function getSyncToken(): Promise<string> {
+  return invoke<string>("get_sync_token");
+}
+
 
 
 

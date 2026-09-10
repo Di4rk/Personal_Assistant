@@ -22,3 +22,26 @@ pub fn set_setting(conn: &Connection, key: &str, value: &str) -> SqlResult<()> {
     )?;
     Ok(())
 }
+
+/// Trả về sync token hiện có hoặc sinh token hex ngẫu nhiên 32 ký tự rồi lưu lại.
+/// Token được dùng để xác thực request từ Tampermonkey userscript → sync server.
+/// Idempotent: gọi nhiều lần trả về cùng 1 token.
+pub fn get_or_create_sync_token(conn: &Connection) -> SqlResult<String> {
+    // Kiểm tra token hiện có
+    if let Some(token) = get_setting(conn, "sync_token")? {
+        if !token.is_empty() {
+            return Ok(token);
+        }
+    }
+
+    // Sinh token ngẫu nhiên 32-byte dưới dạng hex (64 ký tự)
+    use rand::Rng;
+    let mut rng = rand::thread_rng();
+    let token: String = (0..32)
+        .map(|_| format!("{:02x}", rng.gen::<u8>()))
+        .collect();
+
+    set_setting(conn, "sync_token", &token)?;
+    Ok(token)
+}
+

@@ -75,6 +75,19 @@ pub fn run() {
                 server::run_server(server_db).await;
             });
 
+            // Portal Browser Bridge — Loopback sync server nhận payload từ
+            // Tampermonkey userscript trên student.uit.edu.vn.
+            // Chỉ bind 127.0.0.1, xác thực qua X-Jarvis-Sync-Token.
+            let sync_app_handle = app.handle().clone();
+            let sync_db = shared_db.clone();
+            tauri::async_runtime::spawn(async move {
+                crate::modules::academic::sync_server::start_sync_server(
+                    sync_app_handle,
+                    sync_db,
+                )
+                .await;
+            });
+
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -124,6 +137,7 @@ pub fn run() {
             commands::vault::scan_vault,
             commands::vault::search_vault,
             commands::vault::get_vault_stats,
+            commands::academic::get_sync_token,
         ])
         .run(tauri::generate_context!());
 
