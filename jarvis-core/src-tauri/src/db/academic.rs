@@ -259,6 +259,19 @@ pub fn ensure_academic_schema(conn: &Connection) -> SqlResult<()> {
             drl INTEGER,
             updated_at INTEGER NOT NULL
         );
+
+        -- Bảng tóm tắt toàn khóa: sentinel row id='MAIN' lưu cDRL, cGPA, tổng TC.
+        -- Tách riêng để tránh sentinel row nằm lẫn trong bảng học kỳ gây drift.
+        CREATE TABLE IF NOT EXISTS academic_program_summary (
+            id                  TEXT PRIMARY KEY,  -- luôn là 'MAIN'
+            cumulative_gpa      REAL,
+            cumulative_drl      REAL,
+            cumulative_credits  INTEGER,
+            total_degree_credits INTEGER DEFAULT 126,
+            classification      TEXT,
+            drl_classification  TEXT,
+            updated_at          INTEGER NOT NULL
+        );
         "#,
     )?;
     Ok(())
