@@ -35,21 +35,35 @@ pub struct CreateStructuredNoteDto {
     pub vault_path: Option<String>,
 }
 
-fn slugify(title: &str) -> String {
-    let slug: String = title
-        .trim()
+const WINDOWS_RESERVED_CHARS: &[char] = &['\\', '/', ':', '*', '?', '"', '<', '>', '|'];
+const WINDOWS_RESERVED_NAMES: &[&str] = &[
+    "CON", "PRN", "AUX", "NUL",
+    "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+    "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+];
+
+pub fn slugify_title(title: &str) -> String {
+    let stripped: String = title
         .chars()
-        .map(|c| if c.is_alphanumeric() { c.to_ascii_lowercase() } else { '-' })
+        .filter(|c| !WINDOWS_RESERVED_CHARS.contains(c))
         .collect();
-    let cleaned: String = slug
-        .split('-')
-        .filter(|s| !s.is_empty())
+
+    let mut slug = stripped
+        .trim()
+        .to_lowercase()
+        .split_whitespace()
         .collect::<Vec<_>>()
         .join("-");
-    if cleaned.is_empty() {
-        "untitled".to_string()
+
+    slug = slug.trim_end_matches(['.', ' ']).to_string();
+    if slug.is_empty() {
+        slug = "untitled".to_string();
+    }
+
+    if WINDOWS_RESERVED_NAMES.contains(&slug.to_uppercase().as_str()) {
+        format!("{slug}-note")
     } else {
-        cleaned
+        slug
     }
 }
 
@@ -139,13 +153,22 @@ pub async fn create_structured_note(
             _ => "notes",
         };
 
-        let slug = slugify(&dto.title);
         let target_dir = vault_root.join(folder);
         std::fs::create_dir_all(&target_dir)
             .map_err(|e| format!("Không thể tạo thư mục {}: {}", target_dir.display(), e))?;
 
-        let relative_path = format!("{}/{}.md", folder, slug);
-        let file_path = vault_root.join(&relative_path);
+        let base_slug = slugify_title(&dto.title);
+        let mut candidate_slug = base_slug.clone();
+        let mut counter = 2;
+        let (relative_path, full_path) = loop {
+            let rel = format!("{}/{}.md", folder, candidate_slug);
+            let full = vault_root.join(&rel);
+            if !full.exists() {
+                break (rel, full);
+            }
+            candidate_slug = format!("{}-{}", base_slug, counter);
+            counter += 1;
+        };
 
         // 4. Sinh nội dung Markdown chuẩn
         let tags_yaml = serde_json::to_string(&dto.tags).unwrap_or_else(|_| "[]".to_string());
@@ -169,9 +192,9 @@ pub async fn create_structured_note(
             }
         }
 
-        // 5. Ghi file ra đĩa
-        std::fs::write(&file_path, &md_content)
-            .map_err(|e| format!("Không thể ghi file {}: {}", file_path.display(), e))?;
+        // 5. Ghi file ra đĩa (không clobber file cũ)
+        std::fs::write(&full_path, &md_content)
+            .map_err(|e| format!("Không thể ghi file {}: {}", full_path.display(), e))?;
 
         let now_ts = chrono::Utc::now().timestamp();
         let frontmatter_json = serde_json::json!({
@@ -346,4 +369,75 @@ pub async fn get_vault_stats(
     })
     .await
     .map_err(|e| format!("Lỗi runtime worker get_vault_stats: {e}"))?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_windows_slug_sanitization() {
+        assert_eq!(slugify_title("ICPC: Cặp ghép cực đại"), "icpc-cặp-ghép-cực-đại");
+        assert_eq!(slugify_title("Con"), "con-note");
+        assert_eq!(slugify_title("CON"), "con-note");
+        assert_eq!(slugify_title("test..."), "test");
+        assert_eq!(slugify_title(""), "untitled");
+        assert_eq!(slugify_title("   AUX   "), "aux-note");
+        assert_eq!(slugify_title("note*with?invalid<chars>|"), "notewithinvalidchars");
+    }
+
+    #[test]
+    fn test_auto_disambiguation_avoids_clobbering() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let vault_root = temp_dir.path();
+        let folder = "algo";
+        let target_dir = vault_root.join(folder);
+        std::fs::create_dir_all(&target_dir).expect("create dir");
+
+        let title = "Segment Tree";
+        let base_slug = slugify_title(title);
+        assert_eq!(base_slug, "segment-tree");
+
+        // Simulate creating first note
+        let mut candidate_slug = base_slug.clone();
+        let mut counter = 2;
+        let (rel1, full1) = loop {
+            let rel = format!("{}/{}.md", folder, candidate_slug);
+            let full = vault_root.join(&rel);
+            if !full.exists() {
+                break (rel, full);
+            }
+            candidate_slug = format!("{}-{}", base_slug, counter);
+            counter += 1;
+        };
+        assert_eq!(rel1, "algo/segment-tree.md");
+        std::fs::write(&full1, "Note 1 content").expect("write note 1");
+
+        // Simulate creating second note with identical title
+        candidate_slug = base_slug.clone();
+        counter = 2;
+        let (rel2, full2) = loop {
+            let rel = format!("{}/{}.md", folder, candidate_slug);
+            let full = vault_root.join(&rel);
+            if !full.exists() {
+                break (rel, full);
+            }
+            candidate_slug = format!("{}-{}", base_slug, counter);
+            counter += 1;
+        };
+        assert_eq!(rel2, "algo/segment-tree-2.md");
+        std::fs::write(&full2, "Note 2 content").expect("write note 2");
+
+        // Both files must exist on disk with separate content
+        assert!(full1.exists());
+        assert!(full2.exists());
+        assert_eq!(
+            std::fs::read_to_string(&full1).expect("read full1"),
+            "Note 1 content"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&full2).expect("read full2"),
+            "Note 2 content"
+        );
+    }
 }
