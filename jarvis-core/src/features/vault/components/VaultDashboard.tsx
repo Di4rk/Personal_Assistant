@@ -1,7 +1,18 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { FolderGit2, RefreshCw, Search, FileText, Link2, Hash, Loader2 } from "lucide-react";
-import { getVaultStats, scanVault, searchVault } from "@/lib/tauri-client";
-import type { VaultStatsDto, VaultSearchResultDto } from "../types";
+import {
+  FolderGit2,
+  RefreshCw,
+  Search,
+  FileText,
+  Link2,
+  Hash,
+  Loader2,
+  Plus,
+  ExternalLink,
+} from "lucide-react";
+import { getVaultStats, scanVault, searchVault, openOnenoteLink } from "@/lib/tauri-client";
+import type { VaultStatsDto, VaultSearchResultDto, NoteType } from "../types";
+import { QuickCaptureModal } from "./QuickCaptureModal";
 
 export const VaultDashboard: React.FC = () => {
   const [stats, setStats] = useState<VaultStatsDto | null>(null);
@@ -9,6 +20,7 @@ export const VaultDashboard: React.FC = () => {
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [isQuickCaptureOpen, setIsQuickCaptureOpen] = useState<boolean>(false);
 
   // Search state
   const [searchQuery, setSearchQuery] = useState<string>("");
@@ -28,6 +40,41 @@ export const VaultDashboard: React.FC = () => {
   useEffect(() => {
     void loadStats();
   }, [loadStats]);
+
+  const renderNoteTypeBadge = (type?: NoteType | string) => {
+    switch (type) {
+      case "ALGO_TRICK":
+        return (
+          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-blue-950/60 text-blue-300 border border-blue-800/40">
+            ALGO
+          </span>
+        );
+      case "TEACHING_SHEET":
+        return (
+          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-950/60 text-emerald-300 border border-emerald-800/40">
+            TEACHING
+          </span>
+        );
+      case "ONENOTE_LINK":
+        return (
+          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-purple-950/60 text-purple-300 border border-purple-800/40">
+            ONENOTE
+          </span>
+        );
+      case "ACADEMIC_SUMMARY":
+        return (
+          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-950/60 text-amber-300 border border-amber-800/40">
+            ACADEMIC
+          </span>
+        );
+      default:
+        return (
+          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800/60 text-zinc-400 border border-zinc-700/40">
+            NOTE
+          </span>
+        );
+    }
+  };
 
   // Debounced search handler (200ms)
   const handleQueryChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -113,9 +160,16 @@ export const VaultDashboard: React.FC = () => {
               className="px-3 py-1.5 text-xs bg-zinc-950 border border-zinc-800 rounded-lg text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-violet-500 min-w-[280px]"
             />
             <button
+              onClick={() => setIsQuickCaptureOpen(true)}
+              className="flex items-center justify-center gap-1.5 px-3.5 py-1.5 bg-violet-600 hover:bg-violet-500 text-white text-xs font-medium rounded-lg transition-colors shadow-sm whitespace-nowrap"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>+ Quick Note</span>
+            </button>
+            <button
               onClick={handleManualSync}
               disabled={isSyncing}
-              className="flex items-center justify-center gap-2 px-4 py-1.5 bg-violet-600 hover:bg-violet-500 disabled:bg-violet-900/50 text-white text-xs font-medium rounded-lg transition-colors shadow-sm whitespace-nowrap"
+              className="flex items-center justify-center gap-2 px-4 py-1.5 bg-zinc-800 hover:bg-zinc-700 disabled:bg-zinc-900/50 text-zinc-200 text-xs font-medium rounded-lg transition-colors border border-zinc-700 shadow-sm whitespace-nowrap"
             >
               {isSyncing ? (
                 <>
@@ -246,19 +300,34 @@ export const VaultDashboard: React.FC = () => {
                 {stats.recentNotes.map((note) => (
                   <div
                     key={note.id}
-                    className="p-2.5 rounded-lg bg-zinc-950/50 border border-zinc-800/60 flex items-center justify-between"
+                    className="p-2.5 rounded-lg bg-zinc-950/50 border border-zinc-800/60 flex items-center justify-between hover:border-zinc-700 transition-colors gap-3"
                   >
-                    <div className="min-w-0 pr-2">
-                      <div className="text-xs font-medium text-zinc-200 truncate">
-                        {note.title}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 mb-0.5">
+                        {renderNoteTypeBadge(note.noteType)}
+                        <div className="text-xs font-medium text-zinc-200 truncate">
+                          {note.title}
+                        </div>
                       </div>
                       <div className="text-[10px] text-zinc-500 font-mono truncate">
                         {note.id}
                       </div>
                     </div>
-                    <span className="text-[10px] text-zinc-500 whitespace-nowrap font-mono">
-                      {new Date(note.updatedAt * 1000).toLocaleDateString()}
-                    </span>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      {note.externalUri && note.externalUri.trim().length > 0 && (
+                        <button
+                          onClick={() => void openOnenoteLink(note.externalUri!)}
+                          title={`Mở trong OneNote: ${note.externalUri}`}
+                          className="p-1 rounded bg-purple-950/50 hover:bg-purple-900/60 text-purple-400 hover:text-purple-300 border border-purple-800/40 transition-colors"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                      <span className="text-[10px] text-zinc-500 whitespace-nowrap font-mono">
+                        {new Date(note.updatedAt * 1000).toLocaleDateString()}
+                      </span>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -270,6 +339,14 @@ export const VaultDashboard: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Quick Capture Modal */}
+      <QuickCaptureModal
+        isOpen={isQuickCaptureOpen}
+        onClose={() => setIsQuickCaptureOpen(false)}
+        onSuccess={() => void loadStats()}
+        vaultPath={vaultPath}
+      />
     </div>
   );
 };

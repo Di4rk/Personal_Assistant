@@ -34,6 +34,8 @@ pub struct RecentNoteDto {
     pub id: String,
     pub title: String,
     pub updated_at: i64,
+    pub note_type: String,
+    pub external_uri: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -102,6 +104,55 @@ pub fn extract_frontmatter_and_content(raw_text: &str) -> (Option<String>, Vec<S
     }
 
     (None, Vec::new(), raw_text.to_string())
+}
+
+/// Separates markdown body into prose and code snippets.
+/// Code fence blocks (```...```) are collected into code, the rest into prose.
+pub fn split_prose_and_code(body: &str) -> (String, String) {
+    let mut prose_lines = Vec::new();
+    let mut code_lines = Vec::new();
+    let mut in_code_block = false;
+
+    for line in body.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("```") {
+            in_code_block = !in_code_block;
+            continue;
+        }
+
+        if in_code_block {
+            code_lines.push(line);
+        } else {
+            prose_lines.push(line);
+        }
+    }
+
+    (prose_lines.join("\n"), code_lines.join("\n"))
+}
+
+/// Parses note_type and external_uri from the serialized frontmatter JSON if available.
+pub fn parse_note_type_and_uri_from_json(json_opt: &Option<String>) -> (String, String) {
+    if let Some(json_str) = json_opt {
+        if let Ok(val) = serde_json::from_str::<serde_json::Value>(json_str) {
+            let note_type = val
+                .get("note_type")
+                .or_else(|| val.get("noteType"))
+                .or_else(|| val.get("type"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("GENERAL")
+                .to_string();
+            let external_uri = val
+                .get("external_uri")
+                .or_else(|| val.get("externalUri"))
+                .or_else(|| val.get("uri"))
+                .or_else(|| val.get("onenote_uri"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            return (note_type, external_uri);
+        }
+    }
+    ("GENERAL".to_string(), "".to_string())
 }
 
 /// Extracts wikilinks `[[target|alias]]` or `[[target]]` from text.
@@ -426,10 +477,11 @@ pub fn scan_and_sync_vault(conn: &mut Connection, root_path: &Path) -> AppResult
 
     // Process deletions
     for (id, rowid_key, title, content_cache) in to_delete {
-        // Contentless FTS5 delete: must pass old title and content
+        // Contentless FTS5 delete: must pass old title, prose, and code
+        let (old_prose, old_code) = split_prose_and_code(&content_cache);
         tx.execute(
-            "INSERT INTO vault_fts(vault_fts, rowid, title, content) VALUES('delete', ?1, ?2, ?3)",
-            params![rowid_key, title, content_cache],
+            "INSERT INTO vault_fts(vault_fts, rowid, title, prose, code) VALUES('delete', ?1, ?2, ?3, ?4)",
+            params![rowid_key, title, old_prose, old_code],
         )?;
 
         tx.execute(
@@ -446,20 +498,22 @@ pub fn scan_and_sync_vault(conn: &mut Connection, root_path: &Path) -> AppResult
     // Process updates
     for (rowid_key, old_title, old_content, parsed) in to_update {
         // Delete old entry in FTS5
+        let (old_prose, old_code) = split_prose_and_code(&old_content);
         tx.execute(
-            "INSERT INTO vault_fts(vault_fts, rowid, title, content) VALUES('delete', ?1, ?2, ?3)",
-            params![rowid_key, old_title, old_content],
+            "INSERT INTO vault_fts(vault_fts, rowid, title, prose, code) VALUES('delete', ?1, ?2, ?3, ?4)",
+            params![rowid_key, old_title, old_prose, old_code],
         )?;
 
         let tags_json = serde_json::to_string(&parsed.tags).unwrap_or_else(|_| "[]".to_string());
+        let (note_type, external_uri) = parse_note_type_and_uri_from_json(&parsed.frontmatter_json);
 
         // Update vault_notes
         tx.execute(
             r#"
             UPDATE vault_notes
             SET title = ?1, tags = ?2, frontmatter_json = ?3, file_mtime = ?4,
-                content_cache = ?5, updated_at = ?6
-            WHERE rowid_key = ?7
+                content_cache = ?5, updated_at = ?6, note_type = ?7, external_uri = ?8
+            WHERE rowid_key = ?9
             "#,
             params![
                 parsed.title,
@@ -468,14 +522,17 @@ pub fn scan_and_sync_vault(conn: &mut Connection, root_path: &Path) -> AppResult
                 parsed.file_mtime,
                 parsed.content,
                 now_ts,
+                note_type,
+                external_uri,
                 rowid_key
             ],
         )?;
 
         // Re-insert into FTS5
+        let (prose, code) = split_prose_and_code(&parsed.content);
         tx.execute(
-            "INSERT INTO vault_fts(rowid, title, content) VALUES(?1, ?2, ?3)",
-            params![rowid_key, parsed.title, parsed.content],
+            "INSERT INTO vault_fts(rowid, title, prose, code) VALUES(?1, ?2, ?3, ?4)",
+            params![rowid_key, parsed.title, prose, code],
         )?;
 
         // Update links
@@ -494,11 +551,12 @@ pub fn scan_and_sync_vault(conn: &mut Connection, root_path: &Path) -> AppResult
     // Process inserts
     for parsed in to_insert {
         let tags_json = serde_json::to_string(&parsed.tags).unwrap_or_else(|_| "[]".to_string());
+        let (note_type, external_uri) = parse_note_type_and_uri_from_json(&parsed.frontmatter_json);
 
         tx.execute(
             r#"
-            INSERT INTO vault_notes(id, title, tags, frontmatter_json, file_mtime, content_cache, updated_at)
-            VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            INSERT INTO vault_notes(id, title, tags, frontmatter_json, file_mtime, content_cache, updated_at, note_type, external_uri)
+            VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
             "#,
             params![
                 parsed.id,
@@ -507,15 +565,18 @@ pub fn scan_and_sync_vault(conn: &mut Connection, root_path: &Path) -> AppResult
                 parsed.frontmatter_json,
                 parsed.file_mtime,
                 parsed.content,
-                now_ts
+                now_ts,
+                note_type,
+                external_uri
             ],
         )?;
 
         let rowid_key = tx.last_insert_rowid();
+        let (prose, code) = split_prose_and_code(&parsed.content);
 
         tx.execute(
-            "INSERT INTO vault_fts(rowid, title, content) VALUES(?1, ?2, ?3)",
-            params![rowid_key, parsed.title, parsed.content],
+            "INSERT INTO vault_fts(rowid, title, prose, code) VALUES(?1, ?2, ?3, ?4)",
+            params![rowid_key, parsed.title, prose, code],
         )?;
 
         for target in parsed.links {
@@ -569,13 +630,16 @@ pub fn query_vault_stats(conn: &Connection) -> AppResult<VaultStatsDto> {
     let mut recent_notes = Vec::new();
     {
         let mut stmt = conn.prepare(
-            "SELECT id, title, updated_at FROM vault_notes ORDER BY updated_at DESC, rowid_key DESC LIMIT 10",
+            "SELECT id, title, updated_at, COALESCE(note_type, 'GENERAL'), COALESCE(external_uri, '') 
+             FROM vault_notes ORDER BY updated_at DESC, rowid_key DESC LIMIT 10",
         )?;
         let rows = stmt.query_map([], |r| {
             Ok(RecentNoteDto {
                 id: r.get(0)?,
                 title: r.get(1)?,
                 updated_at: r.get(2)?,
+                note_type: r.get(3)?,
+                external_uri: r.get(4)?,
             })
         })?;
 
@@ -726,7 +790,7 @@ Some content here."#;
         )
         .expect("insert dummy note");
         conn.execute(
-            "INSERT INTO vault_fts(rowid, title, content) VALUES(1, 'Test', 'segment tree algorithm details')",
+            "INSERT INTO vault_fts(rowid, title, prose, code) VALUES(1, 'Test', 'segment tree algorithm details', '')",
             [],
         )
         .expect("insert dummy fts");
@@ -854,5 +918,53 @@ Some content here."#;
             .expect("query vault_links after resolution");
         assert_eq!(resolved_target_id, Some("B.md".to_string()));
         assert_eq!(unresolved_target_after, "B");
+    }
+
+    #[test]
+    fn test_fts5_frontmatter_not_indexed() {
+        let dir = tempdir().expect("temp dir");
+        let vault_path = dir.path();
+        let note_path = vault_path.join("fib.md");
+
+        let mut file = File::create(&note_path).expect("create fib note");
+        write!(
+            file,
+            "---\ntitle: \"Fibonacci Note\"\nnote_type: \"ALGO_TRICK\"\ntags: [dynamic_programming, math]\nexternal_uri: \"onenote:https://example.com\"\n---\n# Insight\nFibonacci sequence computation via matrix exponentiation."
+        )
+        .expect("write fib note");
+
+        let mut conn = Connection::open_in_memory().expect("in-memory db");
+        init_vault_tables(&conn).expect("init tables");
+
+        scan_and_sync_vault(&mut conn, vault_path).expect("sync vault");
+
+        // Frontmatter fields should NOT be indexed in FTS5
+        let note_type_match: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM vault_fts WHERE vault_fts MATCH 'note_type'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("query note_type");
+        assert_eq!(note_type_match, 0, "YAML frontmatter field 'note_type' must not be in FTS5");
+
+        let tags_field_match: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM vault_fts WHERE vault_fts MATCH 'tags'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("query tags keyword");
+        assert_eq!(tags_field_match, 0, "YAML frontmatter field 'tags:' must not be in FTS5");
+
+        // Actual content in body SHOULD match
+        let fib_match: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM vault_fts WHERE vault_fts MATCH 'exponentiation'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("query body content");
+        assert_eq!(fib_match, 1, "Body content should be indexed in FTS5");
     }
 }

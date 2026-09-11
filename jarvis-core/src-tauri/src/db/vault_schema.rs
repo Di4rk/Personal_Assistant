@@ -2,6 +2,34 @@
 
 use rusqlite::{Connection, Result as SqlResult};
 
+/// Helper to safely check if a column exists in a given table.
+pub fn column_exists(conn: &Connection, table: &str, column: &str) -> Result<bool, String> {
+    let mut stmt = conn
+        .prepare(&format!("PRAGMA table_info({})", table))
+        .map_err(|e| format!("Failed to prepare table_info for {}: {}", table, e))?;
+
+    let names = stmt
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|e| format!("Failed to query table_info for {}: {}", table, e))?;
+
+    for name in names {
+        let name = name.map_err(|e| format!("Failed to read column name: {}", e))?;
+        if name.eq_ignore_ascii_case(column) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Helper to safely add a column to a table if it does not already exist.
+pub fn ensure_column(conn: &Connection, table: &str, column_name: &str, column_def: &str) -> Result<(), String> {
+    if !column_exists(conn, table, column_name)? {
+        conn.execute(&format!("ALTER TABLE {} ADD COLUMN {}", table, column_def), [])
+            .map_err(|e| format!("Failed to add column {} to {}: {}", column_name, table, e))?;
+    }
+    Ok(())
+}
+
 /// Verifies that SQLite was compiled with FTS5 support.
 pub fn check_fts5_support(conn: &Connection) -> SqlResult<()> {
     let fts5_enabled: i64 = conn.query_row(
@@ -32,11 +60,22 @@ pub fn init_vault_tables(conn: &Connection) -> SqlResult<()> {
             frontmatter_json TEXT,                     -- Raw metadata JSON
             file_mtime INTEGER NOT NULL,              -- Unix timestamp for incremental sync
             content_cache TEXT NOT NULL DEFAULT '',    -- Needed for FTS5 contentless 'delete'
-            updated_at INTEGER NOT NULL
+            updated_at INTEGER NOT NULL,
+            -- Giá trị mặc định 'GENERAL' phải khớp với enum NoteType bên TypeScript types.ts
+            note_type TEXT DEFAULT 'GENERAL',
+            external_uri TEXT DEFAULT ''
         )
         "#,
         [],
     )?;
+
+    // Migration guard: ensure columns exist for existing tables
+    ensure_column(conn, "vault_notes", "note_type", "note_type TEXT DEFAULT 'GENERAL'").map_err(|e| {
+        rusqlite::Error::UserFunctionError(e.into())
+    })?;
+    ensure_column(conn, "vault_notes", "external_uri", "external_uri TEXT DEFAULT ''").map_err(|e| {
+        rusqlite::Error::UserFunctionError(e.into())
+    })?;
 
     // 2. Outlinks / Backlinks table
     conn.execute(
@@ -94,18 +133,48 @@ pub fn init_vault_tables(conn: &Connection) -> SqlResult<()> {
         [],
     )?;
 
-    // 3. FTS5 Virtual Table (Contentless)
-    conn.execute(
-        r#"
-        CREATE VIRTUAL TABLE IF NOT EXISTS vault_fts USING fts5(
-            title,
-            content,
-            content='',
-            tokenize='unicode61 remove_diacritics 2'
-        )
-        "#,
-        [],
-    )?;
+    // 3. FTS5 Virtual Table (Contentless, Multi-column: title, prose, code)
+    let fts_needs_migration: bool = {
+        let table_sql: Option<String> = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='vault_fts'",
+                [],
+                |r| r.get(0),
+            )
+            .ok();
+
+        match table_sql {
+            Some(sql) => !sql.contains("prose") || !sql.contains("code"),
+            None => false,
+        }
+    };
+
+    if fts_needs_migration {
+        conn.execute_batch(
+            r#"
+            DROP TABLE IF EXISTS vault_fts;
+            CREATE VIRTUAL TABLE vault_fts USING fts5(
+                title,
+                prose,
+                code,
+                content='',
+                tokenize='unicode61 remove_diacritics 2'
+            );
+            "#,
+        )?;
+    } else {
+        conn.execute_batch(
+            r#"
+            CREATE VIRTUAL TABLE IF NOT EXISTS vault_fts USING fts5(
+                title,
+                prose,
+                code,
+                content='',
+                tokenize='unicode61 remove_diacritics 2'
+            );
+            "#,
+        )?;
+    }
 
     Ok(())
 }
@@ -128,5 +197,18 @@ mod tests {
             )
             .expect("query sqlite_master");
         assert_eq!(count, 3);
+    }
+
+    #[test]
+    fn test_init_vault_tables_migration_idempotency() {
+        let conn = Connection::open_in_memory().expect("in-memory db should open");
+        // First run
+        init_vault_tables(&conn).expect("first init must succeed");
+        // Second run (idempotency check)
+        init_vault_tables(&conn).expect("second init must succeed without duplicate column error");
+
+        // Verify columns exist
+        assert!(column_exists(&conn, "vault_notes", "note_type").unwrap());
+        assert!(column_exists(&conn, "vault_notes", "external_uri").unwrap());
     }
 }
