@@ -47,6 +47,7 @@ chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4"] }
 scraper = "0.22"
 walkdir = "2.4"
+open = "5.3"
 serde_yaml = "0.9"
 regex = "1"
 

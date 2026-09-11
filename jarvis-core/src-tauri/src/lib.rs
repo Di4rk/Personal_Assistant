@@ -137,6 +137,8 @@ pub fn run() {
             commands::vault::scan_vault,
             commands::vault::search_vault,
             commands::vault::get_vault_stats,
+            commands::vault::create_structured_note,
+            commands::vault::open_onenote_link,
             commands::academic::get_sync_token,
         ])
         .run(tauri::generate_context!());

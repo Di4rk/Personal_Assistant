@@ -11,7 +11,7 @@ import type {
   FullPortalIngestionRequest,
 } from "../features/academic/types";
 import type { LifeMatrixEntryDto } from "../features/life-matrix/types";
-import type { VaultSearchResultDto, VaultStatsDto } from "../features/vault/types";
+import type { CreateStructuredNoteDto, VaultSearchResultDto, VaultStatsDto } from "../features/vault/types";
 
 /**
  * Wrapper mỏng quanh invoke() để:
@@ -303,15 +303,23 @@ export async function getVaultStats(): Promise<VaultStatsDto> {
 }
 
 /**
+ * Tạo note có cấu trúc và đồng bộ ngay vào vault_notes & vault_fts.
+ */
+export async function createStructuredNote(dto: CreateStructuredNoteDto): Promise<string> {
+  return invoke<string>("create_structured_note", { dto });
+}
+
+/**
+ * Mở link OneNote an toàn sau khi validate scheme & ký tự.
+ */
+export async function openOnenoteLink(uri: string): Promise<void> {
+  return invoke<void>("open_onenote_link", { uri });
+}
+
+/**
  * Trả về sync token hiện tại (hoặc sinh mới nếu chưa có).
  * Dùng trong SyncTokenDisplay để hiển thị token cho người dùng dán vào Tampermonkey.
  */
 export async function getSyncToken(): Promise<string> {
   return invoke<string>("get_sync_token");
 }
-
-
-
-
-
-
