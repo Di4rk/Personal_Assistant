@@ -5,10 +5,12 @@ pub mod gamification;
 pub mod modules;
 pub mod server;
 pub mod services;
+pub mod tray;
 
 use std::sync::{Arc, Mutex};
 
 use tauri::Manager;
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
 use tokio::sync::watch;
 
 use services::cf_worker::{self, SyncLock};
@@ -88,14 +90,54 @@ pub fn run() {
                 .await;
             });
 
+            // Setup System Tray
+            crate::tray::setup_tray(app.handle())?;
+
+            // Global Shortcut Alt+K
+            let shortcut: Result<Shortcut, _> = "Alt+K".parse();
+            match shortcut {
+                Ok(sc) => {
+                    let app_handle = app.handle().clone();
+                    match app.global_shortcut().register(sc) {
+                        Ok(_) => {
+                            let _ = app.global_shortcut().on_shortcut(sc, move |_app, _shortcut, _event| {
+                                if let Some(window) = app_handle.get_webview_window("main") {
+                                    let is_visible = window.is_visible().unwrap_or(false);
+                                    if is_visible {
+                                        let _ = window.hide();
+                                    } else {
+                                        let _ = crate::tray::show_and_focus_hud(&window);
+                                    }
+                                }
+                            });
+                        }
+                        Err(e) => {
+                            eprintln!("[WARN] Failed to register Alt+K global shortcut: {}", e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[WARN] Failed to parse Alt+K shortcut: {}", e);
+                }
+            }
+
+            // Chặn sự kiện đóng cửa sổ (CloseRequested) trên main window để ẩn vào System Tray
+            if let Some(main_window) = app.get_webview_window("main") {
+                let window_clone = main_window.clone();
+                main_window.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        api.prevent_close();
+                        let _ = window_clone.hide();
+                    }
+                });
+            }
+
             Ok(())
         })
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { .. } = event {
                 if let Some(shutdown_tx) = window.app_handle().try_state::<watch::Sender<bool>>() {
-                    // Bỏ qua lỗi send có chủ đích: nếu receiver đã bị drop (worker
-                    // chết sớm vì lý do khác) thì không còn gì để báo hiệu nữa,
-                    // và đó không phải lỗi cần chặn quá trình đóng app.
                     let _ = shutdown_tx.send(true);
                 }
             }
