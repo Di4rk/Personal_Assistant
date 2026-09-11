@@ -1,6 +1,4 @@
-//! SQLite Schema and FTS5 Virtual Table setup for Native Vault Core.
-
-use rusqlite::{Connection, Result as SqlResult};
+use rusqlite::{Connection, OptionalExtension, Result as SqlResult};
 
 /// Helper to safely check if a column exists in a given table.
 pub fn column_exists(conn: &Connection, table: &str, column: &str) -> Result<bool, String> {
@@ -27,6 +25,80 @@ pub fn ensure_column(conn: &Connection, table: &str, column_name: &str, column_d
         conn.execute(&format!("ALTER TABLE {} ADD COLUMN {}", table, column_def), [])
             .map_err(|e| format!("Failed to add column {} to {}: {}", column_name, table, e))?;
     }
+    Ok(())
+}
+
+/// Checks whether vault_fts needs to be rebuilt (e.g. from legacy 2-column to 3-column prose/code).
+pub fn vault_fts_needs_rebuild(conn: &Connection) -> Result<bool, String> {
+    let sql: Option<String> = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='vault_fts'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| format!("Failed to check vault_fts schema: {e}"))?;
+
+    match sql {
+        None => Ok(false), // Bảng chưa tồn tại, init_vault_tables sẽ tạo mới
+        Some(ddl) => Ok(!ddl.contains("prose") || !ddl.contains("code")),
+    }
+}
+
+/// Re-indexes all existing notes from vault_notes into the newly recreated vault_fts.
+pub fn reindex_all_notes_to_fts(conn: &Connection) -> Result<(), String> {
+    let mut stmt = conn
+        .prepare("SELECT rowid_key, title, content_cache FROM vault_notes")
+        .map_err(|e| format!("Failed to prepare notes for reindexing: {e}"))?;
+
+    let notes = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })
+        .map_err(|e| format!("Failed to query notes for reindexing: {e}"))?;
+
+    let mut insert_stmt = conn
+        .prepare("INSERT INTO vault_fts(rowid, title, prose, code) VALUES (?1, ?2, ?3, ?4)")
+        .map_err(|e| format!("Failed to prepare FTS5 insert statement: {e}"))?;
+
+    for note in notes {
+        let (rowid, title, content_cache) =
+            note.map_err(|e| format!("Failed to read note row: {e}"))?;
+        let (prose, code) = crate::modules::vault::scanner::split_prose_and_code(&content_cache);
+        insert_stmt
+            .execute(rusqlite::params![rowid, title, prose, code])
+            .map_err(|e| format!("Failed to reindex note {rowid} into FTS5: {e}"))?;
+    }
+
+    Ok(())
+}
+
+/// Migrates vault_fts if it exists with legacy schema (missing prose or code columns).
+pub fn migrate_vault_fts_if_needed(conn: &Connection) -> Result<(), String> {
+    if !vault_fts_needs_rebuild(conn)? {
+        return Ok(());
+    }
+
+    conn.execute_batch(
+        r#"
+        DROP TABLE IF EXISTS vault_fts;
+        CREATE VIRTUAL TABLE vault_fts USING fts5(
+            title,
+            prose,
+            code,
+            content='',
+            tokenize='unicode61 remove_diacritics 2'
+        );
+        "#,
+    )
+    .map_err(|e| format!("Failed to recreate 3-column vault_fts: {e}"))?;
+
+    // Tự động re-index toàn bộ notes đang có trong DB vào FTS5 mới
+    reindex_all_notes_to_fts(conn)?;
     Ok(())
 }
 
@@ -134,47 +206,21 @@ pub fn init_vault_tables(conn: &Connection) -> SqlResult<()> {
     )?;
 
     // 3. FTS5 Virtual Table (Contentless, Multi-column: title, prose, code)
-    let fts_needs_migration: bool = {
-        let table_sql: Option<String> = conn
-            .query_row(
-                "SELECT sql FROM sqlite_master WHERE type='table' AND name='vault_fts'",
-                [],
-                |r| r.get(0),
-            )
-            .ok();
+    migrate_vault_fts_if_needed(conn).map_err(|e| {
+        rusqlite::Error::UserFunctionError(e.into())
+    })?;
 
-        match table_sql {
-            Some(sql) => !sql.contains("prose") || !sql.contains("code"),
-            None => false,
-        }
-    };
-
-    if fts_needs_migration {
-        conn.execute_batch(
-            r#"
-            DROP TABLE IF EXISTS vault_fts;
-            CREATE VIRTUAL TABLE vault_fts USING fts5(
-                title,
-                prose,
-                code,
-                content='',
-                tokenize='unicode61 remove_diacritics 2'
-            );
-            "#,
-        )?;
-    } else {
-        conn.execute_batch(
-            r#"
-            CREATE VIRTUAL TABLE IF NOT EXISTS vault_fts USING fts5(
-                title,
-                prose,
-                code,
-                content='',
-                tokenize='unicode61 remove_diacritics 2'
-            );
-            "#,
-        )?;
-    }
+    conn.execute_batch(
+        r#"
+        CREATE VIRTUAL TABLE IF NOT EXISTS vault_fts USING fts5(
+            title,
+            prose,
+            code,
+            content='',
+            tokenize='unicode61 remove_diacritics 2'
+        );
+        "#,
+    )?;
 
     Ok(())
 }
@@ -210,5 +256,68 @@ mod tests {
         // Verify columns exist
         assert!(column_exists(&conn, "vault_notes", "note_type").unwrap());
         assert!(column_exists(&conn, "vault_notes", "external_uri").unwrap());
+    }
+
+    #[test]
+    fn test_fts5_legacy_migration() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        // Initialize base vault tables first so vault_notes exists
+        init_vault_tables(&conn).expect("base init");
+
+        // Manually simulate legacy 2-column vault_fts (v0.5)
+        conn.execute_batch(
+            r#"
+            DROP TABLE IF EXISTS vault_fts;
+            CREATE VIRTUAL TABLE vault_fts USING fts5(
+                title,
+                content,
+                content='',
+                tokenize='unicode61 remove_diacritics 2'
+            );
+            "#,
+        )
+        .expect("create legacy table");
+
+        // Insert a note into vault_notes to verify reindexing
+        conn.execute(
+            r#"
+            INSERT INTO vault_notes (id, title, tags, file_mtime, content_cache, updated_at, note_type, external_uri)
+            VALUES ('algo/dp.md', 'DP Intro', '["dp"]', 100, 'Hello world\n```cpp\nint x = 0;\n```', 100, 'ALGO_TRICK', '')
+            "#,
+            [],
+        )
+        .expect("insert note");
+
+        // Check that it needs rebuild
+        assert!(vault_fts_needs_rebuild(&conn).expect("check rebuild"));
+
+        // Run migration
+        migrate_vault_fts_if_needed(&conn).expect("migration must succeed");
+
+        // Verify it no longer needs rebuild
+        assert!(!vault_fts_needs_rebuild(&conn).expect("check rebuild"));
+
+        // Verify schema is 3 columns (title, prose, code)
+        let sql: String = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='vault_fts'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("query ddl");
+        assert!(sql.contains("prose") && sql.contains("code"));
+
+        // Verify the existing note was reindexed into 3 columns
+        let fts_count: i64 = conn
+            .query_row("SELECT count(*) FROM vault_fts", [], |r| r.get(0))
+            .expect("query fts count");
+        assert_eq!(fts_count, 1);
+
+        // Verify inserting 4 parameters (rowid, title, prose, code) succeeds
+        conn.execute(
+            "INSERT INTO vault_fts(rowid, title, prose, code) VALUES (999, 'Test Title', 'Test Prose', 'Test Code')",
+            [],
+        )
+        .expect("insert into migrated vault_fts");
     }
 }
