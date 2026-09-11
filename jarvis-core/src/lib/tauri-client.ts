@@ -323,3 +323,38 @@ export async function openOnenoteLink(uri: string): Promise<void> {
 export async function getSyncToken(): Promise<string> {
   return invoke<string>("get_sync_token");
 }
+
+/**
+ * Lưu đường dẫn thư mục vault vào bảng settings.
+ */
+export async function setVaultPath(path: string): Promise<void> {
+  return invoke<void>("set_vault_path", { path });
+}
+
+/**
+ * Lấy đường dẫn thư mục vault hiện tại từ bảng settings.
+ */
+export async function getVaultPath(): Promise<string | null> {
+  try {
+    return await invoke<string | null>("get_vault_path");
+  } catch (err) {
+    console.error("[tauri-client] getVaultPath lỗi:", err);
+    return null;
+  }
+}
+
+/**
+ * Ẩn cửa sổ HUD xuống khay hệ thống.
+ */
+export async function hideHud(): Promise<void> {
+  return invoke<void>("hide_hud");
+}
+
+/**
+ * Xóa sạch dữ liệu Codeforces (submissions, post_mortems, handle) và tính lại matrix,
+ * nhưng BẢO TOÀN 100% dữ liệu deadline Moodle.
+ */
+export async function purgeCfData(): Promise<void> {
+  return invoke<void>("purge_cf_data");
+}
+

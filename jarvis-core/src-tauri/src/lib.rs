@@ -93,6 +93,18 @@ pub fn run() {
             // Setup System Tray
             crate::tray::setup_tray(app.handle())?;
 
+            // Periodic Idle WAL Checkpoint (chạy mỗi 15 phút = 900 giây)
+            let checkpoint_db = shared_db.clone();
+            tauri::async_runtime::spawn(async move {
+                let mut interval = tokio::time::interval(std::time::Duration::from_secs(900));
+                loop {
+                    interval.tick().await;
+                    if let Ok(conn) = checkpoint_db.lock() {
+                        let _ = conn.execute_batch("PRAGMA wal_checkpoint(PASSIVE);");
+                    }
+                }
+            });
+
             // Global Shortcut Alt+K
             let shortcut: Result<Shortcut, _> = "Alt+K".parse();
             match shortcut {
@@ -135,6 +147,7 @@ pub fn run() {
             Ok(())
         })
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_dialog::init())
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { .. } = event {
                 if let Some(shutdown_tx) = window.app_handle().try_state::<watch::Sender<bool>>() {
@@ -181,7 +194,11 @@ pub fn run() {
             commands::vault::get_vault_stats,
             commands::vault::create_structured_note,
             commands::vault::open_onenote_link,
+            commands::vault::set_vault_path,
+            commands::vault::get_vault_path,
             commands::academic::get_sync_token,
+            commands::hide_hud,
+            commands::purge_cf_data,
         ])
         .run(tauri::generate_context!());
 

@@ -24,6 +24,12 @@ pub fn validate_onenote_uri(uri: &str) -> Result<(), String> {
         return Err("Ký tự không hợp lệ trong URI: phát hiện dấu ngoặc kép '\"'".into());
     }
 
+    // Chặn tuyệt đối encoded quotes (%22 = ", %27 = ')
+    let lower = trimmed.to_lowercase();
+    if lower.contains("%22") || lower.contains("%27") {
+        return Err("URI chứa ký tự mã hóa không an toàn".into());
+    }
+
     // Whitelist bộ ký tự an toàn
     let is_valid_char = |c: char| {
         c.is_alphanumeric()
@@ -49,6 +55,17 @@ mod tests {
         let res = validate_onenote_uri("onenote:test\" -arg");
         assert!(res.is_err());
         assert!(res.unwrap_err().contains("dấu ngoặc kép"));
+    }
+
+    #[test]
+    fn test_reject_encoded_quotes() {
+        let res1 = validate_onenote_uri("onenote:test%22 -arg");
+        assert!(res1.is_err());
+        assert_eq!(res1.unwrap_err(), "URI chứa ký tự mã hóa không an toàn");
+
+        let res2 = validate_onenote_uri("onenote:test%27 -arg");
+        assert!(res2.is_err());
+        assert_eq!(res2.unwrap_err(), "URI chứa ký tự mã hóa không an toàn");
     }
 
     #[test]
