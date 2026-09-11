@@ -27,6 +27,7 @@ let toastIdCounter = 0;
 
 import { AcademicDashboard } from "./features/academic";
 import { VaultDashboard } from "./features/vault";
+import { CommandPaletteModal } from "./features/command-palette";
 import { Code2, GraduationCap, FolderGit2 } from "lucide-react";
 import { useAppVersion } from "@/shared/hooks/useAppVersion";
 
@@ -295,6 +296,8 @@ export default function App() {
         onClose={() => setIsModalOpen(false)}
         submission={selectedSubmission}
       />
+
+      <CommandPaletteModal />
 
       {/* --- Toast notifications --- */}
       <div className="fixed bottom-4 right-4 flex flex-col gap-2 z-50">
