@@ -4,22 +4,22 @@ import type { HeatmapDay } from "../types";
 
 function getHeatmapCellClass(totalXp: number): string {
   if (totalXp === 0) {
-    return "w-3 h-3 rounded-[3px] bg-zinc-900 border border-zinc-800/60";
+    return "w-3 h-3 rounded-[3px] bg-slate-950 border border-slate-800/60";
   }
 
   if (totalXp < 30) {
-    return "w-3 h-3 rounded-[3px] bg-emerald-950/80 border border-emerald-800/40";
+    return "w-3 h-3 rounded-[3px] bg-emerald-950/80 border border-emerald-800/40 text-emerald-300";
   }
 
   if (totalXp < 60) {
-    return "w-3 h-3 rounded-[3px] bg-emerald-600 shadow-[0_0_8px_rgba(16,185,129,0.4)]";
+    return "w-3 h-3 rounded-[3px] bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)]";
   }
 
   if (totalXp < 100) {
-    return "w-3 h-3 rounded-[3px] bg-violet-600 shadow-[0_0_10px_rgba(139,92,246,0.5)]";
+    return "w-3 h-3 rounded-[3px] bg-cyan-500 shadow-[0_0_10px_rgba(6,182,212,0.5)]";
   }
 
-  return "w-3 h-3 rounded-[3px] bg-fuchsia-400 shadow-[0_0_14px_rgba(232,121,249,0.9)] border border-white/60";
+  return "w-3 h-3 rounded-[3px] bg-amber-400 shadow-[0_0_14px_rgba(251,191,36,0.8)] border border-amber-200/60";
 }
 
 /**
@@ -139,11 +139,11 @@ export default function ActivityHeatmap() {
                 <span>&lt;60 XP</span>
               </div>
               <div className="flex items-center gap-1.5">
-                <div className="w-2.5 h-2.5 rounded-[3px] bg-violet-600 shadow-[0_0_10px_rgba(139,92,246,0.5)]" />
+                <div className="w-2.5 h-2.5 rounded-[3px] bg-cyan-500 shadow-[0_0_10px_rgba(6,182,212,0.5)]" />
                 <span>&lt;100 XP</span>
               </div>
               <div className="flex items-center gap-1.5">
-                <div className="w-2.5 h-2.5 rounded-[3px] bg-fuchsia-400 shadow-[0_0_14px_rgba(232,121,249,0.9)] border border-white/60" />
+                <div className="w-2.5 h-2.5 rounded-[3px] bg-amber-400 shadow-[0_0_14px_rgba(251,191,36,0.8)] border border-amber-200/60" />
                 <span>God Mode</span>
               </div>
             </div>

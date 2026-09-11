@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   FolderGit2,
+  Folder,
   RefreshCw,
   Search,
   FileText,
@@ -10,7 +11,15 @@ import {
   Plus,
   ExternalLink,
 } from "lucide-react";
-import { getVaultStats, scanVault, searchVault, openOnenoteLink } from "@/lib/tauri-client";
+import { open } from "@tauri-apps/plugin-dialog";
+import {
+  getVaultStats,
+  scanVault,
+  searchVault,
+  openOnenoteLink,
+  getVaultPath,
+  setVaultPath as setVaultPathBackend,
+} from "@/lib/tauri-client";
 import type { VaultStatsDto, VaultSearchResultDto, NoteType } from "../types";
 import { QuickCaptureModal } from "./QuickCaptureModal";
 
@@ -39,6 +48,16 @@ export const VaultDashboard: React.FC = () => {
 
   useEffect(() => {
     void loadStats();
+    void (async () => {
+      try {
+        const saved = await getVaultPath();
+        if (saved) {
+          setVaultPath(saved);
+        }
+      } catch (err) {
+        console.error("Failed to load vault path:", err);
+      }
+    })();
   }, [loadStats]);
 
   const renderNoteTypeBadge = (type?: NoteType | string) => {
@@ -105,9 +124,9 @@ export const VaultDashboard: React.FC = () => {
     }, 200);
   };
 
-  const handleManualSync = async () => {
-    if (!vaultPath.trim()) {
-      setSyncError("Vui lòng nhập đường dẫn thư mục Vault hợp lệ");
+  const triggerScanVault = async (targetPath: string) => {
+    if (!targetPath.trim()) {
+      setSyncError("Vui lòng chọn thư mục Vault hợp lệ");
       return;
     }
 
@@ -116,7 +135,7 @@ export const VaultDashboard: React.FC = () => {
     setSyncMessage(null);
 
     try {
-      const result = await scanVault(vaultPath.trim());
+      const result = await scanVault(targetPath.trim());
       setStats(result);
       setSyncMessage(
         `Đồng bộ hoàn tất: ${result.totalNotes} notes, ${result.totalLinks} links, ${result.totalTags} tags.`
@@ -130,6 +149,19 @@ export const VaultDashboard: React.FC = () => {
       setSyncError(typeof err === "string" ? err : "Đồng bộ thất bại. Kiểm tra lại đường dẫn.");
     } finally {
       setIsSyncing(false);
+    }
+  };
+
+  const handlePickDirectory = async () => {
+    try {
+      const selected = await open({ directory: true, multiple: false });
+      if (selected && typeof selected === "string") {
+        setVaultPath(selected);
+        await setVaultPathBackend(selected);
+        await triggerScanVault(selected);
+      }
+    } catch (err) {
+      console.error("Error picking vault directory:", err);
     }
   };
 
@@ -152,13 +184,27 @@ export const VaultDashboard: React.FC = () => {
           </div>
 
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full md:w-auto">
-            <input
-              type="text"
-              value={vaultPath}
-              onChange={(e) => setVaultPath(e.target.value)}
-              placeholder="Đường dẫn thư mục Vault (e.g. D:/ObsidianVault)..."
-              className="px-3 py-1.5 text-xs bg-zinc-950 border border-zinc-800 rounded-lg text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-violet-500 min-w-[280px]"
-            />
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handlePickDirectory}
+                disabled={isSyncing}
+                className="flex items-center justify-center gap-2 px-3.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 text-zinc-200 text-xs font-medium rounded-lg transition-colors border border-zinc-700 shadow-sm whitespace-nowrap"
+              >
+                <Folder className="w-4 h-4 text-violet-400" />
+                <span>Chọn thư mục Vault</span>
+              </button>
+              {vaultPath ? (
+                <span
+                  className="text-xs text-zinc-300 font-mono truncate max-w-[200px] sm:max-w-[260px] px-2.5 py-1 bg-zinc-950 border border-zinc-800 rounded-lg"
+                  title={vaultPath}
+                >
+                  {vaultPath}
+                </span>
+              ) : (
+                <span className="text-xs text-zinc-500 italic">Chưa chọn thư mục</span>
+              )}
+            </div>
             <button
               onClick={() => setIsQuickCaptureOpen(true)}
               className="flex items-center justify-center gap-1.5 px-3.5 py-1.5 bg-violet-600 hover:bg-violet-500 text-white text-xs font-medium rounded-lg transition-colors shadow-sm whitespace-nowrap"
@@ -167,9 +213,9 @@ export const VaultDashboard: React.FC = () => {
               <span>+ Quick Note</span>
             </button>
             <button
-              onClick={handleManualSync}
-              disabled={isSyncing}
-              className="flex items-center justify-center gap-2 px-4 py-1.5 bg-zinc-800 hover:bg-zinc-700 disabled:bg-zinc-900/50 text-zinc-200 text-xs font-medium rounded-lg transition-colors border border-zinc-700 shadow-sm whitespace-nowrap"
+              onClick={() => triggerScanVault(vaultPath)}
+              disabled={isSyncing || !vaultPath.trim()}
+              className="flex items-center justify-center gap-2 px-4 py-1.5 bg-zinc-800 hover:bg-zinc-700 disabled:bg-zinc-900/50 disabled:opacity-50 text-zinc-200 text-xs font-medium rounded-lg transition-colors border border-zinc-700 shadow-sm whitespace-nowrap"
             >
               {isSyncing ? (
                 <>
@@ -333,7 +379,7 @@ export const VaultDashboard: React.FC = () => {
               </div>
             ) : (
               <div className="py-6 text-center text-xs text-zinc-500">
-                Chưa có note nào trong vault. Nhập đường dẫn thư mục và bấm &quot;Sync Vault&quot; để bắt đầu.
+                Chưa có note nào trong vault. Bấm &quot;Chọn thư mục Vault&quot; để bắt đầu.
               </div>
             )}
           </div>
@@ -344,7 +390,13 @@ export const VaultDashboard: React.FC = () => {
       <QuickCaptureModal
         isOpen={isQuickCaptureOpen}
         onClose={() => setIsQuickCaptureOpen(false)}
-        onSuccess={() => void loadStats()}
+        onSuccess={() => {
+          setSyncMessage("Tạo note mới thành công!");
+          void loadStats();
+          if (vaultPath.trim()) {
+            void triggerScanVault(vaultPath);
+          }
+        }}
         vaultPath={vaultPath}
       />
     </div>

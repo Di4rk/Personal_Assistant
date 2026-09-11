@@ -6,6 +6,7 @@ import type {
   AcademicOverviewDto,
 } from "../types";
 import { classifyCourseCategory } from "../utils/forecastEngine";
+import { calculateCompositeRewardRank, getGpaClassification } from "../utils/grading";
 
 export interface AcademicCourseTableProps {
   courses: AcademicCourseRecord[];
@@ -29,6 +30,15 @@ export const AcademicCourseTable: React.FC<AcademicCourseTableProps> = ({
     return val.toFixed(1);
   };
 
+  const gpa10Val = currentMacro
+    ? currentMacro.termGpa
+    : currentSemester?.actualGpa10 ?? 0;
+  const drlVal = currentMacro
+    ? currentMacro.drlScore
+    : currentSemester?.actualDrl ?? 0;
+  const gpaClassification = getGpaClassification(gpa10Val);
+  const compositeReward = calculateCompositeRewardRank(gpa10Val, drlVal);
+
   return (
     <div
       className={`rounded-xl bg-zinc-900 border border-zinc-800 p-4 overflow-hidden ${className}`}
@@ -44,40 +54,46 @@ export const AcademicCourseTable: React.FC<AcademicCourseTableProps> = ({
               : "Chi Tiết Môn Học"}
           </h3>
           {currentMacro ? (
-            <p className="text-xs text-zinc-500 mt-0.5">
-              GPA Học Kỳ:{" "}
+            <p className="text-xs text-zinc-400 mt-1">
+              GPA:{" "}
               <span className="font-mono text-violet-400 font-bold">
                 {currentMacro.termGpa.toFixed(2)}
               </span>{" "}
-              • Tín chỉ kỳ:{" "}
-              <span className="font-mono text-emerald-400 font-bold">
-                {currentMacro.termCredits} TC
-              </span>{" "}
-              • ĐRL:{" "}
+              <span className="text-zinc-400">({gpaClassification})</span>{" "}
+              • DRL:{" "}
               <span className="font-mono text-amber-400 font-bold">
                 {currentMacro.drlScore}
               </span>{" "}
-              • Xếp loại:{" "}
-              <span className="font-medium text-zinc-300">
-                {currentMacro.rankLabel}
+              • Thi đua:{" "}
+              <span className="font-semibold text-emerald-400">
+                {compositeReward}
+              </span>{" "}
+              • Tín chỉ:{" "}
+              <span className="font-mono text-zinc-300 font-bold">
+                {currentMacro.termCredits} TC
               </span>
             </p>
           ) : currentSemester ? (
-            <p className="text-xs text-zinc-500 mt-0.5">
-              GPA Hệ 10:{" "}
+            <p className="text-xs text-zinc-400 mt-1">
+              GPA:{" "}
               <span className="font-mono text-violet-400 font-bold">
                 {currentSemester.actualGpa10
                   ? currentSemester.actualGpa10.toFixed(2)
                   : "—"}
               </span>{" "}
-              • GPA Hệ 4:{" "}
-              <span className="font-mono text-indigo-400 font-bold">
-                {currentSemester.actualGpa4
-                  ? currentSemester.actualGpa4.toFixed(2)
-                  : "—"}
+              {currentSemester.actualGpa10 && (
+                <span className="text-zinc-400">({gpaClassification})</span>
+              )}{" "}
+              • DRL:{" "}
+              <span className="font-mono text-amber-400 font-bold">
+                {currentSemester.actualDrl}
+              </span>{" "}
+              • Thi đua:{" "}
+              <span className="font-semibold text-emerald-400">
+                {compositeReward}
               </span>{" "}
               • Tín chỉ:{" "}
-              <span className="font-mono text-emerald-400 font-bold">
+              <span className="font-mono text-zinc-300 font-bold">
                 {currentSemester.passedCredits} / {currentSemester.totalCredits} TC
               </span>
             </p>

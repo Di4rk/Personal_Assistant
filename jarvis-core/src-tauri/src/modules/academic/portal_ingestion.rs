@@ -205,11 +205,10 @@ pub fn ingest_dynamic_academic_payload(
                         term_gpa = excluded.term_gpa,
                         cumulative_gpa = excluded.cumulative_gpa,
                         term_credits = excluded.term_credits,
-                        cumulative_credits = excluded.cumulative_credits,
-                        drl_score = excluded.drl_score,
+                        drl_score = COALESCE(excluded.drl_score, academic_macro_metrics.drl_score),
                         classification = excluded.classification,
                         rank_label = excluded.rank_label,
-                        drl = excluded.drl,
+                        drl = COALESCE(excluded.drl, academic_macro_metrics.drl),
                         updated_at = excluded.updated_at",
                     params![
                         semester_id,
