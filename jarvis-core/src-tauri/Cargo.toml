@@ -1,6 +1,6 @@
 [package]
 name = "jarvis-core"
-version = "0.3.3"
+version = "0.4.0"
 description = "JARVIS Personal OS - Core Vertical Slice"
 edition = "2021"
 
@@ -49,6 +49,9 @@ scraper = "0.22"
 walkdir = "2.4"
 serde_yaml = "0.9"
 regex = "1"
+
+# --- Lightweight HTTP parser cho sync server loopback (không kéo axum/actix) ---
+httparse = "1.8"
 
 # --- Chỉ dùng cho mock data seeder (dev-only, xem cfg(debug_assertions)) ---
 rand = "0.8"

@@ -55,9 +55,12 @@ pub struct GenericDrlItem {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct IngestionPayload {
+    #[serde(default)]
     pub semester_groups: Vec<GenericSemesterGroup>,
+    #[serde(default)]
     pub term_summaries: Option<Vec<GenericTermSummary>>,
-    pub drl_history: Option<Vec<GenericDrlItem>>,
+    #[serde(default, alias = "drl_history")]
+    pub drl: Option<Vec<GenericDrlItem>>,
 }
 
 pub fn parse_score(val: &Option<String>) -> Option<f64> {
@@ -116,11 +119,19 @@ pub fn ingest_dynamic_academic_payload(
     let tx = conn.transaction().map_err(|e| e.to_string())?;
     let now = chrono::Utc::now().timestamp();
 
-    // 1. Build lookup map cho DRL (nếu có)
+    // 1. Kiểm tra payload DRL: Nếu payload.drl.is_none() hoặc drl rỗng:
+    // BỎ QUA TOÀN BỘ BƯỚC CẬP NHẬT/RECONCILE DRL, giữ nguyên drl_score trong academic_macro_metrics.
+    let has_drl = payload
+        .drl
+        .as_ref()
+        .map_or(false, |items| !items.is_empty());
+
     let mut drl_map = std::collections::HashMap::new();
-    if let Some(drl_list) = payload.drl_history {
-        for d in drl_list {
-            drl_map.insert(d.semester, d.point);
+    if has_drl {
+        if let Some(ref drl_list) = payload.drl {
+            for d in drl_list {
+                drl_map.insert(d.semester.clone(), d.point);
+            }
         }
     }
 
@@ -162,7 +173,6 @@ pub fn ingest_dynamic_academic_payload(
                     "Chưa xếp loại".to_string()
                 }
             });
-        let drl = *drl_map.get(&group.semester_key).unwrap_or(&0);
 
         // Đảm bảo academic_semesters có bản ghi để thỏa mãn foreign key
         tx.execute(
@@ -177,35 +187,102 @@ pub fn ingest_dynamic_academic_payload(
             ],
         ).map_err(|e| e.to_string())?;
 
-        tx.execute(
-            "INSERT INTO academic_macro_metrics 
-                (semester_id, semester_label, year_name, term_gpa, cumulative_gpa, term_credits, cumulative_credits, drl_score, classification, rank_label, drl, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9, ?8, ?10)
-             ON CONFLICT(semester_id) DO UPDATE SET
-                semester_label = excluded.semester_label,
-                year_name = excluded.year_name,
-                term_gpa = excluded.term_gpa,
-                cumulative_gpa = excluded.cumulative_gpa,
-                term_credits = excluded.term_credits,
-                cumulative_credits = excluded.cumulative_credits,
-                drl_score = excluded.drl_score,
-                classification = excluded.classification,
-                rank_label = excluded.rank_label,
-                drl = excluded.drl,
-                updated_at = excluded.updated_at",
-            params![
-                semester_id,
-                group.semester_label,
-                group.year_name,
-                term_gpa,
-                cum_gpa,
-                term_credits,
-                cum_credits,
-                drl,
-                classification,
-                now
-            ],
-        ).map_err(|e| e.to_string())?;
+        if has_drl {
+            let drl_val_opt = drl_map
+                .get(&group.semester_key)
+                .or_else(|| drl_map.get(&sem_num))
+                .or_else(|| drl_map.get(&semester_id))
+                .copied();
+
+            if let Some(drl_val) = drl_val_opt {
+                tx.execute(
+                    "INSERT INTO academic_macro_metrics 
+                        (semester_id, semester_label, year_name, term_gpa, cumulative_gpa, term_credits, cumulative_credits, drl_score, classification, rank_label, drl, updated_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9, ?8, ?10)
+                     ON CONFLICT(semester_id) DO UPDATE SET
+                        semester_label = excluded.semester_label,
+                        year_name = excluded.year_name,
+                        term_gpa = excluded.term_gpa,
+                        cumulative_gpa = excluded.cumulative_gpa,
+                        term_credits = excluded.term_credits,
+                        cumulative_credits = excluded.cumulative_credits,
+                        drl_score = excluded.drl_score,
+                        classification = excluded.classification,
+                        rank_label = excluded.rank_label,
+                        drl = excluded.drl,
+                        updated_at = excluded.updated_at",
+                    params![
+                        semester_id,
+                        group.semester_label,
+                        group.year_name,
+                        term_gpa,
+                        cum_gpa,
+                        term_credits,
+                        cum_credits,
+                        drl_val,
+                        classification,
+                        now
+                    ],
+                ).map_err(|e| e.to_string())?;
+            } else {
+                // Có drl payload nhưng kỳ học này không có trong drl_map -> không ghi đè DRL cũ
+                tx.execute(
+                    "INSERT INTO academic_macro_metrics 
+                        (semester_id, semester_label, year_name, term_gpa, cumulative_gpa, term_credits, cumulative_credits, drl_score, classification, rank_label, drl, updated_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, ?8, ?8, NULL, ?9)
+                     ON CONFLICT(semester_id) DO UPDATE SET
+                        semester_label = excluded.semester_label,
+                        year_name = excluded.year_name,
+                        term_gpa = excluded.term_gpa,
+                        cumulative_gpa = excluded.cumulative_gpa,
+                        term_credits = excluded.term_credits,
+                        cumulative_credits = excluded.cumulative_credits,
+                        classification = excluded.classification,
+                        rank_label = excluded.rank_label,
+                        updated_at = excluded.updated_at",
+                    params![
+                        semester_id,
+                        group.semester_label,
+                        group.year_name,
+                        term_gpa,
+                        cum_gpa,
+                        term_credits,
+                        cum_credits,
+                        classification,
+                        now
+                    ],
+                ).map_err(|e| e.to_string())?;
+            }
+        } else {
+            // has_drl == false: BỎ QUA TOÀN BỘ BƯỚC CẬP NHẬT/RECONCILE DRL
+            // Tuyệt đối không chạm vào drl_score hay drl nếu đã tồn tại
+            tx.execute(
+                "INSERT INTO academic_macro_metrics 
+                    (semester_id, semester_label, year_name, term_gpa, cumulative_gpa, term_credits, cumulative_credits, drl_score, classification, rank_label, drl, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, ?8, ?8, NULL, ?9)
+                 ON CONFLICT(semester_id) DO UPDATE SET
+                    semester_label = excluded.semester_label,
+                    year_name = excluded.year_name,
+                    term_gpa = excluded.term_gpa,
+                    cumulative_gpa = excluded.cumulative_gpa,
+                    term_credits = excluded.term_credits,
+                    cumulative_credits = excluded.cumulative_credits,
+                    classification = excluded.classification,
+                    rank_label = excluded.rank_label,
+                    updated_at = excluded.updated_at",
+                params![
+                    semester_id,
+                    group.semester_label,
+                    group.year_name,
+                    term_gpa,
+                    cum_gpa,
+                    term_credits,
+                    cum_credits,
+                    classification,
+                    now
+                ],
+            ).map_err(|e| e.to_string())?;
+        }
 
         // 4. Ingest dynamic subjects
         let mut stmt = tx.prepare_cached(
@@ -261,6 +338,33 @@ pub fn ingest_dynamic_academic_payload(
         }
     }
 
+    // 5. Reconcile DRL nếu có phần tử DRL thực sự trong mảng (hỗ trợ cả trường hợp semester_groups rỗng)
+    if has_drl {
+        if let Some(ref drl_items) = payload.drl {
+            let mut drl_stmt = tx.prepare_cached(
+                "UPDATE academic_macro_metrics 
+                 SET drl = ?1, drl_score = ?1, updated_at = ?2 
+                 WHERE semester_id = ?3 
+                    OR semester_id LIKE ?4 
+                    OR semester_id LIKE ?5"
+            ).map_err(|e| e.to_string())?;
+
+            for item in drl_items {
+                let sem_key = &item.semester;
+                let sem_num = sem_key.replace("semester_", "");
+                let dot_pattern = format!("%.{}", sem_num);
+                let underscore_pattern = format!("%_{}", sem_num);
+                drl_stmt.execute(params![
+                    item.point,
+                    now,
+                    sem_key,
+                    dot_pattern,
+                    underscore_pattern,
+                ]).map_err(|e| e.to_string())?;
+            }
+        }
+    }
+
     tx.commit().map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -311,7 +415,7 @@ pub fn execute_portal_ingest(
     let payload = IngestionPayload {
         semester_groups: generic_groups,
         term_summaries: None,
-        drl_history: Some(generic_drl),
+        drl: Some(generic_drl),
     };
 
     ingest_dynamic_academic_payload(conn, payload)
@@ -641,5 +745,98 @@ mod tests {
             .query_row("SELECT course_code FROM academic_courses", [], |r| r.get(0))
             .unwrap();
         assert_eq!(course_code, "SE104");
+    }
+
+    #[test]
+    fn test_sync_transcript_preserves_existing_drl_data() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::db::academic::init_academic_module(&conn).unwrap();
+
+        let now = chrono::Utc::now().timestamp();
+
+        // 1. Khởi tạo schema và chèn 1 kỳ học có DRL = 95 vào academic_macro_metrics
+        conn.execute(
+            "INSERT INTO academic_semesters (id, academic_year, semester_term, is_completed, created_at, updated_at)
+             VALUES ('2024-2025.1', '2024-2025', 1, 1, ?1, ?1)",
+            params![now],
+        ).unwrap();
+
+        conn.execute(
+            "INSERT INTO academic_macro_metrics 
+                (semester_id, semester_label, year_name, term_gpa, cumulative_gpa, term_credits, cumulative_credits, drl_score, classification, rank_label, drl, updated_at)
+             VALUES ('2024-2025.1', 'Học kỳ 1 Năm học 2024-2025', '2024-2025', 8.5, 8.5, 18, 18, 95, 'Giỏi', 'Giỏi', 95, ?1)",
+            params![now],
+        ).unwrap();
+
+        // 2. Giả lập một IngestionPayload với transcript chứa môn học mới nhưng drl: None
+        let payload_none = IngestionPayload {
+            semester_groups: vec![GenericSemesterGroup {
+                semester_key: "semester_1".to_string(),
+                semester_label: "Học kỳ 1 Năm học 2024-2025".to_string(),
+                year_name: "2024-2025".to_string(),
+                total_credit: Some(21),
+                average_point: Some(8.7),
+                subjects: vec![GenericSubject {
+                    id: Some("SE104_2024-2025.1".to_string()),
+                    subject_code: "SE104".to_string(),
+                    subject_name: "Nhập môn Công nghệ phần mềm".to_string(),
+                    number_of_credit: 3,
+                    course_point: Some("9.0".to_string()),
+                    midterm_score: None,
+                    practice_point: None,
+                    final_point: None,
+                    process_point: None,
+                    note: None,
+                }],
+            }],
+            term_summaries: None,
+            drl: None,
+        };
+
+        // 3. Gọi ingest_dynamic_academic_payload
+        ingest_dynamic_academic_payload(&mut conn, payload_none).unwrap();
+
+        // 4. Truy vấn lại academic_macro_metrics và xác minh drl_score = 95
+        let drl_score: i32 = conn
+            .query_row(
+                "SELECT drl_score FROM academic_macro_metrics WHERE semester_id = '2024-2025.1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(drl_score, 95, "Điểm DRL không được bị reset khi drl là None");
+
+        let drl_val: Option<i32> = conn
+            .query_row(
+                "SELECT drl FROM academic_macro_metrics WHERE semester_id = '2024-2025.1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(drl_val, Some(95), "Cột drl không được bị NULL hóa");
+
+        // 5. Thử lại với drl: Some(vec![]) — xác minh mảng rỗng cũng giữ nguyên 95
+        let payload_empty = IngestionPayload {
+            semester_groups: vec![GenericSemesterGroup {
+                semester_key: "semester_1".to_string(),
+                semester_label: "Học kỳ 1 Năm học 2024-2025".to_string(),
+                year_name: "2024-2025".to_string(),
+                total_credit: Some(21),
+                average_point: Some(8.7),
+                subjects: vec![],
+            }],
+            term_summaries: None,
+            drl: Some(vec![]),
+        };
+        ingest_dynamic_academic_payload(&mut conn, payload_empty).unwrap();
+
+        let drl_score_after_empty: i32 = conn
+            .query_row(
+                "SELECT drl_score FROM academic_macro_metrics WHERE semester_id = '2024-2025.1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(drl_score_after_empty, 95, "Điểm DRL không được bị reset khi drl là Some(vec![])");
     }
 }
