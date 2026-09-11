@@ -10,6 +10,7 @@
 //!   và trả HTTP error response, sau đó kết nối bị đóng gracefully.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use tauri::{AppHandle, Emitter};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -74,15 +75,24 @@ pub async fn start_sync_server(app: AppHandle, db: SharedDb) {
             Ok((socket, peer_addr)) => {
                 // Chỉ chấp nhận loopback connections (phòng ngừa lỗi cấu hình OS)
                 if !peer_addr.ip().is_loopback() {
-                    eprintln!("[SyncServer] Từ chối kết nối từ non-loopback: {}", peer_addr);
+                    eprintln!("[SyncServer] Rejected non-loopback connection: {}", peer_addr);
                     continue;
                 }
 
                 let state_clone = Arc::clone(&state);
                 let app_clone = app.clone();
+
                 tokio::spawn(async move {
-                    if let Err(e) = handle_connection(socket, state_clone, app_clone).await {
-                        eprintln!("[SyncServer] Lỗi xử lý connection: {}", e);
+                    let timeout_res = tokio::time::timeout(
+                        Duration::from_secs(5),
+                        handle_connection(socket, state_clone, app_clone),
+                    )
+                    .await;
+
+                    match timeout_res {
+                        Ok(Ok(())) => {}
+                        Ok(Err(e)) => eprintln!("[SyncServer] Connection error: {}", e),
+                        Err(_) => eprintln!("[SyncServer] Connection timed out after 5s, dropped socket gracefully"),
                     }
                 });
             }
@@ -183,14 +193,17 @@ async fn handle_connection(
     let body_bytes = &buffer[headers_end..total_read.min(body_end)];
 
     // --- Phase 6: Xác thực Sync Token ---
-    let expected_token = {
-        let conn_guard = state
+    let state_for_token = Arc::clone(&state);
+    let expected_token = tokio::task::spawn_blocking(move || -> Result<String, String> {
+        let conn_guard = state_for_token
             .db
             .lock()
-            .map_err(|_| "DB mutex bị poisoned")?;
+            .map_err(|_| "DB mutex bị poisoned".to_string())?;
         crate::db::settings::get_or_create_sync_token(&conn_guard)
-            .map_err(|e| format!("Lỗi đọc sync token: {e}"))?
-    };
+            .map_err(|e| format!("Lỗi đọc sync token: {e}"))
+    })
+    .await
+    .map_err(|e| format!("JoinError reading token: {e}"))??;
 
     let provided_token = token_opt.as_deref().unwrap_or("");
     if provided_token != expected_token {
@@ -212,22 +225,29 @@ async fn handle_connection(
         };
 
     // Defensive validation: từ chối payload rỗng hoàn toàn
-    if payload.semester_groups.is_empty() {
-        send_text_response(&mut stream, 422, "Payload has no semester_groups").await?;
+    let has_drl = payload.drl.as_ref().map_or(false, |items| !items.is_empty());
+    if payload.semester_groups.is_empty() && !has_drl {
+        send_text_response(&mut stream, 422, "Payload has no semester_groups and no drl").await?;
         return Ok(());
     }
 
-    // --- Phase 8: Ingest vào SQLite qua AppState.db ---
-    {
-        let mut conn_guard = state
-            .db
-            .lock()
-            .map_err(|_| "DB mutex bị poisoned")?;
+    // --- Phase 8: Offload blocking DB writes sang dedicated blocking pool ---
+    let state_for_db = Arc::clone(&state);
+    let commit_result = tokio::task::spawn_blocking(move || -> Result<(), String> {
+        let mut conn = state_for_db.db.lock().map_err(|e| e.to_string())?;
         crate::modules::academic::portal_ingestion::ingest_dynamic_academic_payload(
-            &mut conn_guard,
+            &mut conn,
             payload,
         )
-        .map_err(|e| format!("Ingestion error: {e}"))?;
+        .map_err(|e| format!("Ingestion commit error: {}", e))
+    })
+    .await
+    .map_err(|e| format!("JoinError in spawn_blocking: {}", e))?;
+
+    if let Err(e) = commit_result {
+        eprintln!("[SyncServer] DB commit error: {}", e);
+        send_text_response(&mut stream, 500, &format!("DB Commit Error: {}", e)).await?;
+        return Ok(());
     }
 
     // --- Phase 9: Thông báo frontend refresh ---

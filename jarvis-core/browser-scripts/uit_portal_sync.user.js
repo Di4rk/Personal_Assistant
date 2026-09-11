@@ -88,7 +88,7 @@
      * @param {object} transcriptData — Dữ liệu JSON từ endpoint bang-diem
      * @param {Array}  drlHistory     — Dữ liệu DRL nếu có, mặc định []
      */
-    function buildIngestionPayload(transcriptData, drlHistory = []) {
+    function buildIngestionPayload(transcriptData, drlHistory = null) {
         // Portal trả về mảng học kỳ, mỗi học kỳ có danh sách môn học
         const semesterGroups = [];
         const termSummaries  = [];
@@ -137,10 +137,12 @@
             }
         }
 
+        const validDrl = (Array.isArray(drlHistory) && drlHistory.length > 0) ? drlHistory : null;
         return {
             semester_groups: semesterGroups,
             term_summaries:  termSummaries.length > 0 ? termSummaries : null,
-            drl_history:     drlHistory.length > 0 ? drlHistory : null,
+            drl:             validDrl,
+            drl_history:     validDrl,
         };
     }
 
@@ -162,8 +164,11 @@
             try {
                 const clone = response.clone();
                 const data  = await clone.json();
+                console.log("[Jarvis Sync] Captured transcript payload!");
                 log.info("🎓 Đã bắt được bảng điểm, đang sync…");
-                const payload = buildIngestionPayload(data);
+                const payload = buildIngestionPayload(data, null);
+                payload.drl = null;
+                payload.drl_history = null;
                 if (payload.semester_groups.length > 0) {
                     syncToJarvis(payload);
                 } else {
@@ -192,6 +197,7 @@
                     syncToJarvis({
                         semester_groups: [],
                         term_summaries:  null,
+                        drl:             drlHistory,
                         drl_history:     drlHistory,
                     });
                 }
@@ -222,7 +228,10 @@
             this.addEventListener("load", () => {
                 try {
                     const data    = JSON.parse(this.responseText);
-                    const payload = buildIngestionPayload(data);
+                    console.log("[Jarvis Sync] Captured transcript payload!");
+                    const payload = buildIngestionPayload(data, null);
+                    payload.drl = null;
+                    payload.drl_history = null;
                     if (payload.semester_groups.length > 0) {
                         log.info("🎓 [XHR] Đã bắt được bảng điểm, đang sync…");
                         syncToJarvis(payload);
