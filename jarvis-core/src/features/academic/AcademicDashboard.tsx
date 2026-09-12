@@ -11,6 +11,7 @@ import { SyncPortalButton } from "./components/SyncPortalButton";
 import { AcademicSummaryCards } from "./components/AcademicSummaryCards";
 import { SemesterTabs } from "./components/SemesterTabs";
 import { AcademicCourseTable } from "./components/AcademicCourseTable";
+import { StudentIdentityChip } from "./components/StudentIdentityChip";
 import {
   computeCategoryRadarData,
   type CategoryAxisData,
@@ -203,6 +204,11 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
           </button>
           <SyncPortalButton onSyncSuccess={() => { void handleRefresh(); }} />
         </div>
+      </div>
+
+      {/* 1.1 Student Identity Chip (Hồ Sơ Chính Thức UIT) */}
+      <div>
+        <StudentIdentityChip />
       </div>
 
       {/* 2. Cumulative Summary Cards (SSOT: cGPA 10, cGPA 4, Cumulative Credits, Average DRL) */}

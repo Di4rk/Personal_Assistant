@@ -170,7 +170,10 @@ async fn handle_connection(
     }
 
     // --- Phase 3: Route check ---
-    if method != "POST" || path != "/api/sync/academic" {
+    let is_academic_sync = method == "POST" && path == "/api/sync/academic";
+    let is_student_profile_sync = method == "POST" && (path == "/sync/student-profile" || path == "/api/sync/student-profile");
+
+    if !is_academic_sync && !is_student_profile_sync {
         send_text_response(&mut stream, 404, "Not Found").await?;
         return Ok(());
     }
@@ -212,7 +215,48 @@ async fn handle_connection(
         return Ok(());
     }
 
-    // --- Phase 7: Parse & validate JSON payload ---
+    // --- Phase 7: Branching Route Handling ---
+    if is_student_profile_sync {
+        let payload: crate::commands::academic::StudentProfilePayload =
+            match serde_json::from_slice(body_bytes) {
+                Ok(p) => p,
+                Err(e) => {
+                    eprintln!("[SyncServer] JSON parse lỗi student profile: {}", e);
+                    let msg = format!("Invalid student profile JSON: {}", e);
+                    send_text_response(&mut stream, 400, &msg).await?;
+                    return Ok(());
+                }
+            };
+
+        let app_handle = app.clone();
+        let state_for_profile = Arc::clone(&state);
+
+        let save_result = tokio::task::spawn_blocking(move || -> Result<(), String> {
+            let mut conn = state_for_profile.db.lock().map_err(|e| e.to_string())?;
+            crate::commands::academic::execute_save_student_profile(&mut conn, &payload)?;
+            app_handle.emit("student-profile-synced", &payload).map_err(|e| e.to_string())?;
+            Ok(())
+        })
+        .await
+        .map_err(|e| format!("JoinError saving student profile: {e}"))?;
+
+        if let Err(e) = save_result {
+            eprintln!("[SyncServer] Student profile commit error: {}", e);
+            send_text_response(&mut stream, 500, &format!("DB Commit Error: {}", e)).await?;
+            return Ok(());
+        }
+
+        println!("[SyncServer] ✅ Student profile sync thành công — đã emit student-profile-synced.");
+        send_json_response(
+            &mut stream,
+            200,
+            r#"{"status":"success","message":"Student profile synced successfully"}"#,
+        )
+        .await?;
+        return Ok(());
+    }
+
+    // Phase 7.1: Parse & validate JSON payload for Academic Ingestion
     let payload: crate::modules::academic::portal_ingestion::IngestionPayload =
         match serde_json::from_slice(body_bytes) {
             Ok(p) => p,

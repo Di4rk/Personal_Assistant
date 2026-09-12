@@ -54,6 +54,7 @@ macro_rules! registered_commands {
             commands::academic::purge_and_seed_canonical_academic_data,
             commands::academic::get_academic_curriculum,
             commands::academic::get_sync_token,
+            commands::academic::get_student_profile,
             // Moodle & Workspace
             commands::workspace::ingest_moodle_course_html,
             commands::workspace::get_upcoming_deadlines,
@@ -118,6 +119,7 @@ macro_rules! registered_commands {
             commands::academic::purge_and_seed_canonical_academic_data,
             commands::academic::get_academic_curriculum,
             commands::academic::get_sync_token,
+            commands::academic::get_student_profile,
             // Moodle & Workspace
             commands::workspace::ingest_moodle_course_html,
             commands::workspace::get_upcoming_deadlines,
