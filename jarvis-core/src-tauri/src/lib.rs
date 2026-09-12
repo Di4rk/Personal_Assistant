@@ -53,6 +53,7 @@ macro_rules! registered_commands {
             commands::academic::ingest_dynamic_academic_data,
             commands::academic::purge_and_seed_canonical_academic_data,
             commands::academic::get_academic_curriculum,
+            commands::academic::get_resolved_curriculum,
             commands::academic::get_sync_token,
             commands::academic::get_student_profile,
             // Portal In-App SSO
@@ -127,6 +128,7 @@ macro_rules! registered_commands {
             commands::academic::ingest_dynamic_academic_data,
             commands::academic::purge_and_seed_canonical_academic_data,
             commands::academic::get_academic_curriculum,
+            commands::academic::get_resolved_curriculum,
             commands::academic::get_sync_token,
             commands::academic::get_student_profile,
             // Portal In-App SSO

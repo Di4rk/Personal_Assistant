@@ -20,6 +20,7 @@ import {
   getSemesterCourses,
   getAcademicMacroMetricsSsot,
   launchPortalSsoSync,
+  getResolvedCurriculum,
 } from "../../lib/tauri-client";
 import { listen } from "@tauri-apps/api/event";
 import type { AcademicCourseRecord, AcademicMacroMetricSSOT } from "./types";
@@ -52,11 +53,21 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
 
   const [radarScope, setRadarScope] = useState<"all" | "semester">("all");
 
+  const [curriculumCredits, setCurriculumCredits] = useState<number>(126);
+
   const loadMacroMetrics = useCallback(async () => {
     try {
       setIsLoadingMacro(true);
-      const data = await getAcademicMacroMetricsSsot();
-      setMacroMetrics(data);
+      const [data, curr] = await Promise.allSettled([
+        getAcademicMacroMetricsSsot(),
+        getResolvedCurriculum(),
+      ]);
+      if (data.status === "fulfilled") {
+        setMacroMetrics(data.value);
+      }
+      if (curr.status === "fulfilled") {
+        setCurriculumCredits(curr.value.total_credits);
+      }
     } catch (err) {
       console.error("Không thể nạp academic_macro_metrics SSOT:", err);
     } finally {
@@ -239,7 +250,7 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
       {/* 2. Cumulative Summary Cards (SSOT: cGPA 10, cGPA 4, Cumulative Credits, Average DRL) */}
       <AcademicSummaryCards
         metrics={macroMetrics}
-        totalCurriculumCredits={126}
+        totalCurriculumCredits={curriculumCredits}
         onSyncClick={handleSyncPortal}
       />
 
@@ -348,6 +359,7 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
             currentTotalWeighted10={cumulativeStats.currentTotalWeighted10}
             currentGpa10={cumulativeStats.cGpa10}
             completedTermsCount={macroMetrics.length > 0 ? macroMetrics.length : overview.length}
+            totalDegreeCredits={curriculumCredits}
           />
         </div>
       </div>

@@ -403,5 +403,19 @@ export async function launchPortalSsoSync(): Promise<void> {
   return invoke<void>("launch_portal_sso_sync");
 }
 
+export interface CurriculumResolution {
+  major_code: string;
+  total_credits: number;
+  matched_via: string;
+}
+
+/**
+ * Lấy kết quả phân giải chương trình đào tạo đa ngành từ settings (hoặc fallback).
+ */
+export async function getResolvedCurriculum(): Promise<CurriculumResolution> {
+  return invoke<CurriculumResolution>("get_resolved_curriculum");
+}
+
+
 
 

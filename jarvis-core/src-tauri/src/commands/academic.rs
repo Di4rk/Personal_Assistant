@@ -464,6 +464,30 @@ pub fn ingest_full_academic_payload_internal(
 
     crate::modules::academic::portal_ingestion::ingest_dynamic_academic_payload(&mut conn, payload)?;
 
+    // Đồng bộ total_degree_credits theo curriculum resolved từ settings
+    let (curriculum_code, major_code) = {
+        let get_val = |k: &str| -> String {
+            conn.query_row(
+                "SELECT value FROM settings WHERE key = ?1",
+                [k],
+                |r| r.get(0),
+            ).unwrap_or_default()
+        };
+        (get_val("curriculum_code"), get_val("major_code"))
+    };
+    if let Ok(res) = crate::modules::academic::curriculum_resolver::resolve_curriculum(
+        &conn,
+        &curriculum_code,
+        if major_code.is_empty() { None } else { Some(&major_code) },
+    ) {
+        let _ = conn.execute(
+            "INSERT INTO academic_program_summary (id, total_degree_credits, updated_at)
+             VALUES ('MAIN', ?1, ?2)
+             ON CONFLICT(id) DO UPDATE SET total_degree_credits = excluded.total_degree_credits",
+            rusqlite::params![res.total_credits, chrono::Utc::now().timestamp()],
+        );
+    }
+
     let _ = app.emit("academic://sync-complete", ());
     let _ = app.emit("academic-data-synced", ());
     Ok(())
@@ -621,6 +645,30 @@ pub fn get_academic_curriculum(
         .map_err(|e| format!("Lỗi get_academic_curriculum: {e}"))
 }
 
+/// Trả về kết quả phân giải chương trình đào tạo đa ngành từ settings (hoặc fallback)
+#[tauri::command]
+pub fn get_resolved_curriculum(
+    db: tauri::State<'_, SharedDb>,
+) -> Result<crate::modules::academic::curriculum_resolver::CurriculumResolution, String> {
+    let conn = db.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
+    let (curriculum_code, major_code) = {
+        let get_val = |k: &str| -> String {
+            conn.query_row(
+                "SELECT value FROM settings WHERE key = ?1",
+                [k],
+                |r| r.get(0),
+            ).unwrap_or_default()
+        };
+        (get_val("curriculum_code"), get_val("major_code"))
+    };
+    crate::modules::academic::curriculum_resolver::resolve_curriculum(
+        &conn,
+        &curriculum_code,
+        if major_code.is_empty() { None } else { Some(&major_code) },
+    )
+}
+
+
 /// Trả về sync token hiện tại (hoặc sinh mới nếu chưa có) để hiển thị
 /// trong SyncTokenDisplay và dán vào Tampermonkey script.
 #[tauri::command]
@@ -702,6 +750,20 @@ pub fn execute_save_student_profile(
 
     if should_upgrade_major && !payload.specialization.trim().is_empty() {
         upsert("user_major", &payload.specialization, &tx)?;
+    }
+
+    // Cập nhật total_degree_credits động trong academic_program_summary
+    if let Ok(res) = crate::modules::academic::curriculum_resolver::resolve_curriculum(
+        &tx,
+        &payload.curriculum_code,
+        Some(&payload.major_code),
+    ) {
+        let _ = tx.execute(
+            "INSERT INTO academic_program_summary (id, total_degree_credits, updated_at)
+             VALUES ('MAIN', ?1, ?2)
+             ON CONFLICT(id) DO UPDATE SET total_degree_credits = excluded.total_degree_credits",
+            params![res.total_credits, chrono::Utc::now().timestamp()],
+        );
     }
 
     tx.commit().map_err(|e| e.to_string())?;

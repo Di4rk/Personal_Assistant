@@ -1,7 +1,8 @@
 import React, { useState } from "react";
 import { IS_DEV } from "../constants/app";
 import { resetIdentityState } from "../lib/tauri-client";
-import { Wrench, RotateCcw, AlertTriangle, Loader2 } from "lucide-react";
+import { Wrench, RotateCcw, AlertTriangle, Loader2, Shield } from "lucide-react";
+import { usePrivacyStore } from "../stores/usePrivacyStore";
 
 interface DevControlDockProps {
   onResetIdentity: () => void;
@@ -39,6 +40,15 @@ export const DevControlDock: React.FC<DevControlDockProps> = ({ onResetIdentity 
           <p className="text-[11px] text-slate-400 leading-tight">
             Chỉ khả dụng trong môi trường <span className="text-amber-300 font-semibold">DEV</span>. Không xuất hiện trong release build.
           </p>
+
+          <button
+            type="button"
+            onClick={() => usePrivacyStore.getState().toggleDemoMode()}
+            className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded bg-cyan-500/20 hover:bg-cyan-500/30 active:bg-cyan-500/40 text-cyan-300 border border-cyan-500/40 font-semibold transition-all cursor-pointer"
+          >
+            <Shield className="w-3.5 h-3.5" />
+            <span>🔒 TOGGLE DEMO PRIVACY</span>
+          </button>
 
           <button
             type="button"

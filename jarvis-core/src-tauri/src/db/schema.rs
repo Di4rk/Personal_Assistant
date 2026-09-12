@@ -38,6 +38,7 @@ pub fn init_db(db_path: &Path) -> SqlResult<Connection> {
     ensure_worker_schema(&conn)?;
     ensure_post_mortem_schema(&conn)?;
     crate::db::academic::init_academic_module(&conn)?;
+    ensure_curriculum_schema(&conn)?;
     ensure_moodle_schema(&conn)?;
     ensure_matrix_schema(&conn)?;
     ensure_plugin_and_activity_schema(&conn)?;
@@ -54,6 +55,7 @@ pub fn create_tables(conn: &Connection) -> SqlResult<()> {
     ensure_worker_schema(conn)?;
     ensure_post_mortem_schema(conn)?;
     crate::db::academic::init_academic_module(conn)?;
+    ensure_curriculum_schema(conn)?;
     ensure_moodle_schema(conn)?;
     ensure_matrix_schema(conn)?;
     ensure_plugin_and_activity_schema(conn)?;
@@ -361,6 +363,52 @@ pub fn ensure_matrix_schema(conn: &Connection) -> SqlResult<()> {
         )?;
     }
 
+    Ok(())
+}
+
+/// Tạo schema và dữ liệu hạt giống cho CTĐT đa ngành UIT và bí danh phân giải (idempotent).
+pub fn ensure_curriculum_schema(conn: &Connection) -> SqlResult<()> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS academic_curriculums (
+            major_code      TEXT PRIMARY KEY,
+            major_name      TEXT NOT NULL,
+            faculty         TEXT NOT NULL,
+            total_credits   INTEGER NOT NULL,
+            standard_years  REAL NOT NULL DEFAULT 4.0
+        );
+
+        CREATE TABLE IF NOT EXISTS curriculum_aliases (
+            alias_token     TEXT PRIMARY KEY,
+            major_code      TEXT NOT NULL,
+            credit_override INTEGER,
+            FOREIGN KEY (major_code) REFERENCES academic_curriculums(major_code)
+        );
+
+        INSERT OR IGNORE INTO academic_curriculums (major_code, major_name, faculty, total_credits, standard_years)
+        VALUES
+            ('D480101', 'Khoa học Máy tính', 'Khoa KHMT', 126, 4.0),
+            ('D480102', 'Mạng máy tính và TT', 'Khoa MMT&TT', 130, 4.0),
+            ('D480103', 'Kỹ thuật Phần mềm', 'Khoa KTPM', 130, 4.0),
+            ('D480104', 'Hệ thống Thông tin', 'Khoa HTTT', 130, 4.0),
+            ('D480201', 'An toàn Thông tin', 'Khoa ATTT', 132, 4.0),
+            ('D520216', 'Kỹ thuật Máy tính', 'Khoa KTMT', 132, 4.0);
+
+        INSERT OR IGNORE INTO curriculum_aliases (alias_token, major_code, credit_override)
+        VALUES
+            ('KHMT-CLC',  'D480101', 130),
+            ('KHMT-CTTT', 'D480101', 133),
+            ('KHMT-CQUI', 'D480101', NULL),
+            ('KHMT',      'D480101', NULL),
+            ('KTPM-CLC',  'D480103', 133),
+            ('KTPM',      'D480103', NULL),
+            ('ATTT-CLC',  'D480201', 135),
+            ('ATTT',      'D480201', NULL),
+            ('HTTT',      'D480104', NULL),
+            ('MMT',       'D480102', NULL),
+            ('KTMT',      'D520216', NULL);
+        "#,
+    )?;
     Ok(())
 }
 
