@@ -416,6 +416,16 @@ export async function getResolvedCurriculum(): Promise<CurriculumResolution> {
   return invoke<CurriculumResolution>("get_resolved_curriculum");
 }
 
+import type { WecodeSubmission } from "../types/wecode";
+
+export async function getWecodeSubmissions(assignmentId?: number): Promise<WecodeSubmission[]> {
+  return invoke<WecodeSubmission[]>("get_wecode_submissions", { assignmentId });
+}
+
+export async function launchWecodeSsoSync(): Promise<void> {
+  return invoke<void>("launch_wecode_sso_sync");
+}
+
 
 
 
