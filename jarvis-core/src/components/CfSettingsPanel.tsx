@@ -1,7 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { AlertTriangle, RotateCcw, X, Loader2 } from "lucide-react";
-import { getCfHandle, setCfHandle, triggerCfSync, purgeCfData } from "../lib/tauri-client";
-import type { SyncCompletePayload } from "../lib/tauri-client";
+import {
+  getCfHandle,
+  setCfHandle,
+  triggerCfSync,
+  purgeCfData,
+  saveUserProfile,
+  type UserProfileDto,
+  type SyncCompletePayload,
+} from "../lib/tauri-client";
 
 type SyncStatus =
   | { kind: "idle" }
@@ -12,6 +19,8 @@ type SyncStatus =
 interface CfSettingsPanelProps {
   /** Called after a successful sync or reset so App.tsx can refetch dashboard data. */
   onSyncComplete?: (payload: SyncCompletePayload) => void;
+  userProfile?: UserProfileDto;
+  onProfileUpdated?: (profile: UserProfileDto) => void;
 }
 
 /**
@@ -21,13 +30,49 @@ interface CfSettingsPanelProps {
  *   - Read / write the CF handle via IPC.
  *   - Trigger live synchronization.
  *   - Purge CF data safely with explicit Moodle deadline protection confirmation.
+ *   - Manage Signature Handle / Biệt danh and user identity.
  */
-export default function CfSettingsPanel({ onSyncComplete }: CfSettingsPanelProps) {
+export default function CfSettingsPanel({
+  onSyncComplete,
+  userProfile,
+  onProfileUpdated,
+}: CfSettingsPanelProps) {
   const [handle, setHandle] = useState("");
   const [status, setStatus] = useState<SyncStatus>({ kind: "idle" });
   const [isPurgeModalOpen, setIsPurgeModalOpen] = useState<boolean>(false);
   const [isPurging, setIsPurging] = useState<boolean>(false);
+  const [nickInput, setNickInput] = useState<string>(userProfile?.nickname ?? "");
+  const [profileSaveStatus, setProfileSaveStatus] = useState<string | null>(null);
   const mounted = useRef(true);
+
+  // Sync with userProfile prop changes
+  useEffect(() => {
+    if (userProfile?.nickname) {
+      setNickInput(userProfile.nickname);
+    }
+  }, [userProfile?.nickname]);
+
+  const handleSaveProfile = async () => {
+    const trimmed = nickInput.trim();
+    if (!trimmed) {
+      setProfileSaveStatus("Biệt danh không được để trống.");
+      return;
+    }
+    try {
+      const major = userProfile?.major ?? "CS";
+      await saveUserProfile(trimmed, major);
+      const updated: UserProfileDto = {
+        nickname: trimmed,
+        major,
+        is_initialized: true,
+      };
+      onProfileUpdated?.(updated);
+      setProfileSaveStatus("Đã lưu!");
+      setTimeout(() => setProfileSaveStatus(null), 3000);
+    } catch (err) {
+      setProfileSaveStatus(typeof err === "string" ? err : "Lỗi lưu biệt danh.");
+    }
+  };
 
   // Initialize input from persisted settings on mount.
   useEffect(() => {
@@ -176,6 +221,51 @@ export default function CfSettingsPanel({ onSyncComplete }: CfSettingsPanelProps
 
       {/* Status feedback */}
       <StatusMessage status={status} />
+
+      {/* Signature Handle / Biệt danh */}
+      <div className="pt-2.5 border-t border-slate-800/80 flex flex-col gap-2">
+        <div className="flex items-center justify-between">
+          <label
+            htmlFor="user-nickname-input"
+            className="text-xs font-mono font-medium text-slate-400 uppercase tracking-wider"
+          >
+            Signature Handle / Biệt danh
+          </label>
+          {profileSaveStatus && (
+            <span className="text-[11px] font-mono text-cyan-400 animate-in fade-in">
+              {profileSaveStatus}
+            </span>
+          )}
+        </div>
+        <div className="flex gap-2">
+          <input
+            id="user-nickname-input"
+            type="text"
+            value={nickInput}
+            onChange={(e) => setNickInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void handleSaveProfile();
+            }}
+            placeholder="Biệt danh (e.g. Diark)..."
+            className="flex-1 min-w-0 rounded-lg bg-slate-950 border border-slate-800
+                       px-3 py-2 text-sm text-slate-100 placeholder-slate-500
+                       focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500
+                       transition-colors font-mono"
+            aria-label="Signature Handle hoặc Biệt danh"
+          />
+          <button
+            id="user-save-profile-btn"
+            type="button"
+            onClick={() => void handleSaveProfile()}
+            className="shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-lg
+                       bg-slate-800 hover:bg-slate-700 active:bg-slate-900
+                       text-xs font-medium text-cyan-400 border border-slate-700
+                       transition-colors focus:outline-none focus:ring-2 focus:ring-cyan-500/50 cursor-pointer"
+          >
+            Lưu Định Danh
+          </button>
+        </div>
+      </div>
 
       {/* Reset Confirmation Modal */}
       {isPurgeModalOpen && (

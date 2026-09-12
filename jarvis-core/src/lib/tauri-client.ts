@@ -358,3 +358,17 @@ export async function purgeCfData(): Promise<void> {
   return invoke<void>("purge_cf_data");
 }
 
+export interface UserProfileDto {
+  nickname: string;
+  major: string;
+  is_initialized: boolean;
+}
+
+export async function getUserProfile(): Promise<UserProfileDto> {
+  return invoke<UserProfileDto>("get_user_profile");
+}
+
+export async function saveUserProfile(nickname: string, major: string): Promise<void> {
+  return invoke<void>("save_user_profile", { nickname, major });
+}
+

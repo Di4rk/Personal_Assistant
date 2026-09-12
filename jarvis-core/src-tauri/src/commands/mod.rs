@@ -1,6 +1,7 @@
 pub mod academic;
 pub mod matrix;
 pub mod post_mortem;
+pub mod settings;
 pub mod vault;
 pub mod workspace;
 
