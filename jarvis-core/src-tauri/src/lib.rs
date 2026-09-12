@@ -90,6 +90,7 @@ macro_rules! registered_commands {
             commands::settings::get_user_profile,
             commands::settings::save_user_profile,
             commands::settings::save_setting,
+            commands::settings::get_system_storage_stats,
             commands::settings::reset_identity_state,
             // Plugin Engine
             commands::plugins::list_installed_plugins,
@@ -171,6 +172,7 @@ macro_rules! registered_commands {
             commands::settings::get_user_profile,
             commands::settings::save_user_profile,
             commands::settings::save_setting,
+            commands::settings::get_system_storage_stats,
             commands::settings::reset_identity_state,
             // Plugin Engine
             commands::plugins::list_installed_plugins,
@@ -198,6 +200,7 @@ pub fn run() {
             let shared_db: db::SharedDb = Arc::new(Mutex::new(conn));
             app.manage(shared_db.clone());
             app.manage(AppState { db: shared_db.clone() });
+            app.manage(crate::commands::portal_auth::WatchdogRegistry::new());
 
             // HTTP client (15s timeout) — dùng chung giữa worker và IPC command
             // trigger_cf_sync, tránh tạo nhiều pool connection mỗi khi user bấm sync.

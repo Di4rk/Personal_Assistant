@@ -1,9 +1,178 @@
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
+use tokio_util::sync::CancellationToken;
 use urlencoding::decode;
 use crate::db::SharedDb;
+
+pub struct WatchdogRegistry(pub StdMutex<HashMap<String, CancellationToken>>);
+
+impl WatchdogRegistry {
+    pub fn new() -> Self {
+        Self(StdMutex::new(HashMap::new()))
+    }
+
+    pub fn register(&self, label: &str) -> CancellationToken {
+        let token = CancellationToken::new();
+        if let Ok(mut map) = self.0.lock() {
+            map.insert(label.to_string(), token.clone());
+        }
+        token
+    }
+
+    pub fn cancel(&self, label: &str) {
+        if let Ok(mut map) = self.0.lock() {
+            if let Some(token) = map.remove(label) {
+                token.cancel();
+            }
+        }
+    }
+}
+
+fn spawn_watchdog(app: AppHandle, window_label: String, token: CancellationToken) {
+    tauri::async_runtime::spawn(async move {
+        tokio::select! {
+            _ = tokio::time::sleep(std::time::Duration::from_secs(120)) => {
+                if let Some(win) = app.get_webview_window(&window_label) {
+                    let _ = win.destroy();
+                }
+                let _ = app.emit_to(
+                    "main",
+                    "portal-sync-failed",
+                    "Quá thời gian đăng nhập (Timeout 120s)",
+                );
+            }
+            _ = token.cancelled() => {
+                // Task hủy ngay lập tức khi nhận callback sớm
+            }
+        }
+    });
+}
+
+const UNIVERSAL_GUARDIAN_SCRIPT: &str = r#"
+(() => {
+  if (window.__DIARK_ACTIVE_GUARDIAN__) return;
+  window.__DIARK_ACTIVE_GUARDIAN__ = true;
+
+  const emitToRust = (target, payload) => {
+    window.location.href = 'diark-sso://callback#target=' + target + '&data=' + encodeURIComponent(JSON.stringify(payload));
+  };
+
+  const emitError = (reason) => {
+    window.location.href = 'diark-sso://failed#reason=' + reason;
+  };
+
+  const origFetch = window.fetch;
+  let fetchOverrideActive = false;
+
+  try {
+    window.fetch = async function(...args) {
+      const response = await origFetch.apply(this, args);
+      try {
+        const clone = response.clone();
+        const url = typeof args[0] === 'string' ? args[0] : (args[0]?.url || '');
+        if (url.includes('/api/sinh-vien/') || url.includes('/api/academic/')) {
+          clone.json().then(data => {
+            if (url.includes('ho-so')) emitToRust('portal_profile', data);
+            if (url.includes('bang-diem')) emitToRust('portal_transcript', data);
+          }).catch(() => {});
+        }
+      } catch (e) {}
+      return response;
+    };
+    fetchOverrideActive = (window.fetch !== origFetch);
+  } catch (e) {
+    fetchOverrideActive = false;
+  }
+
+  let harvested = false;
+
+  const inspectDOM = () => {
+    if (harvested) return;
+
+    // 1. Kịch bản Portal UIT: Bắt label "Mã sinh viên"
+    if (window.location.hostname.includes('portal.uit.edu.vn')) {
+      const nodes = Array.from(document.querySelectorAll('div, span, td, p'));
+      const idLabel = nodes.find(n => n.textContent?.trim().startsWith('Mã sinh viên'));
+      if (idLabel) {
+        const valNode = idLabel.nextElementSibling || idLabel.parentElement?.querySelector('.font-medium, .font-semibold');
+        const studentId = valNode?.textContent?.trim() || '';
+        if (/^\d{8}$/.test(studentId)) {
+          harvested = true;
+          const getText = (lbl) => {
+            const target = nodes.find(n => n.textContent?.trim().startsWith(lbl));
+            return target?.nextElementSibling?.textContent?.trim() || target?.parentElement?.querySelector('.font-medium, .font-semibold')?.textContent?.trim() || '';
+          };
+          emitToRust('portal_profile', {
+            student_id: studentId,
+            full_name: getText('Họ và tên'),
+            faculty: getText('Khoa'),
+            major_code: getText('Ngành'),
+            specialization: getText('Chuyên ngành'),
+            student_class: getText('Lớp sinh hoạt'),
+            curriculum_code: getText('CTĐT cụ thể'),
+            cohort: getText('Khóa')
+          });
+        }
+      }
+    }
+
+    // 2. Kịch bản Wecode UIT: Đã đăng nhập và vào trang Assignments
+    if (window.location.href.includes('/wecode25/it00x/')) {
+      const isLogin = window.location.href.includes('/login');
+      const profileLink = document.querySelector('#profile_link, a[href*="logout"]');
+
+      if (profileLink && isLogin) {
+        window.location.href = 'https://khmt.uit.edu.vn/wecode25/it00x/assignments';
+        return;
+      }
+      if (profileLink && !window.location.href.includes('/assignments') && !window.location.href.includes('/submissions')) {
+        window.location.href = 'https://khmt.uit.edu.vn/wecode25/it00x/assignments';
+        return;
+      }
+
+      const rows = Array.from(document.querySelectorAll('#DataTables_Table_0 tbody tr, table tbody tr'));
+      if (rows.length > 0 && rows[0].querySelector('td:nth-child(2)')) {
+        harvested = true;
+        const assignments = rows.map(tr => {
+          const idStr = tr.getAttribute('data-id') || tr.querySelector('td:nth-child(1)')?.textContent?.trim() || '0';
+          const className = tr.querySelector('td:nth-child(2)')?.textContent?.trim() || '';
+          const title = tr.querySelector('td:nth-child(3) a')?.textContent?.trim() || '';
+          const statsText = tr.querySelector('td:nth-child(4)')?.textContent?.trim() || '';
+          const startTime = tr.querySelector('td:nth-child(5)')?.textContent?.trim() || '';
+          const finishTime = tr.querySelector('td:nth-child(6)')?.textContent?.trim() || '';
+
+          let totalSubmits = 0, totalProblems = 0;
+          const subMatch = statsText.match(/(\d+)\s*sub/i);
+          if (subMatch) totalSubmits = parseInt(subMatch[1], 10);
+          const probMatch = statsText.match(/(\d+)\s*prob/i);
+          if (probMatch) totalProblems = parseInt(probMatch[1], 10);
+
+          return {
+            id: parseInt(idStr, 10),
+            class_name: className,
+            title: title,
+            author: null,
+            total_problems: totalProblems,
+            total_submits: totalSubmits,
+            status_text: statsText,
+            start_time: startTime,
+            finish_time: finishTime,
+            is_finished: statsText.toLowerCase().includes('finished')
+          };
+        }).filter(a => a.id > 0);
+
+        emitToRust('wecode_assignments', assignments);
+      }
+    }
+  };
+
+  const domSnoopInterval = fetchOverrideActive ? 300 : 150;
+  setInterval(inspectDOM, domSnoopInterval);
+})();
+"#;
 
 const STAGE_AWAITING_PROFILE: u8 = 0;
 const STAGE_AWAITING_TRANSCRIPT: u8 = 1;
@@ -250,6 +419,13 @@ pub async fn launch_portal_sso_sync(app: AppHandle) -> Result<(), String> {
             .map_err(|e| format!("Invalid auth URL: {e}"))?,
     );
 
+    let token = if let Some(watchdog) = app.try_state::<WatchdogRegistry>() {
+        watchdog.register("uit-sso-login")
+    } else {
+        CancellationToken::new()
+    };
+    spawn_watchdog(app.clone(), "uit-sso-login".to_string(), token);
+
     let stage = Arc::new(AtomicU8::new(STAGE_AWAITING_PROFILE));
     let stage_for_nav = stage.clone();
     let app_for_nav = app.clone();
@@ -259,10 +435,14 @@ pub async fn launch_portal_sso_sync(app: AppHandle) -> Result<(), String> {
         .inner_size(860.0, 720.0)
         .resizable(true)
         .always_on_top(true)
+        .initialization_script(UNIVERSAL_GUARDIAN_SCRIPT)
         .on_navigation(move |url| {
             let url_str = url.as_str();
 
             if url_str.starts_with(CALLBACK_SCHEME) {
+                if let Some(watchdog) = app_for_nav.try_state::<WatchdogRegistry>() {
+                    watchdog.cancel("uit-sso-login");
+                }
                 if let Some(fragment) = url.fragment() {
                     if let Ok(decoded) = decode(fragment) {
                         let payload_str = decoded.into_owned();
@@ -328,6 +508,9 @@ pub async fn launch_portal_sso_sync(app: AppHandle) -> Result<(), String> {
             }
 
             if url_str.starts_with(CALLBACK_FAIL_SCHEME) {
+                if let Some(watchdog) = app_for_nav.try_state::<WatchdogRegistry>() {
+                    watchdog.cancel("uit-sso-login");
+                }
                 let reason = url.fragment().unwrap_or("unknown").to_string();
                 let _ = app_for_nav.emit_to("main", "portal-sync-failed", reason);
                 close_sso_window(&app_for_nav);
@@ -368,6 +551,13 @@ pub async fn launch_wecode_sso_sync(app: AppHandle) -> Result<(), String> {
             .map_err(|e| format!("Invalid Wecode URL: {e}"))?,
     );
 
+    let token = if let Some(watchdog) = app.try_state::<WatchdogRegistry>() {
+        watchdog.register("wecode-sso-login")
+    } else {
+        CancellationToken::new()
+    };
+    spawn_watchdog(app.clone(), "wecode-sso-login".to_string(), token);
+
     let redirect_attempts = Arc::new(AtomicU8::new(0));
     let already_navigated_to_assignments = Arc::new(AtomicBool::new(false));
 
@@ -380,10 +570,14 @@ pub async fn launch_wecode_sso_sync(app: AppHandle) -> Result<(), String> {
         .inner_size(900.0, 750.0)
         .resizable(true)
         .always_on_top(true)
+        .initialization_script(UNIVERSAL_GUARDIAN_SCRIPT)
         .on_navigation(move |url| {
             let url_str = url.as_str();
 
             if url_str.starts_with(CALLBACK_SCHEME) {
+                if let Some(watchdog) = app_for_nav.try_state::<WatchdogRegistry>() {
+                    watchdog.cancel("wecode-sso-login");
+                }
                 if let Some(fragment) = url.fragment() {
                     if let Ok(decoded) = decode(fragment) {
                         handle_sync_payload(&app_for_nav, decoded.into_owned());
@@ -394,6 +588,9 @@ pub async fn launch_wecode_sso_sync(app: AppHandle) -> Result<(), String> {
             }
 
             if url_str.starts_with(CALLBACK_FAIL_SCHEME) {
+                if let Some(watchdog) = app_for_nav.try_state::<WatchdogRegistry>() {
+                    watchdog.cancel("wecode-sso-login");
+                }
                 let reason = url.fragment().unwrap_or("unknown").to_string();
                 let _ = app_for_nav.emit_to("main", "wecode-sync-failed", reason);
                 close_wecode_window(&app_for_nav);
@@ -404,6 +601,9 @@ pub async fn launch_wecode_sso_sync(app: AppHandle) -> Result<(), String> {
             if url_str.contains(WECODE_LOGIN_MARKER) {
                 let attempts = redirect_attempts_for_nav.fetch_add(1, Ordering::SeqCst);
                 if attempts >= MAX_LOGIN_REDIRECT_ATTEMPTS {
+                    if let Some(watchdog) = app_for_nav.try_state::<WatchdogRegistry>() {
+                        watchdog.cancel("wecode-sso-login");
+                    }
                     let _ = app_for_nav.emit_to(
                         "main",
                         "wecode-sync-failed",
@@ -440,12 +640,18 @@ pub async fn launch_wecode_sso_sync(app: AppHandle) -> Result<(), String> {
 }
 
 fn close_sso_window(app: &AppHandle) {
+    if let Some(watchdog) = app.try_state::<WatchdogRegistry>() {
+        watchdog.cancel("uit-sso-login");
+    }
     if let Some(window) = app.get_webview_window("uit-sso-login") {
         let _ = window.destroy();
     }
 }
 
 fn close_wecode_window(app: &AppHandle) {
+    if let Some(watchdog) = app.try_state::<WatchdogRegistry>() {
+        watchdog.cancel("wecode-sso-login");
+    }
     if let Some(window) = app.get_webview_window("wecode-sso-login") {
         let _ = window.destroy();
     }
@@ -809,5 +1015,20 @@ mod tests {
         let extracted_fragment = callback_url.split('#').nth(1).unwrap();
         let decoded = decode(extracted_fragment).unwrap();
         assert!(decoded.starts_with("target=wecode_assignments&data="));
+    }
+
+    #[test]
+    fn test_watchdog_registry_cancel() {
+        let registry = WatchdogRegistry::new();
+        let token = registry.register("test-window");
+        assert!(!token.is_cancelled());
+        registry.cancel("test-window");
+        assert!(token.is_cancelled());
+    }
+
+    #[test]
+    fn test_watchdog_registry_cancel_nonexistent() {
+        let registry = WatchdogRegistry::new();
+        registry.cancel("nonexistent-window");
     }
 }

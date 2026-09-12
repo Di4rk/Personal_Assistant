@@ -426,6 +426,12 @@ export async function launchWecodeSsoSync(): Promise<void> {
   return invoke<void>("launch_wecode_sso_sync");
 }
 
+export interface SystemStorageStats {
+  db_size_bytes: number;
+  wal_size_bytes: number;
+  total_records_count: number;
+}
 
-
-
+export async function getSystemStorageStats(): Promise<SystemStorageStats> {
+  return invoke<SystemStorageStats>("get_system_storage_stats");
+}

@@ -21,9 +21,11 @@ import { DevControlDock } from "./components/DevControlDock";
 import { DemoModeBanner } from "./components/DemoModeBanner";
 import { PluginMarketplaceModal } from "./components/PluginMarketplaceModal";
 import { PluginViewportRouter } from "./features/plugins/PluginViewportRouter";
+import { SettingsModal } from "./components/SettingsModal";
+import { useSettingsStore } from "./stores/useSettingsStore";
 import { listInstalledPlugins } from "./lib/plugin-sdk";
 import type { PluginMetaDto } from "./types/plugin";
-import { Code2, GraduationCap, FolderGit2, Blocks } from "lucide-react";
+import { Code2, GraduationCap, FolderGit2, Blocks, Settings } from "lucide-react";
 import { APP_VERSION, APP_SUBTITLE } from "./constants/app";
 import {
   getUserProfile,
@@ -301,6 +303,16 @@ export default function App() {
             <span className="hidden sm:inline">Plugins</span>
           </button>
 
+          {/* Settings Hub Button */}
+          <button
+            onClick={() => useSettingsStore.getState().openSettings()}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 text-xs font-mono text-slate-300 hover:text-cyan-400 transition-colors cursor-pointer"
+            title="Cài đặt hệ thống (Settings Hub)"
+          >
+            <Settings className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Settings</span>
+          </button>
+
           <span className="rounded border border-slate-700 bg-slate-900 px-2 py-0.5 font-mono text-xs text-cyan-400">
             {APP_VERSION}
           </span>
@@ -384,6 +396,7 @@ export default function App() {
         ))}
       </div>
 
+      <SettingsModal />
       <DevControlDock onResetIdentity={handleResetIdentity} />
     </div>
   );
