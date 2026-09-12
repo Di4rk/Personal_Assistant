@@ -89,6 +89,7 @@ macro_rules! registered_commands {
             // Settings & Identity
             commands::settings::get_user_profile,
             commands::settings::save_user_profile,
+            commands::settings::save_setting,
             commands::settings::reset_identity_state,
             // Plugin Engine
             commands::plugins::list_installed_plugins,
@@ -169,6 +170,7 @@ macro_rules! registered_commands {
             // Settings & Identity (Always available)
             commands::settings::get_user_profile,
             commands::settings::save_user_profile,
+            commands::settings::save_setting,
             commands::settings::reset_identity_state,
             // Plugin Engine
             commands::plugins::list_installed_plugins,

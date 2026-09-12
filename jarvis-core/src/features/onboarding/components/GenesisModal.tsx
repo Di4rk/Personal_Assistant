@@ -1,364 +1,155 @@
-import React, { useState } from "react";
-import {
-  Terminal,
-  Shield,
-  ArrowRight,
-  ArrowLeft,
-  AlertCircle,
-  Sparkles,
-  Check,
-  Laptop,
-  Trophy,
-  Bot,
-  ShieldCheck,
-} from "lucide-react";
-import { DEFAULT_NICKNAME, APP_SUBTITLE } from "../../../constants/app";
-import { togglePlugin } from "../../../lib/plugin-sdk";
+import React, { useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 
 interface GenesisModalProps {
-  onComplete: (nickname: string, major: string) => void;
+  onComplete: () => void;
 }
-
-interface WorkspaceGoal {
-  id: string;
-  title: string;
-  description: string;
-  badge: string;
-  icon: React.ComponentType<{ className?: string }>;
-  pluginIds: string[];
-}
-
-const WORKSPACE_GOALS: WorkspaceGoal[] = [
-  {
-    id: "uit_standard",
-    title: "Học tập Cơ sở (UIT Standard)",
-    description: "Kích hoạt Wecode UIT Tracker + Moodle Radar.",
-    badge: "Core Academic",
-    icon: Laptop,
-    pluginIds: ["uit-wecode"],
-  },
-  {
-    id: "competitive_programming",
-    title: "Luyện Thuật toán / ICPC (Competitive Programming)",
-    description: "Bật thêm Codeforces Engine + LeetCode Tracker.",
-    badge: "Algorithms",
-    icon: Trophy,
-    pluginIds: ["cp-codeforces", "cp-leetcode"],
-  },
-  {
-    id: "ai_data",
-    title: "Nghiên cứu Trí tuệ Nhân tạo (AI & Data)",
-    description: "Bật thêm AI Lab (Kaggle Hub).",
-    badge: "Data Science",
-    icon: Bot,
-    pluginIds: ["ai-lab"],
-  },
-  {
-    id: "cyber_security",
-    title: "An toàn Thông tin (Cyber Security)",
-    description: "Bật thêm CTF Logger.",
-    badge: "Security",
-    icon: ShieldCheck,
-    pluginIds: ["sec-ctf"],
-  },
-];
 
 export const GenesisModal: React.FC<GenesisModalProps> = ({ onComplete }) => {
   const [step, setStep] = useState<1 | 2>(1);
-  const [nickname, setNickname] = useState<string>(DEFAULT_NICKNAME);
-  const [selectedGoals, setSelectedGoals] = useState<string[]>([
-    "uit_standard",
-    "competitive_programming",
-  ]);
-  const [error, setError] = useState<string | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [nickname, setNickname] = useState('Diark');
+  const [selectedGoals, setSelectedGoals] = useState<{
+    cp: boolean;
+    ai: boolean;
+    sec: boolean;
+  }>({
+    cp: true,
+    ai: false,
+    sec: false,
+  });
 
-  const toggleGoal = (id: string) => {
-    setSelectedGoals((prev) =>
-      prev.includes(id) ? prev.filter((g) => g !== id) : [...prev, id]
-    );
+  const handleNextStep = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (nickname.trim()) setStep(2);
   };
 
-  const handleNextStep = (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    const trimmedNick = nickname.trim();
-
-    if (!trimmedNick) {
-      setError("Signature Handle / Nickname không được để trống.");
-      return;
-    }
-
-    setError(null);
-    setStep(2);
-  };
-
-  const handleFinalSubmit = async () => {
-    const trimmedNick = nickname.trim();
-    if (!trimmedNick) {
-      setStep(1);
-      setError("Signature Handle / Nickname không được để trống.");
-      return;
-    }
-
-    if (selectedGoals.length === 0) {
-      setError("Vui lòng chọn ít nhất 1 mục tiêu không gian làm việc.");
-      return;
-    }
-
-    setError(null);
-    setIsSubmitting(true);
-
+  const handleActivate = async () => {
     try {
-      // Gather selected plugin IDs
-      const targetPlugins = new Set<string>();
-      for (const goalId of selectedGoals) {
-        const goal = WORKSPACE_GOALS.find((g) => g.id === goalId);
-        if (goal) {
-          for (const pid of goal.pluginIds) {
-            targetPlugins.add(pid);
-          }
-        }
-      }
+      const trimmed = nickname.trim();
+      await invoke('save_user_profile', { nickname: trimmed, major: 'CS' });
+      try {
+        await invoke('save_setting', { key: 'user_nickname', value: trimmed });
+      } catch (_) {}
 
-      // Configure plugins according to goals
-      const allKnownPlugins = [
-        "uit-wecode",
-        "cp-codeforces",
-        "cp-leetcode",
-        "ai-lab",
-        "sec-ctf",
-      ];
+      // Core UIT (Wecode) luôn bật mặc định
+      await invoke('toggle_plugin', { pluginId: 'uit-wecode', enabled: true });
+      await invoke('toggle_plugin', { pluginId: 'cp-codeforces', enabled: selectedGoals.cp });
+      await invoke('toggle_plugin', { pluginId: 'ai-lab', enabled: selectedGoals.ai });
+      await invoke('toggle_plugin', { pluginId: 'sec-ctf', enabled: selectedGoals.sec });
 
-      await Promise.all(
-        allKnownPlugins.map((pid) => togglePlugin(pid, targetPlugins.has(pid)))
-      );
-
-      onComplete(trimmedNick, "CS");
+      onComplete();
     } catch (err) {
-      console.error("Lỗi hoàn tất Genesis onboarding:", err);
-      setError(
-        typeof err === "string" ? err : "Đã xảy ra lỗi khi khởi tạo hệ thống."
-      );
-      setIsSubmitting(false);
+      console.error('Kích hoạt hệ điều hành thất bại:', err);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-300">
-      <div className="w-full max-w-xl rounded-2xl border border-cyan-500/30 bg-slate-950/95 p-8 shadow-[0_0_50px_rgba(6,182,212,0.15)] text-slate-100 relative overflow-hidden">
-        {/* Cyberpunk accent bar top */}
-        <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-cyan-500 via-violet-500 to-emerald-400" />
-
-        {/* Step Indicator */}
-        <div className="mb-4 flex items-center justify-between">
-          <div className="flex items-center gap-2 text-cyan-400 text-xs font-mono tracking-widest uppercase">
-            <Terminal className="w-4 h-4 text-cyan-400 animate-pulse" />
-            <span>
-              SYSTEM GENESIS // STEP {step} OF 2
-            </span>
-          </div>
-          <div className="flex items-center gap-1.5 font-mono text-[11px] text-slate-500">
-            <span
-              className={`px-2 py-0.5 rounded ${
-                step === 1
-                  ? "bg-cyan-950 text-cyan-300 border border-cyan-700/60 font-bold"
-                  : "bg-slate-900 text-slate-400"
-              }`}
-            >
-              01: HANDLE
-            </span>
-            <span>→</span>
-            <span
-              className={`px-2 py-0.5 rounded ${
-                step === 2
-                  ? "bg-cyan-950 text-cyan-300 border border-cyan-700/60 font-bold"
-                  : "bg-slate-900 text-slate-400"
-              }`}
-            >
-              02: GOALS
-            </span>
-          </div>
-        </div>
-
-        {/* Header */}
-        <div className="mb-6 flex items-start justify-between">
-          <div className="space-y-1">
-            <h2 className="text-2xl font-black tracking-tight text-white flex items-center gap-2">
-              {step === 1 ? (
-                <>
-                  INITIALIZE <span className="text-cyan-400">// OS</span>
-                </>
-              ) : (
-                <>
-                  THIẾT LẬP <span className="text-cyan-400">KHÔNG GIAN LÀM VIỆC</span>
-                </>
-              )}
-            </h2>
-            <p className="text-xs text-slate-400 font-mono">
-              {step === 1
-                ? APP_SUBTITLE
-                : "Chọn mục tiêu và phong cách cá nhân để tự động định hình các phân hệ"}
-            </p>
-          </div>
-          <div className="p-2.5 rounded-xl bg-cyan-950/50 border border-cyan-500/20 text-cyan-400 shrink-0">
-            <Shield className="w-6 h-6" />
-          </div>
-        </div>
-
-        {/* Step 1: Signature Handle */}
-        {step === 1 && (
-          <form onSubmit={handleNextStep} className="space-y-5">
-            <div className="rounded-lg border border-slate-800/80 bg-slate-900/60 p-3.5 text-xs text-slate-300 leading-relaxed space-y-1 font-mono">
-              <div className="flex items-center gap-1.5 text-cyan-300 font-semibold">
-                <Sparkles className="w-3.5 h-3.5" />
-                <span>Zero-Cloud, Pure Local Identity</span>
-              </div>
-              <p className="text-slate-400">
-                Hệ điều hành vận hành hoàn toàn cục bộ trên SQLite WAL. Hãy thiết lập chữ ký định danh cá nhân để định cấu hình không gian làm việc.
-              </p>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-md p-4">
+      <div className="w-full max-w-lg rounded-2xl border border-cyan-500/30 bg-slate-900/95 p-8 shadow-2xl shadow-cyan-500/10">
+        {step === 1 ? (
+          <form onSubmit={handleNextStep} className="space-y-6">
+            <div>
+              <p className="font-mono text-xs uppercase tracking-widest text-cyan-400">System Genesis Sequence</p>
+              <h2 className="mt-1 font-mono text-2xl font-bold tracking-wider text-slate-100">INITIALIZE // OS</h2>
+              <p className="mt-2 text-sm text-slate-400">Thiết lập chữ ký định danh cá nhân để định cấu hình không gian làm việc cục bộ.</p>
             </div>
 
-            <div>
-              <label
-                htmlFor="genesis-nickname"
-                className="block text-xs font-mono font-medium text-slate-300 mb-1.5 uppercase tracking-wider"
-              >
+            <div className="space-y-2">
+              <label className="block font-mono text-xs uppercase tracking-wider text-slate-300">
                 Signature Handle / Nickname
               </label>
               <input
-                id="genesis-nickname"
                 type="text"
-                autoFocus
                 value={nickname}
-                onChange={(e) => {
-                  setNickname(e.target.value);
-                  if (error) setError(null);
-                }}
-                placeholder="e.g. Diark"
-                className="w-full rounded-lg bg-slate-900 border border-slate-800 px-4 py-3 text-sm text-white font-mono placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500 transition-colors"
+                onChange={(e) => setNickname(e.target.value)}
+                className="w-full rounded-lg border border-slate-700 bg-slate-800/80 px-4 py-3 font-mono text-slate-100 outline-none transition focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500"
+                placeholder="Nhập tên gọi của bạn..."
+                required
               />
             </div>
 
-            {error && (
-              <div className="flex items-center gap-2 p-3 rounded-lg bg-red-950/60 border border-red-500/40 text-red-300 text-xs font-mono animate-in fade-in duration-200">
-                <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
-                <span>{error}</span>
-              </div>
-            )}
-
             <button
               type="submit"
-              className="w-full mt-2 flex items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 px-5 py-3 text-sm font-bold text-white shadow-[0_0_20px_rgba(6,182,212,0.3)] transition-all active:scale-[0.99] cursor-pointer"
+              className="w-full rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 py-3 font-mono text-sm font-bold uppercase tracking-wider text-slate-950 shadow-lg shadow-cyan-500/20 transition hover:brightness-110 active:scale-[0.99]"
             >
-              <span>TIẾP TỤC</span>
-              <ArrowRight className="w-4 h-4" />
+              Tiếp Tục →
             </button>
           </form>
-        )}
-
-        {/* Step 2: Workspace Goals */}
-        {step === 2 && (
-          <div className="space-y-4">
-            <div className="grid grid-cols-1 gap-2.5 max-h-[320px] overflow-y-auto pr-1">
-              {WORKSPACE_GOALS.map((goal) => {
-                const isSelected = selectedGoals.includes(goal.id);
-                const IconComponent = goal.icon;
-
-                return (
-                  <div
-                    key={goal.id}
-                    onClick={() => toggleGoal(goal.id)}
-                    className={`cursor-pointer rounded-xl border p-3.5 transition-all flex items-start gap-3.5 ${
-                      isSelected
-                        ? "border-cyan-500/80 bg-cyan-950/30 shadow-[0_0_15px_rgba(6,182,212,0.1)]"
-                        : "border-slate-800 bg-slate-900/50 hover:border-slate-700"
-                    }`}
-                  >
-                    <div
-                      className={`p-2 rounded-lg shrink-0 mt-0.5 ${
-                        isSelected
-                          ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/40"
-                          : "bg-slate-800 text-slate-400 border border-slate-700"
-                      }`}
-                    >
-                      <IconComponent className="w-4 h-4" />
-                    </div>
-
-                    <div className="flex-1 min-w-0 space-y-1">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-xs font-bold text-white font-mono truncate">
-                          {goal.title}
-                        </span>
-                        <span
-                          className={`text-[10px] font-mono px-2 py-0.5 rounded font-semibold shrink-0 ${
-                            isSelected
-                              ? "bg-cyan-900/60 text-cyan-300 border border-cyan-700/60"
-                              : "bg-slate-800 text-slate-500"
-                          }`}
-                        >
-                          {goal.badge}
-                        </span>
-                      </div>
-                      <p className="text-[11px] text-slate-400 font-mono leading-relaxed">
-                        {goal.description}
-                      </p>
-                    </div>
-
-                    <div
-                      className={`w-5 h-5 rounded-md flex items-center justify-center shrink-0 border transition-all mt-0.5 ${
-                        isSelected
-                          ? "bg-cyan-500 border-cyan-400 text-slate-950"
-                          : "border-slate-700 bg-slate-800"
-                      }`}
-                    >
-                      {isSelected && <Check className="w-3.5 h-3.5 stroke-[3]" />}
-                    </div>
-                  </div>
-                );
-              })}
+        ) : (
+          <div className="space-y-6">
+            <div>
+              <p className="font-mono text-xs uppercase tracking-widest text-cyan-400">Personal Workspace Configuration</p>
+              <h2 className="mt-1 font-mono text-2xl font-bold tracking-wider text-slate-100">CHỌN MỤC TIÊU &amp; PHÂN HỆ</h2>
+              <p className="mt-2 text-sm text-slate-400">Chọn các mục tiêu ưu tiên để hệ thống kích hoạt không gian làm việc tương ứng.</p>
             </div>
 
-            {error && (
-              <div className="flex items-center gap-2 p-3 rounded-lg bg-red-950/60 border border-red-500/40 text-red-300 text-xs font-mono animate-in fade-in duration-200">
-                <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
-                <span>{error}</span>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between rounded-xl border border-cyan-500/40 bg-cyan-950/20 p-4">
+                <div>
+                  <p className="font-medium text-slate-200">Học vụ UIT &amp; Wecode</p>
+                  <p className="text-xs text-slate-400">Bảng điểm, DRL, tiến độ CTĐT &amp; bài tập thực hành</p>
+                </div>
+                <span className="rounded bg-cyan-500/20 px-2.5 py-1 font-mono text-xs font-semibold text-cyan-400">Cốt lõi</span>
               </div>
-            )}
 
-            <div className="flex items-center gap-3 pt-2">
+              <label className={`flex cursor-pointer items-center justify-between rounded-xl border p-4 transition ${selectedGoals.cp ? 'border-blue-500/50 bg-blue-950/20' : 'border-slate-800 bg-slate-800/40 hover:border-slate-700'}`}>
+                <div>
+                  <p className="font-medium text-slate-200">Luyện Thuật toán / ICPC</p>
+                  <p className="text-xs text-slate-400">Codeforces Engine, LeetCode Radar &amp; Life Matrix XP</p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={selectedGoals.cp}
+                  onChange={(e) => setSelectedGoals({ ...selectedGoals, cp: e.target.checked })}
+                  className="h-5 w-5 rounded border-slate-700 bg-slate-800 text-cyan-500 focus:ring-0"
+                />
+              </label>
+
+              <label className={`flex cursor-pointer items-center justify-between rounded-xl border p-4 transition ${selectedGoals.ai ? 'border-purple-500/50 bg-purple-950/20' : 'border-slate-800 bg-slate-800/40 hover:border-slate-700'}`}>
+                <div>
+                  <p className="font-medium text-slate-200">Trí tuệ Nhân tạo (AI &amp; Data)</p>
+                  <p className="text-xs text-slate-400">Kaggle Notebooks Tracker &amp; Research Lab</p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={selectedGoals.ai}
+                  onChange={(e) => setSelectedGoals({ ...selectedGoals, ai: e.target.checked })}
+                  className="h-5 w-5 rounded border-slate-700 bg-slate-800 text-cyan-500 focus:ring-0"
+                />
+              </label>
+
+              <label className={`flex cursor-pointer items-center justify-between rounded-xl border p-4 transition ${selectedGoals.sec ? 'border-emerald-500/50 bg-emerald-950/20' : 'border-slate-800 bg-slate-800/40 hover:border-slate-700'}`}>
+                <div>
+                  <p className="font-medium text-slate-200">An toàn Thông tin (InfoSec)</p>
+                  <p className="text-xs text-slate-400">CTF Challenge Logger &amp; Writeups Vault</p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={selectedGoals.sec}
+                  onChange={(e) => setSelectedGoals({ ...selectedGoals, sec: e.target.checked })}
+                  className="h-5 w-5 rounded border-slate-700 bg-slate-800 text-cyan-500 focus:ring-0"
+                />
+              </label>
+            </div>
+
+            <div className="flex gap-3">
               <button
                 type="button"
-                onClick={() => {
-                  setError(null);
-                  setStep(1);
-                }}
-                disabled={isSubmitting}
-                className="px-4 py-3 rounded-lg border border-slate-800 bg-slate-900 hover:bg-slate-800 text-slate-300 text-xs font-mono font-bold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+                onClick={() => setStep(1)}
+                className="w-1/3 rounded-lg border border-slate-700 bg-slate-800 py-3 font-mono text-sm font-semibold text-slate-300 transition hover:bg-slate-700"
               >
-                <ArrowLeft className="w-3.5 h-3.5" />
-                <span>QUAY LẠI</span>
+                ← Quay lại
               </button>
-
               <button
                 type="button"
-                onClick={handleFinalSubmit}
-                disabled={isSubmitting}
-                className="flex-1 flex items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 px-5 py-3 text-sm font-bold text-white shadow-[0_0_20px_rgba(6,182,212,0.3)] transition-all active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                onClick={handleActivate}
+                className="w-2/3 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 py-3 font-mono text-sm font-bold uppercase tracking-wider text-slate-950 shadow-lg shadow-cyan-500/20 transition hover:brightness-110 active:scale-[0.99]"
               >
-                <span>
-                  {isSubmitting ? "ĐANG KHỞI TẠO..." : "KÍCH HOẠT HỆ ĐIỀU HÀNH"}
-                </span>
-                <ArrowRight className="w-4 h-4" />
+                Kích Hoạt Hệ Điều Hành →
               </button>
             </div>
           </div>
         )}
-
-        {/* Footer info */}
-        <div className="mt-6 pt-4 border-t border-slate-900 flex items-center justify-between text-[11px] font-mono text-slate-500">
-          <span>STATUS: READY FOR BOOT</span>
-          <span>SEC: LOCAL_SANDBOX</span>
-        </div>
       </div>
     </div>
   );

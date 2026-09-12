@@ -86,16 +86,27 @@ export default function App() {
     };
   }, []);
 
-  const handleGenesisComplete = async (nickname: string, major: string) => {
+  const handleGenesisComplete = async (nickname?: string, major?: string) => {
     try {
-      await saveUserProfile(nickname, major);
+      if (nickname) {
+        await saveUserProfile(nickname, major || "CS");
+      }
+      const profile = await getUserProfile();
       await loadPlugins();
       setProfileState({
         status: "ready",
-        profile: { nickname, major, is_initialized: true },
+        profile: {
+          nickname: profile.nickname || nickname || "Diark",
+          major: profile.major || major || "CS",
+          is_initialized: true,
+        },
       });
     } catch (err) {
-      console.error("Failed to save user profile in genesis:", err);
+      console.error("Failed to complete genesis onboarding:", err);
+      setProfileState({
+        status: "ready",
+        profile: { nickname: "Diark", major: "CS", is_initialized: true },
+      });
     }
   };
 
