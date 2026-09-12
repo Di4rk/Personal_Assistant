@@ -97,6 +97,8 @@ macro_rules! registered_commands {
             commands::plugins::plugin_storage_set,
             commands::plugins::record_activity_event,
             commands::plugins::trigger_recompute_daily_matrix,
+            commands::plugins::fetch_remote_registry,
+            commands::plugins::install_remote_plugin,
             // Dev Tools (Debug Only)
             commands::dev_tools::seed_mock_academic_data,
             commands::dev_tools::clear_cf_cache,
@@ -175,6 +177,8 @@ macro_rules! registered_commands {
             commands::plugins::plugin_storage_set,
             commands::plugins::record_activity_event,
             commands::plugins::trigger_recompute_daily_matrix,
+            commands::plugins::fetch_remote_registry,
+            commands::plugins::install_remote_plugin,
         ]
     };
 }

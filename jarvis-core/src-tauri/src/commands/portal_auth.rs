@@ -1,10 +1,17 @@
 use serde::Deserialize;
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder, Emitter};
+use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::Arc;
+use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 use urlencoding::decode;
 use crate::db::SharedDb;
 
+const STAGE_AWAITING_PROFILE: u8 = 0;
+const STAGE_AWAITING_TRANSCRIPT: u8 = 1;
+const STAGE_DONE: u8 = 2;
+
 const PROFILE_PAGE_MARKER: &str = "portal.uit.edu.vn/sinh-vien/ho-so";
-const WECODE_PAGE_MARKER: &str = "wecode.uit.edu.vn/submissions";
+const TRANSCRIPT_PAGE_MARKER: &str = "portal.uit.edu.vn/sinh-vien/bang-diem";
+const TRANSCRIPT_URL: &str = "https://portal.uit.edu.vn/sinh-vien/bang-diem";
 const CALLBACK_SCHEME: &str = "diark-sso://callback";
 const CALLBACK_FAIL_SCHEME: &str = "diark-sso://failed";
 
@@ -15,33 +22,85 @@ struct PortalIngestionPayload {
     drl: serde_json::Value,
 }
 
-const HARVEST_SCRIPT: &str = r#"
+const PORTAL_PROFILE_HARVEST_SCRIPT: &str = r#"
 (async () => {
   try {
-    const [profileRes, transcriptRes, drlRes] = await Promise.all([
-      fetch('/api/sinh-vien/ho-so', { credentials: 'same-origin' }),
-      fetch('/api/sinh-vien/bang-diem', { credentials: 'same-origin' }),
-      fetch('/api/sinh-vien/diem-ren-luyen', { credentials: 'same-origin' }),
-    ]);
-
-    if (profileRes.status === 401 || transcriptRes.status === 401 || drlRes.status === 401) {
-      window.location.href = 'diark-sso://failed#reason=session_expired';
+    const getTextByLabel = (label) => {
+      const nodes = Array.from(document.querySelectorAll('div, span, td'));
+      const target = nodes.find(n => n.textContent?.trim().startsWith(label));
+      if (!target) return '';
+      const valNode = target.nextElementSibling || target.parentElement?.querySelector('.font-medium, .font-semibold');
+      return valNode?.textContent?.trim() || '';
+    };
+    const profile = {
+      student_id: getTextByLabel('Mã sinh viên') || document.querySelector('.font-mono')?.textContent?.trim() || '',
+      full_name: getTextByLabel('Họ và tên') || document.querySelector('h2.font-heading')?.textContent?.trim() || '',
+      faculty: getTextByLabel('Khoa') || '',
+      major_code: getTextByLabel('Ngành') || '',
+      specialization: getTextByLabel('Chuyên ngành') || '',
+      student_class: getTextByLabel('Lớp sinh hoạt') || '',
+      curriculum_code: getTextByLabel('CTĐT cụ thể') || '',
+      cohort: getTextByLabel('Khóa') || '',
+    };
+    if (!profile.student_id) {
+      window.location.href = 'diark-sso://failed#reason=profile_dom_empty';
       return;
     }
-    if (!profileRes.ok || !transcriptRes.ok || !drlRes.ok) {
-      window.location.href = 'diark-sso://failed#reason=api_error';
-      return;
+    window.location.href = 'diark-sso://callback#target=portal_profile&data=' + encodeURIComponent(JSON.stringify(profile));
+  } catch (err) {
+    window.location.href = 'diark-sso://failed#reason=portal_dom_parse_error';
+  }
+})();
+"#;
+
+const PORTAL_TRANSCRIPT_HARVEST_SCRIPT: &str = r#"
+(async () => {
+  try {
+    let transcriptData = null;
+    let drlData = null;
+
+    try {
+      const [tRes, dRes] = await Promise.all([
+        fetch('/api/sinh-vien/bang-diem', { credentials: 'same-origin' }),
+        fetch('/api/sinh-vien/diem-ren-luyen', { credentials: 'same-origin' })
+      ]);
+      if (tRes.ok) transcriptData = await tRes.json();
+      if (dRes.ok) drlData = await dRes.json();
+    } catch (_) {}
+
+    if (!transcriptData) {
+      const semesterGroups = [];
+      const tables = Array.from(document.querySelectorAll('table'));
+      for (const table of tables) {
+        const title = table.closest('div')?.querySelector('h3, h4, .font-bold')?.textContent?.trim() || 'Học kỳ';
+        const rows = Array.from(table.querySelectorAll('tbody tr'));
+        const courses = [];
+        for (const row of rows) {
+          const cells = Array.from(row.querySelectorAll('td')).map(td => td.textContent?.trim() || '');
+          if (cells.length >= 5) {
+            courses.push({
+              course_code: cells[1] || cells[0],
+              course_name: cells[2] || cells[1],
+              credits: parseInt(cells[3] || '0', 10) || 0,
+              total_score: parseFloat(cells[4] || '0') || null,
+            });
+          }
+        }
+        if (courses.length > 0) {
+          semesterGroups.push({ semester_name: title, courses });
+        }
+      }
+      transcriptData = { semester_groups: semesterGroups };
     }
 
     const payload = {
-      profile: await profileRes.json(),
-      transcript: await transcriptRes.json(),
-      drl: await drlRes.json(),
+      transcript: transcriptData || { semester_groups: [] },
+      drl: drlData || { drl: [] }
     };
 
-    window.location.href = 'diark-sso://callback#' + encodeURIComponent(JSON.stringify(payload));
-  } catch (e) {
-    window.location.href = 'diark-sso://failed#reason=network_error';
+    window.location.href = 'diark-sso://callback#target=portal_transcript&data=' + encodeURIComponent(JSON.stringify(payload));
+  } catch (err) {
+    window.location.href = 'diark-sso://failed#reason=transcript_dom_parse_error';
   }
 })();
 "#;
@@ -100,6 +159,8 @@ pub async fn launch_portal_sso_sync(app: AppHandle) -> Result<(), String> {
             .map_err(|e| format!("Invalid auth URL: {e}"))?,
     );
 
+    let stage = Arc::new(AtomicU8::new(STAGE_AWAITING_PROFILE));
+    let stage_for_nav = stage.clone();
     let app_for_nav = app.clone();
 
     let window = WebviewWindowBuilder::new(&app, "uit-sso-login", auth_url)
@@ -113,7 +174,62 @@ pub async fn launch_portal_sso_sync(app: AppHandle) -> Result<(), String> {
             if url_str.starts_with(CALLBACK_SCHEME) {
                 if let Some(fragment) = url.fragment() {
                     if let Ok(decoded) = decode(fragment) {
-                        handle_sync_payload(&app_for_nav, decoded.into_owned());
+                        let payload_str = decoded.into_owned();
+
+                        if payload_str.starts_with("target=portal_profile&data=") {
+                            let encoded_or_json = &payload_str["target=portal_profile&data=".len()..];
+                            let json_str = if encoded_or_json.starts_with('%') {
+                                decode(encoded_or_json).unwrap_or(std::borrow::Cow::Borrowed(encoded_or_json)).into_owned()
+                            } else {
+                                encoded_or_json.to_string()
+                            };
+
+                            if let Ok(profile) = serde_json::from_str::<crate::commands::academic::StudentProfilePayload>(&json_str) {
+                                let state = app_for_nav.state::<SharedDb>();
+                                let _ = crate::commands::academic::save_student_profile_internal(&app_for_nav, &state, profile);
+                                let _ = app_for_nav.emit_to("main", "portal-profile-synced", ());
+                            }
+
+                            // Chuyển sang stage 1 và điều hướng sang trang bảng điểm
+                            stage_for_nav.store(STAGE_AWAITING_TRANSCRIPT, Ordering::SeqCst);
+                            if let Some(win) = app_for_nav.get_webview_window("uit-sso-login") {
+                                if let Ok(t_url) = TRANSCRIPT_URL.parse() {
+                                    let _ = win.navigate(t_url);
+                                }
+                            }
+                            return false;
+                        }
+
+                        if payload_str.starts_with("target=portal_transcript&data=") {
+                            let encoded_or_json = &payload_str["target=portal_transcript&data=".len()..];
+                            let json_str = if encoded_or_json.starts_with('%') {
+                                decode(encoded_or_json).unwrap_or(std::borrow::Cow::Borrowed(encoded_or_json)).into_owned()
+                            } else {
+                                encoded_or_json.to_string()
+                            };
+
+                            #[derive(serde::Deserialize)]
+                            struct TranscriptData {
+                                transcript: serde_json::Value,
+                                drl: serde_json::Value,
+                            }
+                            if let Ok(data) = serde_json::from_str::<TranscriptData>(&json_str) {
+                                let state = app_for_nav.state::<SharedDb>();
+                                let _ = crate::commands::academic::ingest_full_academic_payload_internal(
+                                    &app_for_nav,
+                                    &state,
+                                    data.transcript,
+                                    data.drl,
+                                );
+                                let _ = app_for_nav.emit_to("main", "academic-data-synced", ());
+                            }
+
+                            stage_for_nav.store(STAGE_DONE, Ordering::SeqCst);
+                            close_sso_window(&app_for_nav);
+                            return false;
+                        }
+
+                        handle_sync_payload(&app_for_nav, payload_str);
                     }
                 }
                 close_sso_window(&app_for_nav);
@@ -127,15 +243,14 @@ pub async fn launch_portal_sso_sync(app: AppHandle) -> Result<(), String> {
                 return false;
             }
 
-            if url_str.contains(PROFILE_PAGE_MARKER) {
+            let current_stage = stage_for_nav.load(Ordering::SeqCst);
+            if current_stage == STAGE_AWAITING_PROFILE && url_str.contains(PROFILE_PAGE_MARKER) {
                 if let Some(win) = app_for_nav.get_webview_window("uit-sso-login") {
-                    let _ = win.eval(HARVEST_SCRIPT);
+                    let _ = win.eval(PORTAL_PROFILE_HARVEST_SCRIPT);
                 }
-            }
-
-            if url_str.contains(WECODE_PAGE_MARKER) {
+            } else if current_stage == STAGE_AWAITING_TRANSCRIPT && url_str.contains(TRANSCRIPT_PAGE_MARKER) {
                 if let Some(win) = app_for_nav.get_webview_window("uit-sso-login") {
-                    let _ = win.eval(WECODE_SUBMISSION_HARVEST_SCRIPT);
+                    let _ = win.eval(PORTAL_TRANSCRIPT_HARVEST_SCRIPT);
                 }
             }
 
@@ -157,7 +272,7 @@ pub async fn launch_wecode_sso_sync(app: AppHandle) -> Result<(), String> {
     }
 
     let auth_url = WebviewUrl::External(
-        "https://wecode.uit.edu.vn/submissions"
+        "https://khmt.uit.edu.vn/wecode25/it00x/submissions"
             .parse()
             .map_err(|e| format!("Invalid Wecode URL: {e}"))?,
     );
@@ -189,7 +304,7 @@ pub async fn launch_wecode_sso_sync(app: AppHandle) -> Result<(), String> {
                 return false;
             }
 
-            if url_str.contains(WECODE_PAGE_MARKER) {
+            if url_str.contains("submissions") || url_str.contains("assignments") {
                 if let Some(win) = app_for_nav.get_webview_window("wecode-sso-login") {
                     let _ = win.eval(WECODE_SUBMISSION_HARVEST_SCRIPT);
                 }
@@ -219,10 +334,9 @@ fn close_wecode_window(app: &AppHandle) {
 fn handle_sync_payload(app: &AppHandle, raw_payload: String) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
-        // Check if payload is from wecode submissions
+        // 1. Wecode submissions
         if raw_payload.starts_with("target=wecode_submissions&data=") {
             let encoded_or_json = &raw_payload["target=wecode_submissions&data=".len()..];
-            // Decode in case it is still URL-encoded, or parse directly if decoded
             let json_str = if encoded_or_json.starts_with('%') {
                 decode(encoded_or_json).unwrap_or(std::borrow::Cow::Borrowed(encoded_or_json)).into_owned()
             } else {
@@ -244,6 +358,72 @@ fn handle_sync_payload(app: &AppHandle, raw_payload: String) {
             return;
         }
 
+        // 2. Portal Profile only
+        if raw_payload.starts_with("target=portal_profile&data=") {
+            let encoded_or_json = &raw_payload["target=portal_profile&data=".len()..];
+            let json_str = if encoded_or_json.starts_with('%') {
+                decode(encoded_or_json).unwrap_or(std::borrow::Cow::Borrowed(encoded_or_json)).into_owned()
+            } else {
+                encoded_or_json.to_string()
+            };
+
+            let profile: crate::commands::academic::StudentProfilePayload = match serde_json::from_str(&json_str) {
+                Ok(p) => p,
+                Err(e) => {
+                    let _ = app.emit_to("main", "portal-sync-failed", format!("parse_error: {e}"));
+                    return;
+                }
+            };
+
+            let state = app.state::<SharedDb>();
+            if let Err(e) = crate::commands::academic::save_student_profile_internal(&app, &state, profile) {
+                let _ = app.emit_to("main", "portal-sync-failed", e);
+                return;
+            }
+
+            let _ = app.emit_to("main", "portal-profile-synced", ());
+            return;
+        }
+
+        // 3. Portal Transcript only
+        if raw_payload.starts_with("target=portal_transcript&data=") {
+            let encoded_or_json = &raw_payload["target=portal_transcript&data=".len()..];
+            let json_str = if encoded_or_json.starts_with('%') {
+                decode(encoded_or_json).unwrap_or(std::borrow::Cow::Borrowed(encoded_or_json)).into_owned()
+            } else {
+                encoded_or_json.to_string()
+            };
+
+            #[derive(serde::Deserialize)]
+            struct TranscriptPayload {
+                transcript: serde_json::Value,
+                drl: serde_json::Value,
+            }
+
+            let data: TranscriptPayload = match serde_json::from_str(&json_str) {
+                Ok(d) => d,
+                Err(e) => {
+                    let _ = app.emit_to("main", "portal-sync-failed", format!("parse_error: {e}"));
+                    return;
+                }
+            };
+
+            let state = app.state::<SharedDb>();
+            if let Err(e) = crate::commands::academic::ingest_full_academic_payload_internal(
+                &app,
+                &state,
+                data.transcript,
+                data.drl,
+            ) {
+                let _ = app.emit_to("main", "portal-sync-failed", e);
+                return;
+            }
+
+            let _ = app.emit_to("main", "academic-data-synced", ());
+            return;
+        }
+
+        // 4. Combined payload fallback
         let payload: PortalIngestionPayload = match serde_json::from_str(&raw_payload) {
             Ok(p) => p,
             Err(e) => {
@@ -309,6 +489,69 @@ mod tests {
         let p = payload.unwrap();
         assert_eq!(p.profile.student_id, "21520000");
         assert_eq!(p.profile.full_name, "Nguyễn Văn A");
+    }
+
+    #[test]
+    fn test_portal_profile_callback_decoding() {
+        let profile_raw = json!({
+            "student_id": "23520123",
+            "full_name": "Lê Văn C",
+            "faculty": "Khoa Khoa học máy tính",
+            "major_code": "7480101",
+            "specialization": "Khoa học máy tính",
+            "student_class": "KHMT2023.1",
+            "curriculum_code": "CQ2023",
+            "cohort": "2023"
+        });
+
+        let json_str = serde_json::to_string(&profile_raw).unwrap();
+        let encoded_data = urlencoding::encode(&json_str);
+        let fragment = format!("target=portal_profile&data={encoded_data}");
+        let callback_url = format!("diark-sso://callback#{fragment}");
+
+        assert!(callback_url.starts_with(CALLBACK_SCHEME));
+        let extracted_fragment = callback_url.split('#').nth(1).unwrap();
+        let decoded = decode(extracted_fragment).unwrap();
+        assert!(decoded.starts_with("target=portal_profile&data="));
+
+        let data_part = &decoded["target=portal_profile&data=".len()..];
+        let p: Result<crate::commands::academic::StudentProfilePayload, _> = serde_json::from_str(data_part);
+        assert!(p.is_ok());
+        assert_eq!(p.unwrap().student_id, "23520123");
+    }
+
+    #[test]
+    fn test_portal_transcript_callback_decoding() {
+        let transcript_raw = json!({
+            "transcript": {
+                "semester_groups": [
+                    {
+                        "semester_name": "Học kỳ 1 Năm học 2023-2024",
+                        "courses": [
+                            {
+                                "course_code": "IT001",
+                                "course_name": "Nhập môn lập trình",
+                                "credits": 4,
+                                "total_score": 9.5
+                            }
+                        ]
+                    }
+                ]
+            },
+            "drl": {
+                "drl": []
+            }
+        });
+
+        let json_str = serde_json::to_string(&transcript_raw).unwrap();
+        let encoded_data = urlencoding::encode(&json_str);
+        let fragment = format!("target=portal_transcript&data={encoded_data}");
+        let callback_url = format!("diark-sso://callback#{fragment}");
+
+        assert!(callback_url.starts_with(CALLBACK_SCHEME));
+        let extracted_fragment = callback_url.split('#').nth(1).unwrap();
+        let decoded = decode(extracted_fragment).unwrap();
+        assert!(decoded.starts_with("target=portal_transcript&data="));
     }
 
     #[test]
@@ -383,4 +626,3 @@ mod tests {
         assert_eq!(list[0].score, 100);
     }
 }
-

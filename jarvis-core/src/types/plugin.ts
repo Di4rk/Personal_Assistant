@@ -17,3 +17,13 @@ export interface ActivityEventInput {
   xpValue: number;
   refId?: string;
 }
+
+export interface RemotePluginDto {
+  id: string;
+  name: string;
+  version: string;
+  author: string;
+  download_url: string;
+  sha256: string;
+  manifest_url: string;
+}
