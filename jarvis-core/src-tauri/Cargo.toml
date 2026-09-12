@@ -23,12 +23,16 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-dialog = "2"
+tauri-plugin-autostart = "2"
+tauri-plugin-notification = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 # --- Database ---
-# "bundled-full" bao gồm FTS5 + R-Tree + mọi extension SQLite chuẩn.
-rusqlite = { version = "0.31", features = ["bundled", "bundled-full"] }
+rusqlite = { version = "0.32", features = ["bundled", "bundled-windows", "functions", "load_extension"] }
+
+# --- Local Text Embeddings (Pure Rust ONNX Engine) ---
+fastembed = "4"
 
 # --- Local HTTP server (nhận webhook từ Chrome extension) ---
 axum = "0.7"
@@ -46,7 +50,8 @@ thiserror = "1"
 anyhow = "1"
 
 # --- Utils ---
-chrono = { version = "0.4", features = ["serde"] }
+# Timezone Lock (UTC+7 Asia/Ho_Chi_Minh)
+chrono = { version = "0.4", features = ["serde", "clock"] }
 uuid = { version = "1", features = ["v4"] }
 scraper = "0.22"
 walkdir = "2.4"

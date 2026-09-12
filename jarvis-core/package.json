@@ -7,13 +7,20 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "codegen:types": "quicktype -s json -o src/types/portal-generated.ts"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",
     "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-autostart": "^2.5.1",
     "@tauri-apps/plugin-dialog": "^2.7.3",
+    "@tauri-apps/plugin-notification": "^2.4.0",
     "@tauri-apps/plugin-opener": "^2",
+    "@visx/group": "^4.0.0",
+    "@visx/scale": "^4.0.0",
+    "@visx/shape": "^4.0.0",
+    "@visx/tooltip": "^4.0.0",
     "clsx": "^2.1.1",
     "lucide-react": "^1.32.0",
     "react": "^19.1.0",
@@ -27,6 +34,7 @@
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^4.6.0",
+    "quicktype": "^26.0.0",
     "typescript": "~5.8.3",
     "vite": "^7.0.4"
   }

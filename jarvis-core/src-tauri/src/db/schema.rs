@@ -9,6 +9,33 @@ use std::time::Duration;
 /// khi bị mutate từ nhiều nơi -- Mutex đảm bảo chỉ 1 thread ghi tại 1 thời điểm.
 pub type SharedDb = Arc<Mutex<Connection>>;
 
+/// Nạp dynamic extension sqlite-vec (vec0) vào SQLite connection.
+/// Tuyệt đối không unwrap(), ưu tiên tìm kiếm file binary tại các đường dẫn quy ước.
+pub fn load_sqlite_vec_extension(conn: &Connection) -> SqlResult<()> {
+    let candidate_paths = [
+        std::path::PathBuf::from("./binaries/extensions/vec0"),
+        std::path::PathBuf::from("binaries/extensions/vec0"),
+        std::path::PathBuf::from("src-tauri/binaries/extensions/vec0"),
+        std::path::PathBuf::from("../src-tauri/binaries/extensions/vec0"),
+    ];
+
+    let mut resolved_path = None;
+    for p in &candidate_paths {
+        let with_dll = p.with_extension("dll");
+        if with_dll.exists() || p.exists() {
+            resolved_path = Some(p.clone());
+            break;
+        }
+    }
+
+    let target = resolved_path.unwrap_or_else(|| std::path::PathBuf::from("./binaries/extensions/vec0"));
+    unsafe {
+        conn.load_extension(&target, None)?;
+    }
+    println!("[SQLite] Loaded sqlite-vec extension successfully from: {}", target.display());
+    Ok(())
+}
+
 /// Khởi tạo connection SQLite tại đường dẫn chỉ định, bật WAL mode,
 /// và chạy migration tạo bảng nếu chưa tồn tại (idempotent - chạy lại
 /// bao nhiêu lần cũng an toàn).
@@ -33,6 +60,11 @@ pub fn init_db(db_path: &Path) -> SqlResult<Connection> {
     // Vô hiệu hóa mmap để tránh phình ảo virtual memory trên Windows.
     // Lưu ý: PRAGMA mmap_size = 0 trả về 1 row (giá trị mmap_size mới), nên dùng pragma_update_and_check để consume row.
     let _: i64 = conn.pragma_update_and_check(None, "mmap_size", 0, |row| row.get(0))?;
+
+    // Bắt buộc mở cờ nạp dynamic extension trên Connection cho sqlite-vec
+    if let Err(e) = load_sqlite_vec_extension(&conn) {
+        eprintln!("[WARN] sqlite-vec extension load deferred: {e}");
+    }
 
     run_migrations(&conn)?;
     ensure_worker_schema(&conn)?;
@@ -820,5 +852,18 @@ mod tests {
         ).unwrap();
 
         assert_eq!(classification, "Chưa xếp loại");
+    }
+
+    #[test]
+    fn test_sqlite_vec_extension_loads_and_queries_version() {
+        let conn = rusqlite::Connection::open_in_memory().expect("open in-memory db");
+        let result = super::load_sqlite_vec_extension(&conn);
+        assert!(result.is_ok(), "sqlite-vec should load successfully: {:?}", result.err());
+
+        let version: String = conn
+            .query_row("SELECT vec_version()", [], |row| row.get(0))
+            .expect("query vec_version");
+        assert!(!version.is_empty(), "vec_version should return non-empty string");
+        println!("sqlite-vec loaded version: {version}");
     }
 }

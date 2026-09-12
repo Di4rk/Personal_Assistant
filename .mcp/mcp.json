@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "jarvis-sqlite": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-sqlite",
+        "--db-path",
+        "${env:APPDATA}/dev.yourname.jarviscore/jarvis.sqlite3"
+      ]
+    }
+  }
+}
