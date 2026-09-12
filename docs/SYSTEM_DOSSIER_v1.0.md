@@ -1,49 +1,47 @@
-# [SYSTEM ARCHITECTURE DOSSIER] JARVIS PERSONAL OS (v1.0.0 BASELINE)
+# [SYSTEM ARCHITECTURE DOSSIER] DIARK // OS (v1.0.0 PRODUCTION BASELINE)
 
 > **Document Type:** Production Architecture Dossier & System Ledger  
-> **Release Version:** `v1.0.0` (Production Baseline)  
-> **Git Commit Hash:** `4f49e78bafc8ebf5e8411aa5120bfab71f60a519`  
+> **System Name:** DIARK // OS (formerly JARVIS Personal OS)  
+> **Release Version:** `v1.0.0` (Production Baseline Tagged)  
+> **Git Commit Hash:** `ab6fb3620c38626d7dcebe4e8704c8ea36f695e2`  
 > **Git Branch:** `main` (Working Tree: Clean)  
-> **Verification Status:** 98/98 Tests Passed (100%), Production Vite Bundle: 307.01 kB JS (gzip: 89.28 kB), 58.91 kB CSS (gzip: 10.10 kB).  
-> **Target Machine Profile:** Acer Nitro 5 Tiger (Windows 11 x64, Intel Core i5 / AMD Ryzen 5, 16GB RAM).
+> **Verification Status:** 101/101 Tests Passed (99 Unit + 2 Integration, 100%), Production Vite Bundle: 303.43 kB JS (gzip: 88.40 kB), 69.50 kB CSS (gzip: 11.39 kB).  
+> **Target Machine Profile:** Acer Nitro 5 Tiger (Windows 11 x64, 16GB RAM).
 
 ---
 
-## 1. PROJECT DNA & TARGET CONSTRAINTS
+## 1. PROJECT DNA & SYSTEM TENETS
 
-### 1.1 Target Persona
+### 1.1 Target Persona & Core User Profiles
 - **Primary User:** Sinh viên năm 2 ngành Khoa học Máy tính / Công nghệ Thông tin tại Trường Đại học Công nghệ Thông tin (UIT - ĐHQG-HCM).
 - **Secondary Roles:**
-  - **Competitive Programmer (ICPC):** Luyện thuật toán chuyên sâu trên Codeforces / VNOJ, cày điểm First-AC, phân tích lỗi hậu giải đấu (Post-Mortem taxonomy).
-  - **Academic Achiever:** Theo dõi tiến độ tích lũy 10 học kỳ, tính GPA/CPA hệ 10 và hệ 4 theo quy chế ĐHQG-HCM, tự động hóa trích xuất điểm rèn luyện (DRL) và bảng điểm chính quy từ cổng sinh viên UIT.
+  - **Competitive Programmer (ICPC):** Luyện thuật toán chuyên sâu trên Codeforces / VNOJ, cày điểm First-AC, lưu trữ phân tích nguyên nhân lỗi sau giải đấu (Post-Mortem taxonomy).
+  - **Academic Achiever:** Theo dõi tiến độ tích lũy 10 học kỳ, tính GPA/CPA hệ 10 và hệ 4 theo chuẩn ĐHQG-HCM, tự động hóa trích xuất điểm rèn luyện (DRL) và bảng điểm chính quy từ cổng sinh viên UIT, mô phỏng mục tiêu tốt nghiệp.
   - **Tutor / Designer:** Soạn thảo tài liệu giảng dạy, bài giảng thuật toán (Teaching Sheets), quản lý liên kết ghi chú ngoài với Microsoft OneNote.
 
-### 1.2 Hardware Constraints & Resource Budget
-- **Memory Budget:** Idle footprint **< 80MB RAM** (Target tối đa cho desktop daemon).
-- **CPU Thrift:** Zero background CPU thrashing — không dùng vòng lặp `thread::sleep` vô tận, không dùng file watcher polling nặng (`notify` polling bị cấm); thay vào đó dùng event-driven architecture (`tokio::sync::watch`, `tokio::select!`, `TcpListener::accept`).
+### 1.2 Hardware Budget & Runtime Constraints
+- **Memory Budget:** Idle RAM nghiêm ngặt **< 80MB** (Rust daemon chiếm ~15-25MB RSS, WebView2 shell ~60-70MB).
+- **CPU Thrift:** Zero background CPU thrashing — không dùng vòng lặp `thread::sleep` vô tận, không dùng file watcher polling nặng (`notify` polling bị cấm); thay vào đó sử dụng kiến trúc event-driven (`tokio::sync::watch`, `tokio::select!`, `TcpListener::accept`).
 - **Disk I/O Protection:** Bật SQLite Write-Ahead Logging (WAL) với `PRAGMA synchronous = NORMAL` và `PRAGMA cache_size = -8000` (giới hạn ~8MB page cache). Khóa `mmap_size = 0` trên Windows để chống phình ảo Virtual Address Space.
 
-### 1.3 Technology Stack & Architectural Pillars
-| Layer | Technologies & Libraries | Invariant Rules |
-| :--- | :--- | :--- |
-| **Host Runtime** | Tauri v2 (`tauri = "2.3"`, `tauri-build = "2.0"`) | Chạy native WebView2, kiểm soát toàn quyền IPC boundary. |
-| **Core Systems** | Rust 2021 Edition, Tokio 1.x async runtime | **Zero `unwrap()` / `expect()`** trong production paths. Propagate lỗi qua `Result<T, AppError>`. |
-| **Persistence** | SQLite 3 (`rusqlite = "0.32"`, `bundled`, `fts5`) | Single-writer guard qua `Arc<Mutex<Connection>>`, WAL checkpointing khi shutdown. |
-| **Frontend UI** | React 18, TypeScript (Strict Mode), Vite 6 | **Zero `any`**, zero magic numbers, 4px scale, Dark mode first (slate/zinc palette). |
-| **Networking** | `reqwest = "0.12"`, `httparse = "1.8"` | Zero-dependency loopback HTTP parser cho browser bridge, client timeout 15s. |
+### 1.3 Core Architectural Tenets
+- **Zero-Effort Automation:** Bất đối xứng I/O, máy tự bắt gói tin ngầm từ portal UIT qua loopback TCP (port 41718), người dùng chỉ việc nộp bài hoặc tra cứu mà không cần thao tác thủ công.
+- **Single Source of Truth (SSOT):** Versioning và cấu hình chuẩn hóa qua hằng số `APP_VERSION = 'v1.0.0'` và `src/constants/app.ts`, triệt tiêu hoàn toàn các chuỗi hardcode phân mảnh (`v0.3.3`, `JARVIS`).
+- **Local-First Hardware Identity:** Không dùng tài khoản/mật khẩu hay xác thực đám mây; định danh gắn liền với SQLite cục bộ (`user_nickname`, `user_major`) và quyền truy cập profile hệ điều hành.
 
 ---
 
-## 2. FUNCTIONAL MATRIX (APP LÀM ĐƯỢC GÌ VÀ VẬN HÀNH NHƯ THẾ NÀO?)
+## 2. FUNCTIONAL SUBSYSTEMS & RUNTIME MATRIX
 
 ```
 +-------------------------------------------------------------------------------------------------------+
-|                                          JARVIS PERSONAL OS                                           |
+|                                             DIARK // OS                                               |
 +-------------------------------------------------------------------------------------------------------+
 |  [Global Daemon & HUD]            [Browser Bridge Server]                [CF Sync Worker]             |
 |   - System Tray (TrayIcon)         - Loopback TCP (127.0.0.1:41718)       - Ephemeral Poller (60s)    |
 |   - Global Shortcut (Alt+K)        - Zero-dependency HTTP Parse           - Exponential Backoff       |
 |   - Raycast-style Palette          - Bearer Token Auth                    - AtomicBool SyncLock       |
+|   - Idle WAL Passive (15m)         - Atomic DRL Retention                 - Safe CF Purge Routine     |
 +------------------------------------+--------------------------------------+---------------------------+
                                       |                                      |
                                       v                                      v
@@ -58,90 +56,69 @@
 +-------------------------------------+--------------------------------------+--------------------------+
 |  [Competitive Engine]              [Academic Automation]                  [Native Vault Engine]       |
 |   - First-AC CTE Deduplication      - UIT Portal SSO & Tampermonkey        - Markdown Scanner (mtime) |
-|   - UTC+07:00 Normalization         - Non-destructive DRL Retention        - FTS5 BM25 (title, prose) |
-|   - Tiered XP State Calculation     - Radar & Simulation Engine            - OneNote Scheme Guard     |
+|   - UTC+07:00 Normalization         - Atomic DRL COALESCE Retention        - FTS5 BM25 (title, prose) |
+|   - Tiered XP State Calculation     - Composite Reward & Simulator         - OneNote Guard & Dialog   |
 +-------------------------------------------------------------------------------------------------------+
 ```
 
-### 2.1 Module 1 & 2: Competitive Programming Engine & Post-Mortem Taxonomy
+### 2.1 Identity Subsystem & Genesis Lifecycle
+- **Window Lifecycle Guarantee (Zero-Flash):**
+  - Cấu hình `"visible": false` và `"title": "// OS"` trong `tauri.conf.json`.
+  - Trong `setup()` hook của Rust, tiến trình đọc SQLite blocking từ bảng `settings`: lấy `user_nickname` (fallback `"Diark"`), đồng bộ native window title dạng `"{nickname} // OS"`, sau đó mới kích hoạt `window.show()`. Cơ chế này loại bỏ 100% hiện tượng chớp title bar hoặc nháy giao diện khi ứng dụng khởi động.
+- **Genesis Modal Flow:**
+  - Khi khởi chạy lần đầu (`system_initialized` chưa tồn tại trong `settings`), React root chuyển sang trạng thái `needs-onboarding`, hiển thị `GenesisModal` Cyberpunk tối giản (`bg-slate-950/95`, border `cyan-500/30`, shadow cyan glow).
+  - Cho phép người dùng thiết lập biệt danh (mặc định: `Diark`) và ngành học (mặc định: `CS`).
+  - Form hỗ trợ phím `Enter` tự động submit, zero-cloud, ghi nhận nguyên tử vào SQLite transaction.
+- **Runtime Identity Mutation:**
+  - Hỗ trợ đổi biệt danh trực tiếp từ panel Settings (`CfSettingsPanel.tsx`), lập tức gọi `save_user_profile` cập nhật header ứng dụng và native window title bar mà không cần reload trang.
+
+### 2.2 Competitive Programming Engine & Life Matrix
 - **First-AC CTE Deduplication:**
-  - Để ngăn chặn gian lận XP khi nộp nhiều lần cho cùng một bài tập (hoặc khi contest replay), hệ thống sử dụng truy vấn SQL Recursive / Window CTE tính `MIN(submission_time)` cho mỗi cặp `(contest_id, problem_index)`.
-  - Chỉ submission đầu tiên đạt verdict `OK` / `ACCEPTED` mới được đánh dấu `is_first_ac = 1` và cộng 15 XP. Các lượt nộp sau đó nhận 0 XP hoặc XP penalty theo cấu hình.
-- **Chuẩn hóa múi giờ UTC+7 (ICT):**
-  - Mọi timestamp Unix Epoch từ Codeforces API đều được chuẩn hóa chính xác vào ngày làm việc theo công thức: `date(datetime(ts, 'unixepoch', '+7 hours'))`.
-- **Background Worker Concurrency:**
-  - Background worker chạy chu kỳ 60s bằng `tokio::select!` kết hợp `watch::Receiver<bool>` để nhận tín hiệu shutdown.
-  - Sử dụng cờ nguyên tử `SyncLock (Arc<AtomicBool>)` để ngăn ngừa race condition giữa tiến trình chạy tự động ngầm và nút bấm thủ công `trigger_cf_sync` trên giao diện.
-- **Post-Mortem Error Taxonomy:**
-  - Phân loại lỗi theo 5 nhóm chuẩn kỹ thuật: `LOGIC_BUG`, `CORNER_CASE`, `TIME_COMPLEXITY`, `IMPLEMENTATION`, `MISREAD`.
-  - Tích hợp bảng ảo FTS5 `post_mortems_fts` dạng *external content*, đồng bộ tự động 100% qua 3 triggers: `AFTER INSERT`, `AFTER UPDATE`, `AFTER DELETE` (dùng lệnh `'delete'` chuyên dụng để dọn dẹp shadow tables).
+  - Để ngăn chặn gian lận XP khi nộp nhiều lần cho cùng một bài tập, hệ thống sử dụng truy vấn SQL CTE đánh giá `MIN(submission_time)` cho mỗi cặp `(contest_id, problem_index)` đạt verdict `OK` / `ACCEPTED`. Chỉ submission đầu tiên mới nhận `is_first_ac = 1` (+15 XP).
+- **Chuẩn hóa UTC+7 (ICT):**
+  - Mọi timestamp Unix Epoch từ Codeforces API đều được quy đổi về ngày làm việc hành chính Việt Nam: `date(datetime(ts, 'unixepoch', '+7 hours'))`.
+- **Safe Purge Execution:**
+  - Command `purge_cf_data` xóa sạch các bảng `submissions`, `post_mortems`, `daily_activity`, và khóa `cf_handle` trong `settings`.
+  - Cập nhật `ac_count = 0` trên `life_matrix_daily` và recompute theo từng ngày bị ảnh hưởng; **bảo toàn 100% `deadlines_cleared`** từ Moodle của người dùng.
+- **UI & Titles:**
+  - Bảng màu Cyberpunk / Monokai (`slate-900`, `cyan-400`, `emerald-400`), hệ thống danh hiệu IT UIT theo cấp độ (Level 1: *Script Kiddie*, Level 5: *Code Monkey*, Level 10: *Bug Hunter*, Level 20: *Senior Specialist*, Level 36+: *Grandmaster Architect*).
 
-### 2.2 Module 3: Life Matrix Heatmap Engine
-- **364-Cell Continuous Calendar Grid:**
-  - Khởi tạo chính xác dải 364 ô liên tục (52 tuần $\times$ 7 ngày) từ SQLite mà không cần loop tính toán ở frontend, thông qua Recursive CTE:
+### 2.3 Academic Automation & Grading Engine
+- **Loopback Sync Server (Port 41718):**
+  - HTTP loopback server siêu nhẹ dùng `httparse`, bind trên `127.0.0.1`, xác thực qua header `X-Jarvis-Sync-Token`. Tự động tiếp nhận transcript & DRL từ Tampermonkey userscript chạy trên cổng thông tin sinh viên UIT.
+- **Atomic DRL Retention:**
+  - Câu lệnh SQL UPSERT trong `portal_ingestion.rs` và `db/academic.rs` sử dụng kỹ thuật:
     ```sql
-    WITH RECURSIVE date_range(d) AS (
-        SELECT date(?1)
-        UNION ALL
-        SELECT date(d, '+1 day') FROM date_range WHERE d < date(?2)
-    )
-    SELECT date_range.d, COALESCE(lmd.ac_count, 0), COALESCE(lmd.total_xp, 0), COALESCE(lmd.state_tier, 0)
-    FROM date_range
-    LEFT JOIN life_matrix_daily lmd ON lmd.date = date_range.d
-    ORDER BY date_range.d ASC;
+    ON CONFLICT(semester_id) DO UPDATE SET
+        ...
+        drl_score = COALESCE(excluded.drl_score, academic_macro_metrics.drl_score),
+        drl = COALESCE(excluded.drl, academic_macro_metrics.drl),
+        updated_at = excluded.updated_at;
     ```
-- **State Tier Calculation:**
-  - Điểm tổng hợp hàng ngày kết hợp: `Total XP = (Distinct First-AC * 15) + (OnTime Deadlines * 20) + (Late Deadlines * 5)`.
-  - Phân tầng trạng thái 5 bậc: `Tier 0 (Idle: <=0 XP)`, `Tier 1 (Low: 1..30 XP)`, `Tier 2 (Mid: 31..60 XP)`, `Tier 3 (High: 61..90 XP)`, `Tier 4 (God Mode: >90 XP)`.
-- **Frontend Zero-Reflow Performance:**
-  - Giao diện sử dụng kỹ thuật Event Delegation (chỉ 1 listener duy nhất trên toàn bộ grid SVG/DOM), tính toán tooltip position qua CSS GPU transform (`translate3d`) lồng trong `requestAnimationFrame`, loại bỏ hoàn toàn hiện tượng layout reflow.
+  - Đảm bảo khi đồng bộ bảng điểm học kỳ mà payload không mang DRL (`drl: null`), điểm rèn luyện đã có trong hệ thống tuyệt đối không bị mất hay reset.
+- **Composite Reward Classification:**
+  - Phân tách rạch ròi giữa Xếp loại Học lực theo GPA và Xếp loại Thi đua/Khen thưởng ĐHQG-HCM tính toán dạng compute-on-read: `calculateCompositeRewardRank(gpa10, drl)`. Nếu DRL < 50 hoặc bị cảnh cáo, hạ bậc thi đua tương ứng theo quy chế chính thức.
+- **Graduation Simulator:**
+  - Chuẩn hóa CTĐT UIT 126 tín chỉ, dynamic pills gợi ý số kỳ còn lại (3.5 năm - 5 kỳ, 4 năm - 6 kỳ, 4.5 năm - 7 kỳ), hỗ trợ nhập trực tiếp số tín chỉ dự kiến/kỳ để tính toán GPA mục tiêu cần đạt.
 
-### 2.3 Module 4 & 6: Academic Automation & UIT Portal Browser Bridge
-- **Loopback HTTP Sync Server (Port 41718):**
-  - Triển khai server TCP siêu nhẹ bằng `tokio::net::TcpListener` và bộ parser zero-dependency `httparse`. Tuyệt đối không kéo các web framework cồng kềnh như `axum` hay `actix-web`.
-  - Tự động fallback sang port 41719, 41720 nếu port 41718 bị chiếm dụng.
-- **Security Boundary:**
-  - Chỉ bind trên giao tiếp nội bộ `127.0.0.1`.
-  - Mọi request đều bắt buộc chứa header `X-Jarvis-Sync-Token` khớp với token bảo mật ngẫu nhiên lưu trong bảng `settings`.
-- **Tampermonkey Userscript Bridge:**
-  - Userscript chạy trên `student.uit.edu.vn` và `portal.uit.edu.vn`. Tự động cào bảng điểm, danh sách môn học và điểm rèn luyện (DRL), đóng gói thành JSON và gửi thẳng vào loopback port.
-- **Bảo vệ DRL Không Bị Ghi Đè (Data Retention Invariant):**
-  - Khi người dùng nạp bảng điểm học tập mà trường DRL bị khuyết hoặc rỗng (`drl: null`), logic tại tầng `spawn_blocking` kiểm tra và duy trì nguyên vẹn điểm DRL đã ghi nhận trước đó trong `academic_macro_metrics`, bảo vệ Single Source of Truth (SSOT).
-- **Grading Engine ĐHQG-HCM:**
-  - Quy đổi điểm hệ 10 sang thang chữ (A+, A, B+, B, C+, C, D+, D, F) và hệ 4 (4.0, 3.7, 3.5, 3.0, 2.5, 2.0, 1.5, 1.0, 0.0) tuân thủ 100% quy chế tín chỉ ĐHQG-HCM. Điểm tổng kết và GPA được tính toán động (dynamic aggregates) để tránh hiện tượng trôi dạt dữ liệu (denormalization drift).
-
-### 2.4 Module 5: Native Knowledge Vault & Quick Capture
+### 2.4 Native Knowledge Vault
 - **Incremental Scanner:**
-  - Quét thư mục Markdown cục bộ, so sánh `file_mtime` (thời điểm sửa đổi) với dữ liệu trong `vault_notes`. Chỉ đọc và phân tích những file có nội dung thay đổi.
-- **FTS5 Multi-Column Search & BM25 Weighting:**
-  - Bảng ảo `vault_fts` tách biệt 3 cột: `title`, `prose`, `code`.
-  - Sử dụng bộ tokenizer `unicode61 remove_diacritics 2` để hỗ trợ tìm kiếm tiếng Việt không dấu.
-  - Phân bổ trọng số BM25: `bm25(vault_fts, 10.0, 5.0, 1.0)` — ưu tiên tiêu đề bài viết gấp 10 lần, phần thân văn bản gấp 5 lần so với code block.
-  - Snippet trích dẫn kết quả chỉ được tạo trên cột `prose` để tránh làm vỡ định dạng code block.
-- **OneNote Deep-Link Security Guard:**
-  - Ngăn chặn triệt để lỗ hổng Command Injection / Shell Injection thông qua hàm `validate_onenote_uri`:
-    1. Bắt buộc URI phải bắt đầu bằng scheme `onenote:`.
-    2. Chiều dài URI $\le 1024$ ký tự.
-    3. Tuyệt đối cấm ký tự nháy kép `"` hoặc ký tự điều khiển shell.
-    4. Ký tự hợp lệ phải thuộc whitelist an toàn (alphanumeric, `/`, `?`, `=`, `&`, `-`, `_`, `%`, v.v.).
-- **Windows-Safe Slug Generator & Auto-Disambiguation:**
-  - Tự động loại bỏ các ký tự cấm trên Windows (`\ / : * ? " < > |`).
-  - Chống va chạm với các tên thiết bị dành riêng của hệ điều hành DOS/Windows (`CON`, `PRN`, `AUX`, `NUL`, `COM1..9`, `LPT1..9`).
-  - Áp dụng cơ chế *check-then-write disambiguation*: nếu `algorithms/dp.md` đã tồn tại, file mới sẽ tự động được đánh số tăng dần `algorithms/dp-2.md`, bảo đảm zero data loss.
+  - Quét thư mục Markdown cục bộ, so khớp `file_mtime` với dữ liệu lưu trữ trong `vault_notes`, chỉ phân tích và re-index những tệp có thay đổi nội dung.
+- **Multi-Column FTS5:**
+  - Bảng ảo `vault_fts` tách biệt 3 cột `(title, prose, code)`, áp dụng trọng số BM25 `(10.0, 5.0, 1.0)`, bộ tokenizer `unicode61 remove_diacritics 2` hỗ trợ tìm kiếm tiếng Việt không dấu.
+- **Directory Picker & URI Sanitization:**
+  - Tích hợp `tauri-plugin-dialog = "2"` cho phép chọn thư mục vault qua native folder dialog (chỉ cấp quyền `dialog:allow-open` cho window `main`).
+  - Bộ lọc `validate_onenote_uri` chặn đứng ký tự nháy kép `"` và các chuỗi URL-encoded nguy hiểm (`%22`, `%27`), chống tấn công Command/Shell Injection.
+  - Cơ chế *auto-disambiguation* chống ghi đè file (`slug-2.md`).
 
-### 2.5 Module 7: OS Daemon & Global HUD
-- **System Tray Lifecycle:**
+### 2.5 OS Daemon & Global HUD
+- **System Tray Daemon:**
   - Khi người dùng nhấn nút đóng cửa sổ 'X', sự kiện `CloseRequested` bị chặn lại (`api.prevent_close()`), cửa sổ chính tự động ẩn vào khay hệ thống (System Tray).
-  - Menu khay hệ thống bao gồm: `Show HUD (Alt+K)`, trạng thái kết nối `Status: Running`, và `Quit Jarvis OS`.
-- **Global Shortcut `Alt+K` (Command Palette):**
-  - Đăng ký hotkey toàn cục `Alt+K` thông qua `tauri-plugin-global-shortcut`.
-  - Cơ chế Focus Guarantee: Khi HUD được mở, hệ thống gửi event `hud-shown` đến frontend. Giao diện React lập tức kích hoạt `requestAnimationFrame` để focus vào ô tìm kiếm, người dùng có thể gõ phím ngay tức khắc không cần click chuột.
-- **Graceful Shutdown:**
-  - Khi thoát ứng dụng từ System Tray (`quit`), hệ thống kích hoạt hàm `graceful_shutdown`:
-    1. Gửi cờ `true` qua kênh `watch::Sender<bool>` để dừng các worker async.
-    2. Chờ thời gian grace period 500ms để hoàn tất các transaction dở dang.
-    3. Thực thi câu lệnh `PRAGMA wal_checkpoint(TRUNCATE)` để flush toàn bộ dữ liệu từ file WAL (`jarvis.sqlite3-wal`) vào file DB chính và thu gọn kích thước file về 0.
-    4. Gọi `app.exit(0)` kết thúc tiến trình an toàn tuyệt đối.
+  - Khi thoát ứng dụng từ Tray (`quit`), hàm `graceful_shutdown` kích hoạt kênh `watch::Sender<bool>`, chờ 500ms hoàn tất transaction dở dang và thực thi `PRAGMA wal_checkpoint(TRUNCATE)` trước khi gọi `app.exit(0)`.
+- **Global Shortcut `Alt+K`:**
+  - Kích hoạt Command Palette Raycast-style; cơ chế `set_always_on_top(true)` tạm thời bảo đảm kéo focus Win32 lập tức qua `requestAnimationFrame`. Phím `Escape` gọi command `hide_hud` thu nhỏ xuống tray.
+- **Idle WAL Passive Checkpoint:**
+  - Background task định kỳ mỗi 15 phút (900 giây) gọi `PRAGMA wal_checkpoint(PASSIVE);`, chống phình file `-wal` trong điều kiện máy chạy nền liên tục 7 ngày.
 
 ---
 
@@ -404,13 +381,14 @@ CREATE TABLE IF NOT EXISTS settings (
 
 ---
 
-## 4. IPC REGISTRY & NETWORK BOUNDARY
+## 4. IPC COMMAND REGISTRY
 
-### 4.1 IPC Command to Frontend Binding Matrix
-Toàn bộ các lệnh gọi IPC giữa React UI (`src/lib/tauri-client.ts`) và backend Rust (`src-tauri/src/commands/`) được liệt kê trong bảng dưới đây:
+Bảng ánh xạ 2 chiều đầy đủ giữa các command Rust (`src-tauri/src/commands/`) và TypeScript API wrapper (`src/lib/tauri-client.ts`):
 
 | Module | Tauri Command (`invoke`) | Frontend Function (`tauri-client.ts`) | Input Parameters | Return Type | Description |
 | :--- | :--- | :--- | :--- | :--- | :--- |
+| **Identity** | `get_user_profile` | `getUserProfile()` | *None* | `UserProfileDto` | Đọc `user_nickname`, `user_major`, `is_initialized` từ DB. |
+| **Identity** | `save_user_profile` | `saveUserProfile(nickname, major)` | `{ nickname: string, major: string }` | `void` | Lưu profile vào SQLite transaction, cập nhật native window title. |
 | **Core CP** | `get_today_stats` | `fetchTodayStats()` | *None* | `DailyStats` | Thống kê số bài AC, WA, XP tích lũy trong ngày. |
 | **Core CP** | `get_recent_submissions` | `fetchRecentSubmissions(limit)` | `{ limit: number }` | `SubmissionRecord[]` | Danh sách bài nộp Codeforces gần đây. |
 | **Core CP** | `get_level_info` | `fetchLevelInfo()` | *None* | `LevelInfo \| null` | Cấp độ hiện tại, XP tiến độ đến level tiếp theo. |
@@ -418,6 +396,7 @@ Toàn bộ các lệnh gọi IPC giữa React UI (`src/lib/tauri-client.ts`) và
 | **Core CP** | `get_cf_handle` | `getCfHandle()` | *None* | `string \| null` | Đọc Codeforces handle đã lưu từ `settings`. |
 | **Core CP** | `set_cf_handle` | `setCfHandle(handle)` | `{ handle: string }` | `void` | Ghi Codeforces handle mới vào `settings`. |
 | **Core CP** | `trigger_cf_sync` | `triggerCfSync()` | *None* | `SyncCompletePayload` | Kích hoạt ngay 1 chu kỳ cào dữ liệu Codeforces API. |
+| **Core CP** | `purge_cf_data` | `purgeCfData()` | *None* | `void` | Xóa dữ liệu CF an toàn, bảo toàn 100% deadline Moodle. |
 | **Post-Mortem** | `save_post_mortem` | `savePostMortem(input)` | `{ input: PostMortemInput }` | `PostMortemRecord` | Lưu phân tích nguyên nhân lỗi vào SQLite + FTS5. |
 | **Post-Mortem** | `get_post_mortem` | `getPostMortem(problemId)` | `{ problemId: string }` | `PostMortemRecord \| null` | Lấy chi tiết bài học kinh nghiệm của 1 problem. |
 | **Post-Mortem** | `delete_post_mortem` | `deletePostMortem(problemId)` | `{ problemId: string }` | `boolean` | Xóa bản ghi post-mortem và trigger dọn sạch FTS5. |
@@ -450,39 +429,21 @@ Toàn bộ các lệnh gọi IPC giữa React UI (`src/lib/tauri-client.ts`) và
 | **Vault** | `get_vault_stats` | `getVaultStats()` | *None* | `VaultStatsDto` | Thống kê số notes, số outlinks, tổng dung lượng. |
 | **Vault** | `create_structured_note`| `createStructuredNote(dto)` | `{ dto: CreateStructuredNoteDto }` | `string` | Tạo file note mới, chống trùng lặp tên file. |
 | **Vault** | `open_onenote_link` | `openOnenoteLink(uri)` | `{ uri: string }` | `void` | Mở liên kết Microsoft OneNote an toàn tuyệt đối. |
-
-### 4.2 Network Boundary & External Interfaces
-1. **Loopback Browser Bridge (`127.0.0.1:41718`):**
-   - **Protocol:** HTTP/1.1 over TCP loopback.
-   - **Inbound Paths:**
-     - `POST /sync/academic`: Tiếp nhận payload bảng điểm và DRL từ Tampermonkey userscript trên UIT student portal.
-     - `OPTIONS *`: Xử lý CORS preflight tự động.
-   - **Authentication:** Kiểm tra bắt buộc header `X-Jarvis-Sync-Token`. Reject ngay bằng mã lỗi `401 Unauthorized` nếu token sai hoặc thiếu.
-2. **Codeforces Public API (`api.codeforces.com`):**
-   - **Protocol:** HTTPS GET qua `reqwest::Client` (Timeout 15 giây, User-Agent chuyên dụng).
-   - **Endpoint:** `GET https://codeforces.com/api/user.status?handle={handle}&from=1&count=50`.
-   - **Rate Limiting & Safety:** Giãn cách 60s giữa các lần sync, tự động kích hoạt exponential backoff khi gặp mã lỗi 429 / 503 hoặc network drop.
+| **Vault** | `set_vault_path` | `setVaultPath(path)` | `{ path: string }` | `void` | Lưu thư mục vault markdown vào settings DB. |
+| **Vault** | `get_vault_path` | `getVaultPath()` | *None* | `string \| null` | Lấy đường dẫn thư mục vault hiện tại. |
+| **HUD / OS** | `hide_hud` | `hideHud()` | *None* | `void` | Ẩn HUD xuống System Tray. |
 
 ---
 
-## 5. EXTERNAL AI REVIEW INSTRUCTIONS
+## 5. EXTERNAL AI AUDIT QUESTIONS (CHO SPRINT TIẾP THEO)
 
-> **Hướng dẫn dành riêng cho Mô hình AI Đánh giá Độc lập (External AI System Auditor):**  
-> Khi tiếp nhận toàn bộ tài liệu hồ sơ kiến trúc này, bạn hãy tiến hành phân tích đa chiều mã nguồn và thiết kế hệ thống của **JARVIS Personal OS (v1.0.0)**, sau đó trả lời 3 câu hỏi đánh giá cốt lõi sau:
+> **Dành cho Mô hình AI Đánh giá Độc lập (External AI System Auditor):**  
+> Khi tiếp nhận bản hồ sơ kiến trúc cập nhật của **DIARK // OS (v1.0.0)**, hãy tập trung phân tích 2 bài toán then chốt sau:
 
-### Câu hỏi 1: Memory & Resource Safety Assessment
-- *Đánh giá cấu hình SQLite PRAGMA (`cache_size = -8000`, `mmap_size = 0`, `WAL mode`) kết hợp với mô hình xử lý thread Tokio:* 
-- Liệu hệ thống có đảm bảo duy trì ngưỡng **Idle RAM < 80MB** trên Windows 11 trong điều kiện vận hành nền liên tục 7 ngày hay không? 
-- Có nguy cơ tiềm ẩn nào về rò rỉ bộ nhớ (memory leaks), bế tắc khóa kết nối (`rusqlite::Connection` deadlocks khi có đồng thời cả UI query, sync worker ghi và loopback server accept), hoặc zombie thread khi ứng dụng bị shutdown đột ngột hay không?
+### Câu hỏi 1: Dev/Prod Runtime Isolation
+- *Làm thế nào để phân tách triệt để giữa môi trường `tauri dev` (cần dev dock, test reset identity, debug logs) và `tauri build` (release sạch, khóa các lệnh reset nguy hiểm) bằng `#[cfg(debug_assertions)]` và `import.meta.env.DEV` mà không làm phân mảnh kiến trúc codebase?*
+- Đánh giá khả năng rò rỉ các chức năng privileged testing ra môi trường binary phát hành (release bundle) và đề xuất pattern đóng gói compile-time gating an toàn nhất cho Tauri v2.
 
-### Câu hỏi 2: Architecture Rigor & Security Boundary Audit
-- *Đánh giá tính an toàn tại các ranh giới mạng và IPC:*
-- Cơ chế xác thực qua `X-Jarvis-Sync-Token` trên loopback port 41718 có lỗ hổng CSRF / SSRF cục bộ nào không khi một trang web độc hại chạy trên trình duyệt của người dùng cố gắng gửi request vào `127.0.0.1`?
-- Bộ lọc `validate_onenote_uri` và cơ chế sinh slug Windows (`slugify_title` chặn ký tự cấm và tên thiết bị hệ thống) đã hoàn toàn miễn nhiễm trước các vector tấn công Command Injection / Path Traversal hay chưa?
-- Việc triệt tiêu hoàn toàn `unwrap()` trong production path của Rust đã đạt chuẩn Zero-Crash của một hệ điều hành cá nhân hay chưa?
-
-### Câu hỏi 3: Data Integrity, Concurrency & Extensibility
-- *Đánh giá tính nhất quán của dữ liệu (Data Integrity) và tiềm năng mở rộng:*
-- Quy trình phân loại First-AC qua SQL CTE và cơ chế bảo vệ DRL không bị ghi đè (`DRL Retention Invariant`) có chịu được tình huống xung đột race condition nếu nhiều payload đồng bộ gửi tới cùng lúc không?
-- Đánh giá kiến trúc bảng ảo FTS5 (sử dụng *external content* cho Post-Mortem và *contentless multi-column* cho Vault) về mặt hiệu năng đánh chỉ mục và dung lượng đĩa khi quy mô ghi chú tăng lên 10.000 file Markdown.
-- Những điểm nghẽn kiến trúc nào cần được tái cấu trúc trước khi nâng cấp hệ thống lên phiên bản đa người dùng (Multi-Profile Desktop OS)?
+### Câu hỏi 2: Identity State Reset Invariants
+- *Khi thực thi `reset_identity_state`, cần cơ chế đồng bộ nào giữa SQLite transaction và React state tree để đảm bảo không xảy ra race condition với các worker đang chạy nền (CF poller, sync server) và title bar native lập tức quay về `// OS`?*
+- Phân tích rủi ro bế tắc (deadlock) hoặc trôi dạt trạng thái (state drift) nếu reset xảy ra đúng lúc background worker đang giữ write-lock trên file SQLite WAL.
