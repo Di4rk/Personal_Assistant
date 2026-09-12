@@ -38,8 +38,10 @@ pub fn init_db(db_path: &Path) -> SqlResult<Connection> {
     ensure_worker_schema(&conn)?;
     ensure_post_mortem_schema(&conn)?;
     crate::db::academic::init_academic_module(&conn)?;
+    ensure_curriculum_schema(&conn)?;
     ensure_moodle_schema(&conn)?;
     ensure_matrix_schema(&conn)?;
+    ensure_plugin_and_activity_schema(&conn)?;
     apply_legacy_compatibility_migrations(&conn)?;
     crate::db::vault_schema::init_vault_tables(&conn)?;
     purge_mock_submissions(&conn)?;
@@ -53,8 +55,10 @@ pub fn create_tables(conn: &Connection) -> SqlResult<()> {
     ensure_worker_schema(conn)?;
     ensure_post_mortem_schema(conn)?;
     crate::db::academic::init_academic_module(conn)?;
+    ensure_curriculum_schema(conn)?;
     ensure_moodle_schema(conn)?;
     ensure_matrix_schema(conn)?;
+    ensure_plugin_and_activity_schema(conn)?;
     apply_legacy_compatibility_migrations(conn)?;
     crate::db::vault_schema::init_vault_tables(conn)?;
 
@@ -362,6 +366,52 @@ pub fn ensure_matrix_schema(conn: &Connection) -> SqlResult<()> {
     Ok(())
 }
 
+/// Tạo schema và dữ liệu hạt giống cho CTĐT đa ngành UIT và bí danh phân giải (idempotent).
+pub fn ensure_curriculum_schema(conn: &Connection) -> SqlResult<()> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS academic_curriculums (
+            major_code      TEXT PRIMARY KEY,
+            major_name      TEXT NOT NULL,
+            faculty         TEXT NOT NULL,
+            total_credits   INTEGER NOT NULL,
+            standard_years  REAL NOT NULL DEFAULT 4.0
+        );
+
+        CREATE TABLE IF NOT EXISTS curriculum_aliases (
+            alias_token     TEXT PRIMARY KEY,
+            major_code      TEXT NOT NULL,
+            credit_override INTEGER,
+            FOREIGN KEY (major_code) REFERENCES academic_curriculums(major_code)
+        );
+
+        INSERT OR IGNORE INTO academic_curriculums (major_code, major_name, faculty, total_credits, standard_years)
+        VALUES
+            ('D480101', 'Khoa học Máy tính', 'Khoa KHMT', 126, 4.0),
+            ('D480102', 'Mạng máy tính và TT', 'Khoa MMT&TT', 130, 4.0),
+            ('D480103', 'Kỹ thuật Phần mềm', 'Khoa KTPM', 130, 4.0),
+            ('D480104', 'Hệ thống Thông tin', 'Khoa HTTT', 130, 4.0),
+            ('D480201', 'An toàn Thông tin', 'Khoa ATTT', 132, 4.0),
+            ('D520216', 'Kỹ thuật Máy tính', 'Khoa KTMT', 132, 4.0);
+
+        INSERT OR IGNORE INTO curriculum_aliases (alias_token, major_code, credit_override)
+        VALUES
+            ('KHMT-CLC',  'D480101', 130),
+            ('KHMT-CTTT', 'D480101', 133),
+            ('KHMT-CQUI', 'D480101', NULL),
+            ('KHMT',      'D480101', NULL),
+            ('KTPM-CLC',  'D480103', 133),
+            ('KTPM',      'D480103', NULL),
+            ('ATTT-CLC',  'D480201', 135),
+            ('ATTT',      'D480201', NULL),
+            ('HTTT',      'D480104', NULL),
+            ('MMT',       'D480102', NULL),
+            ('KTMT',      'D520216', NULL);
+        "#,
+    )?;
+    Ok(())
+}
+
 fn run_migrations(conn: &Connection) -> SqlResult<()> {
     conn.execute_batch(
         r#"
@@ -459,6 +509,114 @@ pub fn insert_submission_and_update_daily(
 /// Dọn dẹp các bản ghi mock submission cũ còn sót lại từ giai đoạn test/dev.
 /// Tự động chạy trong `init_db`. Nếu có bản ghi bị xoá, thực hiện `VACUUM` để
 /// giải phóng triệt để disk space.
+/// Tạo schema cho Plugin Registry, Plugin Storage, Activity Events và backfill lịch sử (idempotent).
+pub fn ensure_plugin_and_activity_schema(conn: &Connection) -> SqlResult<()> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS plugin_registry (
+            plugin_id    TEXT PRIMARY KEY,
+            name         TEXT NOT NULL,
+            version      TEXT NOT NULL,
+            author       TEXT NOT NULL,
+            category     TEXT NOT NULL,
+            is_enabled   BOOLEAN NOT NULL DEFAULT 1,
+            is_builtin   BOOLEAN NOT NULL DEFAULT 0,
+            installed_at TEXT NOT NULL DEFAULT (datetime('now', '+7 hours'))
+        );
+
+        CREATE TABLE IF NOT EXISTS plugin_storage (
+            plugin_id    TEXT NOT NULL,
+            key          TEXT NOT NULL,
+            value        TEXT NOT NULL,
+            updated_at   TEXT NOT NULL DEFAULT (datetime('now', '+7 hours')),
+            PRIMARY KEY (plugin_id, key),
+            FOREIGN KEY (plugin_id) REFERENCES plugin_registry(plugin_id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS activity_events (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            plugin_id   TEXT NOT NULL,
+            event_date  TEXT NOT NULL,
+            event_type  TEXT NOT NULL,
+            xp_value    INTEGER NOT NULL DEFAULT 0,
+            ref_id      TEXT,
+            created_at  INTEGER NOT NULL,
+            FOREIGN KEY (plugin_id) REFERENCES plugin_registry(plugin_id) ON DELETE CASCADE,
+            UNIQUE(plugin_id, event_type, ref_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_activity_events_date ON activity_events(event_date);
+        CREATE INDEX IF NOT EXISTS idx_activity_events_plugin_date ON activity_events(plugin_id, event_date);
+
+        -- Seed 5 First-Party Builtin Plugins
+        INSERT OR IGNORE INTO plugin_registry (plugin_id, name, version, author, category, is_enabled, is_builtin)
+        VALUES 
+            ('cp-codeforces', 'Codeforces Engine', '1.0.0', 'Diark', 'competitive_programming', 1, 1),
+            ('cp-leetcode', 'LeetCode Tracker', '1.0.0', 'Diark', 'competitive_programming', 0, 1),
+            ('uit-wecode', 'Wecode UIT Tracker', '1.0.0', 'Diark', 'education', 1, 1),
+            ('sec-ctf', 'CTF Log & Writeups', '1.0.0', 'Diark', 'cyber_security', 0, 1),
+            ('ai-lab', 'AI & Kaggle Hub', '1.0.0', 'Diark', 'ai_datascience', 0, 1);
+        "#,
+    )?;
+
+    // Backfill Codeforces Submissions (10 XP / AC submission)
+    // Tính toán timestamp và date theo UTC+7 (+25200s)
+    let has_submissions: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'submissions'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|c| c > 0)
+        .unwrap_or(false);
+
+    if has_submissions {
+        let _ = conn.execute_batch(
+            r#"
+            INSERT OR IGNORE INTO activity_events (plugin_id, event_date, event_type, xp_value, ref_id, created_at)
+            SELECT 
+                'cp-codeforces' AS plugin_id,
+                date(COALESCE(s.submission_time, CAST(strftime('%s', s.submitted_at) AS INTEGER)) + 25200, 'unixepoch') AS event_date,
+                'submission_ac' AS event_type,
+                10 AS xp_value,
+                CAST(s.id AS TEXT) AS ref_id,
+                COALESCE(s.submission_time, CAST(strftime('%s', s.submitted_at) AS INTEGER)) AS created_at
+            FROM submissions s
+            WHERE s.verdict = 'OK' AND (s.submission_time IS NOT NULL OR s.submitted_at IS NOT NULL);
+            "#,
+        );
+    }
+
+    // Backfill Moodle Completed Deadlines (25 XP / deadline)
+    let has_deadlines: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'course_deadlines'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|c| c > 0)
+        .unwrap_or(false);
+
+    if has_deadlines {
+        let _ = conn.execute_batch(
+            r#"
+            INSERT OR IGNORE INTO activity_events (plugin_id, event_date, event_type, xp_value, ref_id, created_at)
+            SELECT 
+                'cp-codeforces' AS plugin_id, -- Hoặc uit-moodle nếu có registry, fallback an toàn là cp-codeforces hoặc plugin_registry
+                date(d.updated_at + 25200, 'unixepoch') AS event_date,
+                'deadline_cleared' AS event_type,
+                25 AS xp_value,
+                CAST(d.id AS TEXT) AS ref_id,
+                d.updated_at AS created_at
+            FROM course_deadlines d
+            WHERE d.is_submitted = 1;
+            "#,
+        );
+    }
+
+    Ok(())
+}
+
 pub fn purge_mock_submissions(conn: &Connection) -> SqlResult<usize> {
     let deleted = conn.execute(
         "DELETE FROM submissions WHERE problem_name LIKE 'Mock Problem%' OR problem_id LIKE 'mock-%'",

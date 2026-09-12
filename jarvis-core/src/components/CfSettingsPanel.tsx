@@ -1,7 +1,16 @@
 import { useEffect, useRef, useState } from "react";
-import { AlertTriangle, RotateCcw, X, Loader2 } from "lucide-react";
-import { getCfHandle, setCfHandle, triggerCfSync, purgeCfData } from "../lib/tauri-client";
-import type { SyncCompletePayload } from "../lib/tauri-client";
+import { AlertTriangle, RotateCcw, X, Loader2, Shield } from "lucide-react";
+import { usePrivacyStore } from "../stores/usePrivacyStore";
+import {
+  getCfHandle,
+  setCfHandle,
+  triggerCfSync,
+  purgeCfData,
+  saveUserProfile,
+  resetIdentityState,
+  type UserProfileDto,
+  type SyncCompletePayload,
+} from "../lib/tauri-client";
 
 type SyncStatus =
   | { kind: "idle" }
@@ -12,6 +21,9 @@ type SyncStatus =
 interface CfSettingsPanelProps {
   /** Called after a successful sync or reset so App.tsx can refetch dashboard data. */
   onSyncComplete?: (payload: SyncCompletePayload) => void;
+  userProfile?: UserProfileDto;
+  onProfileUpdated?: (profile: UserProfileDto) => void;
+  onResetIdentity?: () => void;
 }
 
 /**
@@ -21,13 +33,66 @@ interface CfSettingsPanelProps {
  *   - Read / write the CF handle via IPC.
  *   - Trigger live synchronization.
  *   - Purge CF data safely with explicit Moodle deadline protection confirmation.
+ *   - Manage Signature Handle / Biệt danh and user identity.
  */
-export default function CfSettingsPanel({ onSyncComplete }: CfSettingsPanelProps) {
+export default function CfSettingsPanel({
+  onSyncComplete,
+  userProfile,
+  onProfileUpdated,
+  onResetIdentity,
+}: CfSettingsPanelProps) {
   const [handle, setHandle] = useState("");
   const [status, setStatus] = useState<SyncStatus>({ kind: "idle" });
   const [isPurgeModalOpen, setIsPurgeModalOpen] = useState<boolean>(false);
   const [isPurging, setIsPurging] = useState<boolean>(false);
+  const [isResetModalOpen, setIsResetModalOpen] = useState<boolean>(false);
+  const [isResettingIdentity, setIsResettingIdentity] = useState<boolean>(false);
+  const [nickInput, setNickInput] = useState<string>(userProfile?.nickname ?? "");
+  const [profileSaveStatus, setProfileSaveStatus] = useState<string | null>(null);
   const mounted = useRef(true);
+
+  // Sync with userProfile prop changes
+  useEffect(() => {
+    if (userProfile?.nickname) {
+      setNickInput(userProfile.nickname);
+    }
+  }, [userProfile?.nickname]);
+
+  const handleSaveProfile = async () => {
+    const trimmed = nickInput.trim();
+    if (!trimmed) {
+      setProfileSaveStatus("Biệt danh không được để trống.");
+      return;
+    }
+    try {
+      const major = userProfile?.major ?? "CS";
+      await saveUserProfile(trimmed, major);
+      const updated: UserProfileDto = {
+        nickname: trimmed,
+        major,
+        is_initialized: true,
+      };
+      onProfileUpdated?.(updated);
+      setProfileSaveStatus("Đã lưu!");
+      setTimeout(() => setProfileSaveStatus(null), 3000);
+    } catch (err) {
+      setProfileSaveStatus(typeof err === "string" ? err : "Lỗi lưu biệt danh.");
+    }
+  };
+
+  const handleConfirmResetIdentity = async () => {
+    setIsResettingIdentity(true);
+    try {
+      await resetIdentityState();
+      setIsResetModalOpen(false);
+      onResetIdentity?.();
+    } catch (err) {
+      console.error("Lỗi khi reset identity:", err);
+      setIsResetModalOpen(false);
+    } finally {
+      setIsResettingIdentity(false);
+    }
+  };
 
   // Initialize input from persisted settings on mount.
   useEffect(() => {
@@ -176,6 +241,129 @@ export default function CfSettingsPanel({ onSyncComplete }: CfSettingsPanelProps
 
       {/* Status feedback */}
       <StatusMessage status={status} />
+
+      {/* Signature Handle / Biệt danh */}
+      <div className="pt-2.5 border-t border-slate-800/80 flex flex-col gap-2">
+        <div className="flex items-center justify-between">
+          <label
+            htmlFor="user-nickname-input"
+            className="text-xs font-mono font-medium text-slate-400 uppercase tracking-wider"
+          >
+            Signature Handle / Biệt danh
+          </label>
+          {profileSaveStatus && (
+            <span className="text-[11px] font-mono text-cyan-400 animate-in fade-in">
+              {profileSaveStatus}
+            </span>
+          )}
+        </div>
+        <div className="flex gap-2">
+          <input
+            id="user-nickname-input"
+            type="text"
+            value={nickInput}
+            onChange={(e) => setNickInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void handleSaveProfile();
+            }}
+            placeholder="Biệt danh (e.g. Diark)..."
+            className="flex-1 min-w-0 rounded-lg bg-slate-950 border border-slate-800
+                       px-3 py-2 text-sm text-slate-100 placeholder-slate-500
+                       focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500
+                       transition-colors font-mono"
+            aria-label="Signature Handle hoặc Biệt danh"
+          />
+          <button
+            id="user-save-profile-btn"
+            type="button"
+            onClick={() => void handleSaveProfile()}
+            className="shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-lg
+                       bg-slate-800 hover:bg-slate-700 active:bg-slate-900
+                       text-xs font-medium text-cyan-400 border border-slate-700
+                       transition-colors focus:outline-none focus:ring-2 focus:ring-cyan-500/50 cursor-pointer"
+          >
+            Lưu Định Danh
+          </button>
+        </div>
+
+        <div className="flex items-center justify-end gap-2 pt-1">
+          <button
+            type="button"
+            onClick={() => usePrivacyStore.getState().toggleDemoMode()}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-slate-950/80 hover:bg-slate-900 text-cyan-400 border border-cyan-500/40 text-[11px] font-mono transition-colors cursor-pointer"
+            title="Bật/tắt chế độ Demo Privacy Masking"
+          >
+            <Shield className="w-3 h-3" />
+            <span>Demo Privacy Mode</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsResetModalOpen(true)}
+            disabled={isResettingIdentity}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-slate-950/80 hover:bg-slate-900 text-amber-400 border border-amber-500/40 text-[11px] font-mono transition-colors cursor-pointer disabled:opacity-50"
+            title="Reset trạng thái khởi tạo về Genesis Onboarding"
+          >
+            <RotateCcw className="w-3 h-3" />
+            <span>Reset Trạng Thái Khởi Tạo (Test Onboarding)</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Reset Identity Confirmation Modal */}
+      {isResetModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="w-full max-w-md bg-slate-900 border border-amber-500/30 rounded-xl shadow-2xl p-5 space-y-4 font-mono">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-2.5 text-amber-400">
+                <div className="p-2 rounded-lg bg-amber-950/60 border border-amber-800/50">
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <h4 className="text-sm font-semibold text-slate-100">
+                  Xác nhận Reset Trạng Thái Khởi Tạo
+                </h4>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsResetModalOpen(false)}
+                disabled={isResettingIdentity}
+                className="text-slate-400 hover:text-slate-200 p-1 rounded-lg cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-300 leading-relaxed bg-slate-950/70 p-3 rounded-lg border border-slate-800">
+              Thao tác này sẽ đưa ứng dụng về màn hình Onboarding ban đầu để kiểm thử định danh. Dữ liệu môn học và ICPC của bạn được <span className="text-emerald-400 font-semibold">bảo toàn 100%</span>.
+            </p>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setIsResetModalOpen(false)}
+                disabled={isResettingIdentity}
+                className="px-3.5 py-1.5 text-xs font-medium text-slate-300 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleConfirmResetIdentity()}
+                disabled={isResettingIdentity}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white bg-amber-600 hover:bg-amber-500 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
+              >
+                {isResettingIdentity ? (
+                  <>
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    <span>Đang reset...</span>
+                  </>
+                ) : (
+                  <span>Xác nhận Reset</span>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Reset Confirmation Modal */}
       {isPurgeModalOpen && (

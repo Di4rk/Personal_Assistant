@@ -1,8 +1,14 @@
 pub mod academic;
 pub mod matrix;
+pub mod plugins;
+pub mod portal_auth;
 pub mod post_mortem;
+pub mod settings;
 pub mod vault;
 pub mod workspace;
+
+#[cfg(debug_assertions)]
+pub mod dev_tools;
 
 use chrono::Local;
 use rusqlite::params;

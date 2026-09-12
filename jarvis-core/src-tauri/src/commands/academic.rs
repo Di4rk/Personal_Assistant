@@ -433,6 +433,66 @@ pub struct AcademicMacroMetricSSOT {
     pub updated_at: i64,
 }
 
+pub fn ingest_full_academic_payload_internal(
+    app: &tauri::AppHandle,
+    state: &tauri::State<crate::db::SharedDb>,
+    transcript: serde_json::Value,
+    drl: serde_json::Value,
+) -> Result<(), String> {
+    let mut conn = state.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
+
+    // Chuyển đổi transcript và drl thành IngestionPayload
+    let mut payload = if let Ok(dyn_payload) = serde_json::from_value::<crate::modules::academic::portal_ingestion::IngestionPayload>(transcript.clone()) {
+        dyn_payload
+    } else if let Ok(groups) = serde_json::from_value::<Vec<crate::modules::academic::portal_ingestion::GenericSemesterGroup>>(transcript.clone()) {
+        crate::modules::academic::portal_ingestion::IngestionPayload {
+            semester_groups: groups,
+            term_summaries: None,
+            drl: None,
+        }
+    } else {
+        return Err("Không thể parse transcript JSON payload".to_string());
+    };
+
+    if let Ok(drl_items) = serde_json::from_value::<Vec<crate::modules::academic::portal_ingestion::GenericDrlItem>>(drl.clone()) {
+        payload.drl = Some(drl_items);
+    } else if let Ok(drl_obj) = serde_json::from_value::<crate::modules::academic::portal_ingestion::IngestionPayload>(drl.clone()) {
+        if drl_obj.drl.is_some() {
+            payload.drl = drl_obj.drl;
+        }
+    }
+
+    crate::modules::academic::portal_ingestion::ingest_dynamic_academic_payload(&mut conn, payload)?;
+
+    // Đồng bộ total_degree_credits theo curriculum resolved từ settings
+    let (curriculum_code, major_code) = {
+        let get_val = |k: &str| -> String {
+            conn.query_row(
+                "SELECT value FROM settings WHERE key = ?1",
+                [k],
+                |r| r.get(0),
+            ).unwrap_or_default()
+        };
+        (get_val("curriculum_code"), get_val("major_code"))
+    };
+    if let Ok(res) = crate::modules::academic::curriculum_resolver::resolve_curriculum(
+        &conn,
+        &curriculum_code,
+        if major_code.is_empty() { None } else { Some(&major_code) },
+    ) {
+        let _ = conn.execute(
+            "INSERT INTO academic_program_summary (id, total_degree_credits, updated_at)
+             VALUES ('MAIN', ?1, ?2)
+             ON CONFLICT(id) DO UPDATE SET total_degree_credits = excluded.total_degree_credits",
+            rusqlite::params![res.total_credits, chrono::Utc::now().timestamp()],
+        );
+    }
+
+    let _ = app.emit("academic://sync-complete", ());
+    let _ = app.emit("academic-data-synced", ());
+    Ok(())
+}
+
 /// Nạp toàn bộ bảng điểm và lịch sử ĐRL từ JSON payload
 #[tauri::command]
 pub fn ingest_full_academic_payload(
@@ -469,6 +529,7 @@ pub fn ingest_full_academic_payload(
     };
 
     let _ = app.emit("academic://sync-complete", ());
+    let _ = app.emit("academic-data-synced", ());
     Ok(())
 }
 
@@ -584,6 +645,30 @@ pub fn get_academic_curriculum(
         .map_err(|e| format!("Lỗi get_academic_curriculum: {e}"))
 }
 
+/// Trả về kết quả phân giải chương trình đào tạo đa ngành từ settings (hoặc fallback)
+#[tauri::command]
+pub fn get_resolved_curriculum(
+    db: tauri::State<'_, SharedDb>,
+) -> Result<crate::modules::academic::curriculum_resolver::CurriculumResolution, String> {
+    let conn = db.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
+    let (curriculum_code, major_code) = {
+        let get_val = |k: &str| -> String {
+            conn.query_row(
+                "SELECT value FROM settings WHERE key = ?1",
+                [k],
+                |r| r.get(0),
+            ).unwrap_or_default()
+        };
+        (get_val("curriculum_code"), get_val("major_code"))
+    };
+    crate::modules::academic::curriculum_resolver::resolve_curriculum(
+        &conn,
+        &curriculum_code,
+        if major_code.is_empty() { None } else { Some(&major_code) },
+    )
+}
+
+
 /// Trả về sync token hiện tại (hoặc sinh mới nếu chưa có) để hiển thị
 /// trong SyncTokenDisplay và dán vào Tampermonkey script.
 #[tauri::command]
@@ -591,4 +676,242 @@ pub fn get_sync_token(db: tauri::State<'_, SharedDb>) -> Result<String, String> 
     let conn = db.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
     crate::db::settings::get_or_create_sync_token(&conn)
         .map_err(|e| format!("Lỗi get_sync_token: {e}"))
+}
+
+pub const DEFAULT_MAJOR_SENTINEL: &str = "CS";
+
+#[derive(serde::Deserialize, serde::Serialize, Clone, Debug, PartialEq, Eq)]
+pub struct StudentProfilePayload {
+    pub student_id: String,
+    pub full_name: String,
+    pub faculty: String,
+    pub major_code: String,
+    pub specialization: String,
+    pub student_class: String,
+    pub curriculum_code: String,
+    pub cohort: String,
+}
+
+pub fn save_student_profile_internal(
+    app: &tauri::AppHandle,
+    state: &tauri::State<crate::db::SharedDb>,
+    payload: StudentProfilePayload,
+) -> Result<(), String> {
+    let mut conn = state.lock().map_err(|e| e.to_string())?;
+    execute_save_student_profile(&mut conn, &payload)?;
+
+    app.emit("student-profile-synced", &payload)
+        .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+pub fn execute_save_student_profile(
+    conn: &mut rusqlite::Connection,
+    payload: &StudentProfilePayload,
+) -> Result<(), String> {
+    use rusqlite::{params, OptionalExtension};
+
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+
+    let upsert = |key: &str, value: &str, tx: &rusqlite::Transaction| -> Result<(), String> {
+        tx.execute(
+            "INSERT INTO settings (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![key, value],
+        )
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+    };
+
+    upsert("student_id", &payload.student_id, &tx)?;
+    upsert("student_name", &payload.full_name, &tx)?;
+    upsert("faculty", &payload.faculty, &tx)?;
+    upsert("major_code", &payload.major_code, &tx)?;
+    upsert("specialization", &payload.specialization, &tx)?;
+    upsert("student_class", &payload.student_class, &tx)?;
+    upsert("curriculum_code", &payload.curriculum_code, &tx)?;
+    upsert("admission_year", &payload.cohort, &tx)?;
+
+    // Kiểm tra giá trị user_major hiện tại trước khi nâng cấp
+    let current_major: Option<String> = tx
+        .query_row(
+            "SELECT value FROM settings WHERE key = 'user_major'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+
+    let should_upgrade_major = match current_major.as_deref() {
+        None => true,
+        Some(v) => v == DEFAULT_MAJOR_SENTINEL,
+    };
+
+    if should_upgrade_major && !payload.specialization.trim().is_empty() {
+        upsert("user_major", &payload.specialization, &tx)?;
+    }
+
+    // Cập nhật total_degree_credits động trong academic_program_summary
+    if let Ok(res) = crate::modules::academic::curriculum_resolver::resolve_curriculum(
+        &tx,
+        &payload.curriculum_code,
+        Some(&payload.major_code),
+    ) {
+        let _ = tx.execute(
+            "INSERT INTO academic_program_summary (id, total_degree_credits, updated_at)
+             VALUES ('MAIN', ?1, ?2)
+             ON CONFLICT(id) DO UPDATE SET total_degree_credits = excluded.total_degree_credits",
+            params![res.total_credits, chrono::Utc::now().timestamp()],
+        );
+    }
+
+    tx.commit().map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+pub fn query_student_profile(conn: &rusqlite::Connection) -> Result<Option<StudentProfilePayload>, String> {
+    use rusqlite::params;
+    let get_val = |key: &str| -> Option<String> {
+        conn.query_row(
+            "SELECT value FROM settings WHERE key = ?1",
+            params![key],
+            |row| row.get(0),
+        ).ok()
+    };
+
+    if let (Some(student_id), Some(full_name)) = (get_val("student_id"), get_val("student_name")) {
+        Ok(Some(StudentProfilePayload {
+            student_id,
+            full_name,
+            faculty: get_val("faculty").unwrap_or_default(),
+            major_code: get_val("major_code").unwrap_or_default(),
+            specialization: get_val("specialization").unwrap_or_default(),
+            student_class: get_val("student_class").unwrap_or_default(),
+            curriculum_code: get_val("curriculum_code").unwrap_or_default(),
+            cohort: get_val("admission_year").unwrap_or_default(),
+        }))
+    } else {
+        Ok(None)
+    }
+}
+
+#[tauri::command]
+pub fn get_student_profile(
+    db: tauri::State<'_, SharedDb>,
+) -> Result<Option<StudentProfilePayload>, String> {
+    let conn = db.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
+    query_student_profile(&conn)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    fn setup_test_db() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );"
+        ).unwrap();
+        conn
+    }
+
+    #[test]
+    fn test_save_student_profile_preserves_user_nickname() {
+        let mut conn = setup_test_db();
+
+        // 1. Giả lập người dùng đã thiết lập nickname cá nhân
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('user_nickname', 'DiarkArchitect')",
+            [],
+        ).unwrap();
+
+        let payload = StudentProfilePayload {
+            student_id: "21520000".to_string(),
+            full_name: "Nguyen Van A".to_string(),
+            faculty: "Khoa Khoa hoc May tinh".to_string(),
+            major_code: "7480101".to_string(),
+            specialization: "Tri tue nhan tao".to_string(),
+            student_class: "KHMT2021".to_string(),
+            curriculum_code: "K2021".to_string(),
+            cohort: "2021".to_string(),
+        };
+
+        // 2. Chạy execute_save_student_profile
+        execute_save_student_profile(&mut conn, &payload).unwrap();
+
+        // 3. Xác nhận nickname không bao giờ bị ghi đè hay thay đổi
+        let nickname: String = conn.query_row(
+            "SELECT value FROM settings WHERE key = 'user_nickname'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(nickname, "DiarkArchitect");
+
+        // 4. Xác nhận các trường hồ sơ sinh viên được ghi nhận đầy đủ
+        let profile = query_student_profile(&conn).unwrap().unwrap();
+        assert_eq!(profile.student_id, "21520000");
+        assert_eq!(profile.full_name, "Nguyen Van A");
+        assert_eq!(profile.faculty, "Khoa Khoa hoc May tinh");
+        assert_eq!(profile.student_class, "KHMT2021");
+    }
+
+    #[test]
+    fn test_save_student_profile_major_sentinel_protection() {
+        let mut conn = setup_test_db();
+
+        let payload = StudentProfilePayload {
+            student_id: "21521111".to_string(),
+            full_name: "Tran Van B".to_string(),
+            faculty: "Khoa Khoa hoc May tinh".to_string(),
+            major_code: "7480101".to_string(),
+            specialization: "Data Science".to_string(),
+            student_class: "KHMT2021.1".to_string(),
+            curriculum_code: "K2021".to_string(),
+            cohort: "2021".to_string(),
+        };
+
+        // Case 1: user_major là "CS" (sentinel mặc định) -> Phải được nâng cấp thành "Data Science"
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('user_major', 'CS')",
+            [],
+        ).unwrap();
+        execute_save_student_profile(&mut conn, &payload).unwrap();
+        let major: String = conn.query_row(
+            "SELECT value FROM settings WHERE key = 'user_major'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(major, "Data Science");
+
+        // Case 2: user_major là ngành tùy biến khác ("Software Engineering") -> Tuyệt đối không bị ghi đè
+        conn.execute(
+            "UPDATE settings SET value = 'Software Engineering' WHERE key = 'user_major'",
+            [],
+        ).unwrap();
+
+        let payload2 = StudentProfilePayload {
+            student_id: "21521111".to_string(),
+            full_name: "Tran Van B".to_string(),
+            faculty: "Khoa Khoa hoc May tinh".to_string(),
+            major_code: "7480101".to_string(),
+            specialization: "Computer Vision".to_string(),
+            student_class: "KHMT2021.1".to_string(),
+            curriculum_code: "K2021".to_string(),
+            cohort: "2021".to_string(),
+        };
+
+        execute_save_student_profile(&mut conn, &payload2).unwrap();
+        let major_preserved: String = conn.query_row(
+            "SELECT value FROM settings WHERE key = 'user_major'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(major_preserved, "Software Engineering");
+    }
 }

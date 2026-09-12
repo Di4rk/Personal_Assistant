@@ -14,13 +14,14 @@ interface GpaSimulatorCardProps {
   currentTotalWeighted10: number;
   currentGpa10: number;
   completedTermsCount?: number;
+  totalDegreeCredits?: number;
   className?: string;
 }
 
 /**
  * Redesigned Graduation Forecast & GPA Simulator (Sprint v1.0 Production Repair)
  *
- * Tính toán động lộ trình tốt nghiệp dựa trên 126 TC chuẩn CTĐT UIT.
+ * Tính toán động lộ trình tốt nghiệp dựa trên chuẩn CTĐT UIT (mặc định 126 TC hoặc phân giải động).
  * Hỗ trợ chọn nhanh số kỳ tốt nghiệp (3.5 năm / 4 năm / 4.5 năm) hoặc tự nhập số tín chỉ/kỳ.
  */
 export const GpaSimulatorCard: React.FC<GpaSimulatorCardProps> = ({
@@ -28,9 +29,10 @@ export const GpaSimulatorCard: React.FC<GpaSimulatorCardProps> = ({
   currentTotalWeighted10,
   currentGpa10,
   completedTermsCount = 2,
+  totalDegreeCredits = 126,
   className = "",
 }) => {
-  const TOTAL_DEGREE_CREDITS = 126; // Chuẩn CTĐT UIT
+  const TOTAL_DEGREE_CREDITS = totalDegreeCredits;
   const remainingCredits = Math.max(0, TOTAL_DEGREE_CREDITS - currentEarnedCredits);
 
   const [targetGpa10, setTargetGpa10] = useState<number>(8.5); // Default: Giỏi (8.5)

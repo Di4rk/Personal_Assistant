@@ -358,3 +358,64 @@ export async function purgeCfData(): Promise<void> {
   return invoke<void>("purge_cf_data");
 }
 
+export interface UserProfileDto {
+  nickname: string;
+  major: string;
+  is_initialized: boolean;
+}
+
+export async function getUserProfile(): Promise<UserProfileDto> {
+  return invoke<UserProfileDto>("get_user_profile");
+}
+
+export async function saveUserProfile(nickname: string, major: string): Promise<void> {
+  return invoke<void>("save_user_profile", { nickname, major });
+}
+
+export async function resetIdentityState(): Promise<void> {
+  return invoke<void>("reset_identity_state");
+}
+
+export interface StudentProfilePayload {
+  student_id: string;
+  full_name: string;
+  faculty: string;
+  major_code: string;
+  specialization: string;
+  student_class: string;
+  curriculum_code: string;
+  cohort: string;
+}
+
+export async function getStudentProfile(): Promise<StudentProfilePayload | null> {
+  try {
+    return await invoke<StudentProfilePayload | null>("get_student_profile");
+  } catch (err) {
+    console.error("[tauri-client] getStudentProfile lỗi:", err);
+    return null;
+  }
+}
+
+/**
+ * Khởi chạy cửa sổ SSO UIT cô lập để xác thực và bóc tách dữ liệu zero-cookie.
+ */
+export async function launchPortalSsoSync(): Promise<void> {
+  return invoke<void>("launch_portal_sso_sync");
+}
+
+export interface CurriculumResolution {
+  major_code: string;
+  total_credits: number;
+  matched_via: string;
+}
+
+/**
+ * Lấy kết quả phân giải chương trình đào tạo đa ngành từ settings (hoặc fallback).
+ */
+export async function getResolvedCurriculum(): Promise<CurriculumResolution> {
+  return invoke<CurriculumResolution>("get_resolved_curriculum");
+}
+
+
+
+

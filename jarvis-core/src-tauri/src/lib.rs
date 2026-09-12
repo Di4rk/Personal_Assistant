@@ -21,6 +21,153 @@ use services::cf_worker::{self, SyncLock};
 /// sau này nếu muốn user tự chỉnh.
 const DEFAULT_SYNC_INTERVAL_SECS: u64 = 60;
 
+#[cfg(debug_assertions)]
+macro_rules! registered_commands {
+    () => {
+        tauri::generate_handler![
+            // Core CP & Stats
+            commands::get_today_stats,
+            commands::get_recent_submissions,
+            commands::get_level_info,
+            commands::get_yearly_heatmap,
+            commands::set_cf_handle,
+            commands::get_cf_handle,
+            commands::trigger_cf_sync,
+            commands::purge_cf_data,
+            // Post Mortem
+            commands::post_mortem::save_post_mortem,
+            commands::post_mortem::get_post_mortem,
+            commands::post_mortem::delete_post_mortem,
+            commands::post_mortem::search_post_mortems,
+            // Academic
+            commands::academic::get_academic_overview,
+            commands::academic::get_semester_courses,
+            commands::academic::upsert_academic_courses,
+            commands::academic::upsert_academic_semester,
+            commands::academic::sync_portal_uit_data,
+            commands::academic::sync_uit_portal,
+            commands::academic::submit_portal_transcript,
+            commands::academic::get_academic_macro_metrics,
+            commands::academic::get_academic_macro_metrics_ssot,
+            commands::academic::ingest_full_academic_payload,
+            commands::academic::ingest_dynamic_academic_data,
+            commands::academic::purge_and_seed_canonical_academic_data,
+            commands::academic::get_academic_curriculum,
+            commands::academic::get_resolved_curriculum,
+            commands::academic::get_sync_token,
+            commands::academic::get_student_profile,
+            // Portal In-App SSO
+            commands::portal_auth::launch_portal_sso_sync,
+            // Moodle & Workspace
+            commands::workspace::ingest_moodle_course_html,
+            commands::workspace::get_upcoming_deadlines,
+            commands::workspace::mark_deadline_submitted,
+            commands::workspace::upsert_workspace_config,
+            commands::workspace::get_workspace_config,
+            commands::workspace::check_and_launch_vscode,
+            // Life Matrix
+            commands::matrix::recompute_today_xp,
+            commands::matrix::get_heatmap_matrix,
+            commands::matrix::get_life_matrix_range,
+            // Vault & Window
+            commands::vault::scan_vault,
+            commands::vault::search_vault,
+            commands::vault::get_vault_stats,
+            commands::vault::create_structured_note,
+            commands::vault::open_onenote_link,
+            commands::vault::set_vault_path,
+            commands::vault::get_vault_path,
+            commands::hide_hud,
+            // Settings & Identity
+            commands::settings::get_user_profile,
+            commands::settings::save_user_profile,
+            commands::settings::reset_identity_state,
+            // Plugin Engine
+            commands::plugins::list_installed_plugins,
+            commands::plugins::toggle_plugin,
+            commands::plugins::plugin_storage_get,
+            commands::plugins::plugin_storage_set,
+            commands::plugins::record_activity_event,
+            commands::plugins::trigger_recompute_daily_matrix,
+            // Dev Tools (Debug Only)
+            commands::dev_tools::seed_mock_academic_data,
+            commands::dev_tools::clear_cf_cache,
+        ]
+    };
+}
+
+#[cfg(not(debug_assertions))]
+macro_rules! registered_commands {
+    () => {
+        tauri::generate_handler![
+            // Core CP & Stats
+            commands::get_today_stats,
+            commands::get_recent_submissions,
+            commands::get_level_info,
+            commands::get_yearly_heatmap,
+            commands::set_cf_handle,
+            commands::get_cf_handle,
+            commands::trigger_cf_sync,
+            commands::purge_cf_data,
+            // Post Mortem
+            commands::post_mortem::save_post_mortem,
+            commands::post_mortem::get_post_mortem,
+            commands::post_mortem::delete_post_mortem,
+            commands::post_mortem::search_post_mortems,
+            // Academic
+            commands::academic::get_academic_overview,
+            commands::academic::get_semester_courses,
+            commands::academic::upsert_academic_courses,
+            commands::academic::upsert_academic_semester,
+            commands::academic::sync_portal_uit_data,
+            commands::academic::sync_uit_portal,
+            commands::academic::submit_portal_transcript,
+            commands::academic::get_academic_macro_metrics,
+            commands::academic::get_academic_macro_metrics_ssot,
+            commands::academic::ingest_full_academic_payload,
+            commands::academic::ingest_dynamic_academic_data,
+            commands::academic::purge_and_seed_canonical_academic_data,
+            commands::academic::get_academic_curriculum,
+            commands::academic::get_resolved_curriculum,
+            commands::academic::get_sync_token,
+            commands::academic::get_student_profile,
+            // Portal In-App SSO
+            commands::portal_auth::launch_portal_sso_sync,
+            // Moodle & Workspace
+            commands::workspace::ingest_moodle_course_html,
+            commands::workspace::get_upcoming_deadlines,
+            commands::workspace::mark_deadline_submitted,
+            commands::workspace::upsert_workspace_config,
+            commands::workspace::get_workspace_config,
+            commands::workspace::check_and_launch_vscode,
+            // Life Matrix
+            commands::matrix::recompute_today_xp,
+            commands::matrix::get_heatmap_matrix,
+            commands::matrix::get_life_matrix_range,
+            // Vault & Window
+            commands::vault::scan_vault,
+            commands::vault::search_vault,
+            commands::vault::get_vault_stats,
+            commands::vault::create_structured_note,
+            commands::vault::open_onenote_link,
+            commands::vault::set_vault_path,
+            commands::vault::get_vault_path,
+            commands::hide_hud,
+            // Settings & Identity (Always available)
+            commands::settings::get_user_profile,
+            commands::settings::save_user_profile,
+            commands::settings::reset_identity_state,
+            // Plugin Engine
+            commands::plugins::list_installed_plugins,
+            commands::plugins::toggle_plugin,
+            commands::plugins::plugin_storage_get,
+            commands::plugins::plugin_storage_set,
+            commands::plugins::record_activity_event,
+            commands::plugins::trigger_recompute_daily_matrix,
+        ]
+    };
+}
+
 pub fn run() {
     let build_result = tauri::Builder::default()
         .setup(|app| {
@@ -135,6 +282,26 @@ pub fn run() {
 
             // Chặn sự kiện đóng cửa sổ (CloseRequested) trên main window để ẩn vào System Tray
             if let Some(main_window) = app.get_webview_window("main") {
+                let nickname: String = {
+                    if let Ok(conn) = shared_db.lock() {
+                        conn.query_row(
+                            "SELECT value FROM settings WHERE key = 'user_nickname'",
+                            [],
+                            |row| row.get(0),
+                        ).unwrap_or_else(|_| "Diark".to_string())
+                    } else {
+                        "Diark".to_string()
+                    }
+                };
+
+                #[cfg(debug_assertions)]
+                let env_prefix = "[DEV] ";
+                #[cfg(not(debug_assertions))]
+                let env_prefix = "";
+
+                let _ = main_window.set_title(&format!("{env_prefix}{nickname} // OS"));
+                let _ = main_window.show();
+
                 let window_clone = main_window.clone();
                 main_window.on_window_event(move |event| {
                     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
@@ -155,51 +322,7 @@ pub fn run() {
                 }
             }
         })
-        .invoke_handler(tauri::generate_handler![
-            commands::get_today_stats,
-            commands::get_recent_submissions,
-            commands::get_level_info,
-            commands::get_yearly_heatmap,
-            commands::set_cf_handle,
-            commands::get_cf_handle,
-            commands::trigger_cf_sync,
-            commands::post_mortem::save_post_mortem,
-            commands::post_mortem::get_post_mortem,
-            commands::post_mortem::delete_post_mortem,
-            commands::post_mortem::search_post_mortems,
-            commands::academic::get_academic_overview,
-            commands::academic::get_semester_courses,
-            commands::academic::upsert_academic_courses,
-            commands::academic::upsert_academic_semester,
-            commands::academic::sync_portal_uit_data,
-            commands::academic::sync_uit_portal,
-            commands::academic::submit_portal_transcript,
-            commands::academic::get_academic_macro_metrics,
-            commands::academic::get_academic_macro_metrics_ssot,
-            commands::academic::ingest_full_academic_payload,
-            commands::academic::ingest_dynamic_academic_data,
-            commands::academic::purge_and_seed_canonical_academic_data,
-            commands::academic::get_academic_curriculum,
-            commands::workspace::ingest_moodle_course_html,
-            commands::workspace::get_upcoming_deadlines,
-            commands::workspace::mark_deadline_submitted,
-            commands::workspace::upsert_workspace_config,
-            commands::workspace::get_workspace_config,
-            commands::workspace::check_and_launch_vscode,
-            commands::matrix::recompute_today_xp,
-            commands::matrix::get_heatmap_matrix,
-            commands::matrix::get_life_matrix_range,
-            commands::vault::scan_vault,
-            commands::vault::search_vault,
-            commands::vault::get_vault_stats,
-            commands::vault::create_structured_note,
-            commands::vault::open_onenote_link,
-            commands::vault::set_vault_path,
-            commands::vault::get_vault_path,
-            commands::academic::get_sync_token,
-            commands::hide_hud,
-            commands::purge_cf_data,
-        ])
+        .invoke_handler(registered_commands!())
         .run(tauri::generate_context!());
 
     if let Err(e) = build_result {

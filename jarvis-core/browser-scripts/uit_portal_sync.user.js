@@ -1,11 +1,14 @@
 // ==UserScript==
 // @name         Jarvis OS - UIT Portal Auto-Sync Hook
 // @namespace    https://diark.dev/jarvis
-// @version      1.0.0
-// @description  Tự động đẩy bảng điểm và DRL từ UIT Portal về Jarvis Personal OS qua loopback sync server
+// @version      1.1.0
+// @description  Tự động đẩy bảng điểm, DRL và hồ sơ sinh viên từ UIT Portal về Jarvis Personal OS qua loopback sync server
 // @author       Diark Architect
 // @match        https://student.uit.edu.vn/*
+// @match        https://portal.uit.edu.vn/sinh-vien/ho-so*
 // @grant        GM_xmlhttpRequest
+// @grant        GM_getValue
+// @grant        GM_setValue
 // @connect      127.0.0.1
 // @run-at       document-start
 // ==/UserScript==
@@ -246,4 +249,129 @@
     };
 
     log.info("✅ Fetch & XHR interceptors đã được cài đặt.");
+
+    // =========================================================================
+    // Module: Đồng bộ Hồ sơ sinh viên (Passive Network Interception & DOM Fallback)
+    // =========================================================================
+    const PROFILE_API_PATTERN = /\/api\/.*(ho-so|sinh-vien|profile)/i;
+    const NETWORK_CAPTURE_TIMEOUT_MS = 4000;
+    let profileAlreadySynced = false;
+
+    function normalizeProfilePayload(raw) {
+        const pick = (...candidates) => {
+            for (const key of candidates) {
+                if (raw?.[key] != null && raw[key] !== "") return String(raw[key]);
+            }
+            return null;
+        };
+
+        return {
+            student_id: pick("maSv", "ma_sv", "studentId", "mssv", "username"),
+            full_name: pick("hoTen", "ho_ten", "fullName", "tenSinhVien", "displayName"),
+            faculty: pick("khoa", "tenKhoa", "faculty"),
+            major_code: pick("maNganh", "majorCode") || "",
+            specialization: pick("chuyenNganh", "specialization") || "",
+            student_class: pick("lopSinhHoat", "lop", "studentClass"),
+            curriculum_code: pick("ctdt", "maCtdt", "curriculumCode") || "",
+            cohort: pick("khoaHoc", "namNhapHoc", "cohort") || "",
+        };
+    }
+
+    function isCompleteProfilePayload(p) {
+        return Boolean(p.student_id && p.full_name && p.faculty && p.student_class);
+    }
+
+    function sendStudentProfile(payload, portIndex = 0) {
+        if (profileAlreadySynced) return;
+        if (portIndex >= SYNC_PORTS.length) {
+            log.error("⚠️ Không thể gửi hồ sơ sinh viên: không kết nối được sync server.");
+            return;
+        }
+
+        const port = SYNC_PORTS[portIndex];
+        const url = `http://127.0.0.1:${port}/sync/student-profile`;
+        const token = (typeof GM_getValue === "function" ? GM_getValue("sync_token", "") : "") || JARVIS_SYNC_TOKEN;
+
+        GM_xmlhttpRequest({
+            method: "POST",
+            url: url,
+            headers: {
+                "Content-Type": "application/json",
+                "X-Jarvis-Sync-Token": token,
+            },
+            data: JSON.stringify(payload),
+            onload(response) {
+                if (response.status === 200) {
+                    profileAlreadySynced = true;
+                    log.info("[DIARK // OS] Hồ sơ sinh viên đã được đồng bộ thành công.");
+                } else if (response.status === 401) {
+                    log.error("❌ Token không hợp lệ khi đồng bộ hồ sơ sinh viên.");
+                } else {
+                    log.error(`❌ Đồng bộ hồ sơ sinh viên thất bại [${response.status}]:`, response.responseText);
+                }
+            },
+            onerror() {
+                sendStudentProfile(payload, portIndex + 1);
+            },
+            ontimeout() {
+                sendStudentProfile(payload, portIndex + 1);
+            },
+            timeout: 3000,
+        });
+    }
+
+    // Passive fetch capture cho Profile API
+    const _profileOriginalFetch = window.fetch;
+    window.fetch = async function (...args) {
+        const response = await _profileOriginalFetch.apply(this, args);
+        try {
+            const url = typeof args[0] === "string" ? args[0] : args[0]?.url;
+            if (url && PROFILE_API_PATTERN.test(url)) {
+                response.clone().json().then((json) => {
+                    const payload = normalizeProfilePayload(json?.data ?? json);
+                    if (isCompleteProfilePayload(payload)) {
+                        sendStudentProfile(payload);
+                    }
+                }).catch(() => {});
+            }
+        } catch (e) {}
+        return response;
+    };
+
+    // Label-based DOM Fallback
+    function scrapeByLabel(labelText) {
+        const nodes = Array.from(document.querySelectorAll("div, span, td"));
+        const labelNode = nodes.find((n) => n.textContent?.trim().startsWith(labelText));
+        if (!labelNode) return null;
+        const sibling = labelNode.nextElementSibling ?? labelNode.parentElement?.querySelector(".font-medium, .font-semibold");
+        return sibling?.textContent?.trim() || null;
+    }
+
+    function fallbackScrapeProfile() {
+        if (profileAlreadySynced) return;
+        const payload = {
+            student_id: scrapeByLabel("Mã sinh viên"),
+            full_name: scrapeByLabel("Họ và tên") || document.querySelector("h2.font-heading")?.textContent?.trim(),
+            faculty: scrapeByLabel("Khoa"),
+            major_code: scrapeByLabel("Ngành") || "",
+            specialization: scrapeByLabel("Chuyên ngành") || "",
+            student_class: scrapeByLabel("Lớp sinh hoạt"),
+            curriculum_code: scrapeByLabel("CTĐT cụ thể") || "",
+            cohort: scrapeByLabel("Khóa") || "",
+        };
+        if (isCompleteProfilePayload(payload)) {
+            sendStudentProfile(payload);
+        }
+    }
+
+    if (window.location.href.includes("/sinh-vien/ho-so")) {
+        window.addEventListener("DOMContentLoaded", () => {
+            setTimeout(() => {
+                if (!profileAlreadySynced) fallbackScrapeProfile();
+            }, NETWORK_CAPTURE_TIMEOUT_MS);
+        });
+        setTimeout(() => {
+            if (!profileAlreadySynced) fallbackScrapeProfile();
+        }, NETWORK_CAPTURE_TIMEOUT_MS + 2000);
+    }
 })();

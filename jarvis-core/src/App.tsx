@@ -2,20 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchTodayStats, fetchLevelInfo, fetchRecentSubmissions } from "./lib/tauri-client";
 import type { SyncCompletePayload } from "./lib/tauri-client";
 import { useTauriEvent } from "./hooks/useTauriEvent";
-import type { DailyStats, LevelInfo, SubmissionRecord, VerdictKind } from "./types";
-import { classifyVerdict } from "./types";
-import LevelProgressBar from "./components/LevelProgressBar";
-import ActivityHeatmap from "./components/ActivityHeatmap";
-import CfSettingsPanel from "./components/CfSettingsPanel";
+import type { DailyStats, LevelInfo, SubmissionRecord } from "./types";
 import PostMortemModal from "./components/PostMortemModal";
-
-const VERDICT_STYLE: Record<VerdictKind, string> = {
-  AC: "text-emerald-400 bg-emerald-950/40",
-  WA: "text-red-400 bg-red-950/40",
-  TLE: "text-amber-400 bg-amber-950/40",
-  RE: "text-orange-400 bg-orange-950/40",
-  OTHER: "text-zinc-400 bg-zinc-800",
-};
 
 interface Toast {
   id: number;
@@ -28,12 +16,88 @@ let toastIdCounter = 0;
 import { AcademicDashboard } from "./features/academic";
 import { VaultDashboard } from "./features/vault";
 import { CommandPaletteModal } from "./features/command-palette";
-import { Code2, GraduationCap, FolderGit2 } from "lucide-react";
-import { useAppVersion } from "@/shared/hooks/useAppVersion";
+import { GenesisModal } from "./features/onboarding";
+import { DevControlDock } from "./components/DevControlDock";
+import { DemoModeBanner } from "./components/DemoModeBanner";
+import { PluginMarketplaceModal } from "./components/PluginMarketplaceModal";
+import { PluginViewportRouter } from "./features/plugins/PluginViewportRouter";
+import { listInstalledPlugins } from "./lib/plugin-sdk";
+import type { PluginMetaDto } from "./types/plugin";
+import { Code2, GraduationCap, FolderGit2, Blocks } from "lucide-react";
+import { APP_VERSION, APP_SUBTITLE } from "./constants/app";
+import {
+  getUserProfile,
+  saveUserProfile,
+  type UserProfileDto,
+} from "./lib/tauri-client";
+
+type ProfileState =
+  | { status: "loading" }
+  | { status: "needs-onboarding" }
+  | { status: "ready"; profile: UserProfileDto };
 
 export default function App() {
-  const appVersion = useAppVersion();
-  const [activeTab, setActiveTab] = useState<"cp" | "academic" | "vault">("academic");
+  const [profileState, setProfileState] = useState<ProfileState>({ status: "loading" });
+  const [activeTab, setActiveTab] = useState<string>("academic");
+  const [plugins, setPlugins] = useState<PluginMetaDto[]>([]);
+  const [isPluginModalOpen, setIsPluginModalOpen] = useState(false);
+
+  const handleResetIdentity = () => {
+    setProfileState({ status: "needs-onboarding" });
+  };
+
+  // Load Plugins on mount
+  const loadPlugins = useCallback(async () => {
+    try {
+      const list = await listInstalledPlugins();
+      setPlugins(list);
+    } catch (err) {
+      console.error("Lỗi đọc installed plugins:", err);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadPlugins();
+  }, [loadPlugins]);
+
+  // Load User Profile on mount
+  useEffect(() => {
+    let isMounted = true;
+    getUserProfile()
+      .then((profile) => {
+        if (!isMounted) return;
+        if (!profile.is_initialized) {
+          setProfileState({ status: "needs-onboarding" });
+        } else {
+          setProfileState({ status: "ready", profile });
+        }
+      })
+      .catch((err) => {
+        console.error("Failed to load user profile:", err);
+        if (isMounted) {
+          setProfileState({
+            status: "ready",
+            profile: { nickname: "Diark", major: "CS", is_initialized: false },
+          });
+        }
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const handleGenesisComplete = async (nickname: string, major: string) => {
+    try {
+      await saveUserProfile(nickname, major);
+      await loadPlugins();
+      setProfileState({
+        status: "ready",
+        profile: { nickname, major, is_initialized: true },
+      });
+    } catch (err) {
+      console.error("Failed to save user profile in genesis:", err);
+    }
+  };
 
   // ============================================================
   // SINGLE SOURCE OF TRUTH: mọi state hiển thị dồn về đây, các
@@ -142,154 +206,148 @@ export default function App() {
     first_ac_count: number;
   }>("cf://sync-event", handleLegacySync);
 
+  if (profileState.status === "loading") {
+    return null;
+  }
+
+  if (profileState.status === "needs-onboarding") {
+    return <GenesisModal onComplete={handleGenesisComplete} />;
+  }
+
+  const { profile } = profileState;
+
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100 p-6">
-      <header className="mb-6">
-        <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div className="flex items-center gap-6 flex-wrap">
-            <div>
-              <h1 className="text-xl font-bold text-zinc-100 flex items-center gap-2">
-                JARVIS Personal OS
-                <span className="text-xs font-mono px-2 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700/50">
-                  {appVersion}
-                </span>
-              </h1>
-              <p className="text-sm text-zinc-500">Diark Core Dashboard</p>
-            </div>
+    <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col">
+      <DemoModeBanner />
+      <header className="flex items-center justify-between border-b border-slate-800 bg-slate-950 px-6 py-4">
+        <div>
+          <h1 className="text-xl font-black tracking-wider text-white">
+            {profile.nickname.toUpperCase()} <span className="text-cyan-400">// OS</span>
+          </h1>
+          <p className="text-xs font-mono text-slate-400">{APP_SUBTITLE}</p>
+        </div>
 
-            {/* Navigation Tabs */}
-            <nav className="flex items-center bg-zinc-900 border border-zinc-800 rounded-lg p-1 text-xs">
-              <button
-                onClick={() => setActiveTab("academic")}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium transition-colors ${
-                  activeTab === "academic"
-                    ? "bg-violet-600 text-white shadow-sm"
-                    : "text-zinc-400 hover:text-zinc-200"
-                }`}
-              >
-                <GraduationCap className="w-3.5 h-3.5" />
-                <span>Academic Radar</span>
-              </button>
-              <button
-                onClick={() => setActiveTab("cp")}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium transition-colors ${
-                  activeTab === "cp"
-                    ? "bg-violet-600 text-white shadow-sm"
-                    : "text-zinc-400 hover:text-zinc-200"
-                }`}
-              >
-                <Code2 className="w-3.5 h-3.5" />
-                <span>Codeforces &amp; ICPC</span>
-              </button>
-              <button
-                onClick={() => setActiveTab("vault")}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium transition-colors ${
-                  activeTab === "vault"
-                    ? "bg-violet-600 text-white shadow-sm"
-                    : "text-zinc-400 hover:text-zinc-200"
-                }`}
-              >
-                <FolderGit2 className="w-3.5 h-3.5" />
-                <span>Native Vault</span>
-              </button>
-            </nav>
-          </div>
+        <div className="flex items-center gap-4">
+          {/* Navigation Tabs */}
+          <nav className="flex items-center bg-zinc-900 border border-zinc-800 rounded-lg p-1 text-xs">
+            <button
+              onClick={() => setActiveTab("academic")}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium transition-colors cursor-pointer ${
+                activeTab === "academic"
+                  ? "bg-violet-600 text-white shadow-sm"
+                  : "text-zinc-400 hover:text-zinc-200"
+              }`}
+            >
+              <GraduationCap className="w-3.5 h-3.5" />
+              <span>Academic Radar</span>
+            </button>
 
-          {activeTab === "cp" && (
-            <div className="w-full sm:w-80">
-              <CfSettingsPanel onSyncComplete={handleSyncComplete} />
-            </div>
-          )}
+            {/* Dynamic Enabled Plugins */}
+            {plugins
+              .filter((p) => p.isEnabled)
+              .map((p) => {
+                const isSelected = activeTab === p.pluginId;
+                return (
+                  <button
+                    key={p.pluginId}
+                    onClick={() => setActiveTab(p.pluginId)}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium transition-colors cursor-pointer ${
+                      isSelected
+                        ? "bg-violet-600 text-white shadow-sm"
+                        : "text-zinc-400 hover:text-zinc-200"
+                    }`}
+                  >
+                    {p.pluginId === "cp-codeforces" ? (
+                      <Code2 className="w-3.5 h-3.5" />
+                    ) : (
+                      <Blocks className="w-3.5 h-3.5" />
+                    )}
+                    <span>{p.name}</span>
+                  </button>
+                );
+              })}
+
+            <button
+              onClick={() => setActiveTab("vault")}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium transition-colors cursor-pointer ${
+                activeTab === "vault"
+                  ? "bg-violet-600 text-white shadow-sm"
+                  : "text-zinc-400 hover:text-zinc-200"
+              }`}
+            >
+              <FolderGit2 className="w-3.5 h-3.5" />
+              <span>Native Vault</span>
+            </button>
+          </nav>
+
+          {/* Plugin Hub Button */}
+          <button
+            onClick={() => setIsPluginModalOpen(true)}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 text-xs font-mono text-cyan-400 transition-colors cursor-pointer"
+            title="Mở Plugin Hub & Registry"
+          >
+            <Blocks className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Plugins</span>
+          </button>
+
+          <span className="rounded border border-slate-700 bg-slate-900 px-2 py-0.5 font-mono text-xs text-cyan-400">
+            {APP_VERSION}
+          </span>
         </div>
       </header>
 
-      {activeTab === "academic" ? (
-        <AcademicDashboard />
-      ) : activeTab === "vault" ? (
-        <VaultDashboard />
-      ) : (
-        <>
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            {/* --- Stats card hôm nay --- */}
-            <div className="rounded-xl bg-zinc-900 border border-zinc-800 p-4">
-              <h3 className="text-sm font-medium text-zinc-400 mb-3">Hôm nay</h3>
-              {stats ? (
-                <div className="grid grid-cols-2 gap-3">
-                  <StatBox label="XP" value={stats.total_xp} accent="text-cyan-400" />
-                  <StatBox label="AC" value={stats.ac_count} accent="text-emerald-400" />
-                  <StatBox label="WA" value={stats.wa_count} accent="text-red-400" />
-                  <StatBox label="Khác" value={stats.other_count} accent="text-zinc-400" />
-                </div>
-              ) : (
-                <div className="h-16 animate-pulse bg-zinc-800 rounded" />
-              )}
-            </div>
-
-            <LevelProgressBar info={levelInfo} />
-
-            {/* Third column intentionally left for future widgets */}
-            <div className="lg:col-span-1" />
-          </div>
-
-          <div className="mt-4">
-            <ActivityHeatmap />
-          </div>
-
-      {/* --- Recent submissions --- */}
-      <div className="mt-4 rounded-xl bg-zinc-900 border border-zinc-800 p-4">
-        <h3 className="text-sm font-medium text-zinc-400 mb-3">Recent Submissions</h3>
-        {submissions.length === 0 ? (
-          <p className="text-sm text-zinc-600">
-            Chưa có submission nào. Nhập CF handle và bấm &quot;Save &amp; Sync&quot; để bắt đầu.
-          </p>
+      <main className="flex-1 p-6">
+        {activeTab === "academic" ? (
+          <AcademicDashboard />
+        ) : activeTab === "vault" ? (
+          <VaultDashboard />
+        ) : activeTab === "cp" || activeTab === "cp-codeforces" ? (
+          <PluginViewportRouter
+            plugin={{
+              pluginId: "cp-codeforces",
+              name: "Codeforces Engine",
+              version: "1.0.0",
+              author: "Diark",
+              category: "competitive_programming",
+              isEnabled: true,
+              isBuiltin: true,
+              trustTier: "first_party",
+            }}
+            extraProps={{
+              stats,
+              levelInfo,
+              submissions,
+              userProfile: profile,
+              onSyncComplete: handleSyncComplete,
+              onProfileUpdated: (updated: UserProfileDto) =>
+                setProfileState({ status: "ready", profile: updated }),
+              onResetIdentity: handleResetIdentity,
+              onSelectSubmission: (sub: { problemId: string; problemName: string; verdict: string }) => {
+                setSelectedSubmission(sub);
+                setIsModalOpen(true);
+              },
+            }}
+          />
         ) : (
-          <div className="space-y-1.5">
-            {submissions.map((sub) => {
-              const tier = classifyVerdict(sub.verdict);
-              return (
-                <div
-                  key={sub.id}
-                  className="flex cursor-pointer items-center justify-between rounded-lg px-2 py-1.5 text-sm transition-colors hover:bg-zinc-800/40 focus:outline-none focus:ring-2 focus:ring-violet-500"
-                  onClick={() => {
-                    setSelectedSubmission({
-                      problemId: sub.problem_id,
-                      problemName: sub.problem_name,
-                      verdict: sub.verdict,
-                    });
-                    setIsModalOpen(true);
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      setSelectedSubmission({
-                        problemId: sub.problem_id,
-                        problemName: sub.problem_name,
-                        verdict: sub.verdict,
-                      });
-                      setIsModalOpen(true);
-                    }
-                  }}
-                  role="button"
-                  tabIndex={0}
-                >
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className={`px-1.5 py-0.5 rounded text-xs font-medium shrink-0 ${VERDICT_STYLE[tier]}`}>
-                      {sub.verdict}
-                    </span>
-                    <span className="text-zinc-300 truncate">{sub.problem_name}</span>
-                  </div>
-                  <div className="flex items-center gap-3 shrink-0">
-                    <span className="text-zinc-600 text-xs">{sub.language ?? "?"}</span>
-                    <span className="text-violet-400 text-xs font-medium">+{sub.xp_awarded} XP</span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+          (() => {
+            const currentPlugin = plugins.find((p) => p.pluginId === activeTab);
+            if (currentPlugin) {
+              return <PluginViewportRouter plugin={currentPlugin} />;
+            }
+            return (
+              <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-8 text-center text-xs font-mono text-slate-400">
+                Phân hệ chưa được cấu hình hoặc đã bị vô hiệu hóa.
+              </div>
+            );
+          })()
         )}
-      </div>
-      </>
-      )}
+      </main>
+
+      <PluginMarketplaceModal
+        isOpen={isPluginModalOpen}
+        onClose={() => setIsPluginModalOpen(false)}
+        onPluginsChanged={loadPlugins}
+      />
 
       <PostMortemModal
         isOpen={isModalOpen}
@@ -314,15 +372,8 @@ export default function App() {
           </div>
         ))}
       </div>
-    </div>
-  );
-}
 
-function StatBox({ label, value, accent }: { label: string; value: number; accent: string }) {
-  return (
-    <div>
-      <div className={`text-2xl font-bold ${accent}`}>{value}</div>
-      <div className="text-xs text-zinc-500">{label}</div>
+      <DevControlDock onResetIdentity={handleResetIdentity} />
     </div>
   );
 }

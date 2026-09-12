@@ -11,7 +11,7 @@ import { SyncPortalButton } from "./components/SyncPortalButton";
 import { AcademicSummaryCards } from "./components/AcademicSummaryCards";
 import { SemesterTabs } from "./components/SemesterTabs";
 import { AcademicCourseTable } from "./components/AcademicCourseTable";
-import { useAppVersion } from "@/shared/hooks/useAppVersion";
+import { StudentIdentityChip } from "./components/StudentIdentityChip";
 import {
   computeCategoryRadarData,
   type CategoryAxisData,
@@ -19,8 +19,10 @@ import {
 import {
   getSemesterCourses,
   getAcademicMacroMetricsSsot,
-  syncUitPortal,
+  launchPortalSsoSync,
+  getResolvedCurriculum,
 } from "../../lib/tauri-client";
+import { listen } from "@tauri-apps/api/event";
 import type { AcademicCourseRecord, AcademicMacroMetricSSOT } from "./types";
 
 interface AcademicDashboardProps {
@@ -30,7 +32,6 @@ interface AcademicDashboardProps {
 export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
   className = "",
 }) => {
-  const appVersion = useAppVersion();
   const {
     overview,
     selectedSemesterId,
@@ -52,11 +53,21 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
 
   const [radarScope, setRadarScope] = useState<"all" | "semester">("all");
 
+  const [curriculumCredits, setCurriculumCredits] = useState<number>(126);
+
   const loadMacroMetrics = useCallback(async () => {
     try {
       setIsLoadingMacro(true);
-      const data = await getAcademicMacroMetricsSsot();
-      setMacroMetrics(data);
+      const [data, curr] = await Promise.allSettled([
+        getAcademicMacroMetricsSsot(),
+        getResolvedCurriculum(),
+      ]);
+      if (data.status === "fulfilled") {
+        setMacroMetrics(data.value);
+      }
+      if (curr.status === "fulfilled") {
+        setCurriculumCredits(curr.value.total_credits);
+      }
     } catch (err) {
       console.error("Không thể nạp academic_macro_metrics SSOT:", err);
     } finally {
@@ -162,14 +173,38 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
     await Promise.all([refetchOverview(), loadMacroMetrics()]);
   }, [refetchOverview, loadMacroMetrics]);
 
+  // Lắng nghe event thất bại từ SSO sync window
+  useEffect(() => {
+    const unlisten = listen<string>("portal-sync-failed", (event) => {
+      const reason = event.payload;
+      if (reason.includes("session_expired")) {
+        alert("Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.");
+      } else {
+        alert(`Đồng bộ thất bại: ${reason}`);
+      }
+    });
+    return () => {
+      void unlisten.then((fn) => fn());
+    };
+  }, []);
+
+  // Tự động làm mới khi backend hoàn tất nạp dữ liệu từ portal SSO
+  useEffect(() => {
+    const unlisten = listen("academic-data-synced", () => {
+      void handleRefresh();
+    });
+    return () => {
+      void unlisten.then((fn) => fn());
+    };
+  }, [handleRefresh]);
+
   const handleSyncPortal = useCallback(async () => {
     try {
-      await syncUitPortal();
-      await handleRefresh();
+      await launchPortalSsoSync();
     } catch (err) {
-      console.error("Lỗi sync UIT portal:", err);
+      console.error("Khởi tạo cửa sổ SSO thất bại:", err);
     }
-  }, [handleRefresh]);
+  }, []);
 
   const isRefreshing = isLoadingOverview || isLoadingMacro;
 
@@ -183,11 +218,8 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
               <GraduationCap className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-zinc-100 flex items-center gap-2">
+              <h2 className="text-lg font-bold text-zinc-100">
                 UIT Academic Radar
-                <span className="text-xs font-mono px-2 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700/50">
-                  {appVersion}
-                </span>
               </h2>
               <p className="text-xs text-zinc-500">
                 Hệ thống theo dõi lộ trình học tập, phân tích năng lực và dự báo tốt nghiệp
@@ -210,10 +242,15 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
         </div>
       </div>
 
+      {/* 1.1 Student Identity Chip (Hồ Sơ Chính Thức UIT) */}
+      <div>
+        <StudentIdentityChip />
+      </div>
+
       {/* 2. Cumulative Summary Cards (SSOT: cGPA 10, cGPA 4, Cumulative Credits, Average DRL) */}
       <AcademicSummaryCards
         metrics={macroMetrics}
-        totalCurriculumCredits={126}
+        totalCurriculumCredits={curriculumCredits}
         onSyncClick={handleSyncPortal}
       />
 
@@ -322,6 +359,7 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
             currentTotalWeighted10={cumulativeStats.currentTotalWeighted10}
             currentGpa10={cumulativeStats.cGpa10}
             completedTermsCount={macroMetrics.length > 0 ? macroMetrics.length : overview.length}
+            totalDegreeCredits={curriculumCredits}
           />
         </div>
       </div>
