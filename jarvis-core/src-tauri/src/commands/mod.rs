@@ -263,3 +263,115 @@ pub async fn trigger_cf_sync(
         }),
     }
 }
+
+/// Hides the main HUD / Webview window into the system tray.
+#[tauri::command]
+pub fn hide_hud(window: tauri::WebviewWindow) -> Result<(), String> {
+    window.hide().map_err(|e| e.to_string())
+}
+
+/// Core business logic for purging Codeforces data while preserving Moodle deadlines.
+pub fn purge_cf_data_internal(conn: &mut rusqlite::Connection) -> Result<(), String> {
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+
+    tx.execute_batch("
+        DELETE FROM submissions;
+        DELETE FROM post_mortems;
+        DELETE FROM daily_activity;
+        DELETE FROM settings WHERE key = 'cf_handle';
+    ").map_err(|e| e.to_string())?;
+
+    // Lấy các ngày có ac_count > 0 để tính toán lại, KHÔNG xóa dòng trong life_matrix_daily
+    let affected_dates: Vec<String> = {
+        let mut stmt = tx.prepare("SELECT date FROM life_matrix_daily WHERE ac_count > 0")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt.query_map([], |r| r.get(0))
+            .map_err(|e| e.to_string())?;
+        let mut dates = Vec::new();
+        for d in rows {
+            dates.push(d.map_err(|e| e.to_string())?);
+        }
+        dates
+    };
+
+    tx.execute_batch("UPDATE life_matrix_daily SET ac_count = 0;").map_err(|e| e.to_string())?;
+    tx.commit().map_err(|e| e.to_string())?;
+
+    // Recompute idempotent cho từng ngày bị ảnh hưởng để bảo toàn deadlines_cleared
+    for date in affected_dates {
+        let _ = crate::db::matrix::recompute_daily_matrix_for_date(conn, &date);
+    }
+    Ok(())
+}
+
+/// Tauri command invoking the Codeforces purge routine.
+#[tauri::command]
+pub fn purge_cf_data(db: tauri::State<'_, SharedDb>) -> Result<(), String> {
+    let mut conn = db.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
+    purge_cf_data_internal(&mut conn)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::schema::create_tables;
+    use rusqlite::Connection;
+
+    #[test]
+    fn test_purge_cf_data_preserves_deadlines_cleared() {
+        let mut conn = Connection::open_in_memory().expect("in-memory db");
+        create_tables(&conn).expect("create tables");
+
+        // 1. Setup CF submission and settings
+        crate::db::set_setting(&conn, "cf_handle", "tourist").expect("set handle");
+        conn.execute(
+            "INSERT INTO submissions (id, problem_id, problem_name, verdict, submitted_at, xp_awarded, is_first_ac)
+             VALUES (1, '1A', 'Theatre Square', 'OK', '2026-09-11 10:00:00', 15, 1)",
+            [],
+        ).expect("insert sub");
+        conn.execute(
+            "INSERT INTO daily_activity (date, total_xp, ac_count, wa_count, other_count, updated_at)
+             VALUES ('2026-09-11', 15, 1, 0, 0, '2026-09-11T10:00:00')",
+            [],
+        ).expect("insert daily");
+
+        // 2. Setup a cleared course deadline for today (UTC+7)
+        conn.execute(
+            "INSERT INTO course_deadlines (id, course_code, title, due_timestamp, due_date_raw, source_url, is_submitted, updated_at)
+             VALUES ('IT001_1', 'IT001', 'Assignment 1', 1789124400, '11/09/2026 23:59', '', 1, 1789120000)",
+            [],
+        ).expect("insert deadline");
+
+        // Recompute matrix for 2026-09-11
+        crate::db::matrix::recompute_daily_matrix_for_date(&conn, "2026-09-11").expect("recompute matrix");
+
+        // Verify initial state: ac_count = 1, deadlines_cleared = 1, total_xp = 15 + 20 = 35
+        let (ac_before, deadlines_before, xp_before): (i32, i32, i32) = conn.query_row(
+            "SELECT ac_count, deadlines_cleared, total_xp FROM life_matrix_daily WHERE date = '2026-09-11'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        ).expect("query life_matrix_daily");
+        assert_eq!(ac_before, 1);
+        assert_eq!(deadlines_before, 1);
+        assert_eq!(xp_before, 35);
+
+        // 3. Execute purge_cf_data_internal
+        purge_cf_data_internal(&mut conn).expect("purge succeeds");
+
+        // 4. Verify CF data is cleared
+        let sub_count: i64 = conn.query_row("SELECT COUNT(*) FROM submissions", [], |r| r.get(0)).unwrap();
+        assert_eq!(sub_count, 0);
+        let handle = crate::db::get_setting(&conn, "cf_handle").unwrap();
+        assert_eq!(handle, None);
+
+        // 5. Verify life_matrix_daily row is NOT deleted, deadlines_cleared is preserved!
+        let (ac_after, deadlines_after, xp_after): (i32, i32, i32) = conn.query_row(
+            "SELECT ac_count, deadlines_cleared, total_xp FROM life_matrix_daily WHERE date = '2026-09-11'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        ).expect("query life_matrix_daily after purge");
+        assert_eq!(ac_after, 0, "ac_count should be reset to 0");
+        assert_eq!(deadlines_after, 1, "deadlines_cleared must be 100% preserved!");
+        assert_eq!(xp_after, 20, "total_xp should reflect only deadline XP (20)");
+    }
+}

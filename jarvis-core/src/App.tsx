@@ -215,7 +215,7 @@ export default function App() {
               <h3 className="text-sm font-medium text-zinc-400 mb-3">Hôm nay</h3>
               {stats ? (
                 <div className="grid grid-cols-2 gap-3">
-                  <StatBox label="XP" value={stats.total_xp} accent="text-violet-400" />
+                  <StatBox label="XP" value={stats.total_xp} accent="text-cyan-400" />
                   <StatBox label="AC" value={stats.ac_count} accent="text-emerald-400" />
                   <StatBox label="WA" value={stats.wa_count} accent="text-red-400" />
                   <StatBox label="Khác" value={stats.other_count} accent="text-zinc-400" />

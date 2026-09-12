@@ -62,7 +62,9 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
 pub fn show_and_focus_hud(window: &tauri::WebviewWindow) -> Result<(), String> {
     window.unminimize().map_err(|e| e.to_string())?;
     window.show().map_err(|e| e.to_string())?;
+    let _ = window.set_always_on_top(true);
     window.set_focus().map_err(|e| e.to_string())?;
+    let _ = window.set_always_on_top(false);
     window.emit("hud-shown", ()).map_err(|e| e.to_string())?;
     Ok(())
 }

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { hideHud as hideHudBackend } from "@/lib/tauri-client";
 
 export function useCommandPalette() {
   const [isOpen, setIsOpen] = useState<boolean>(false);
@@ -33,6 +33,7 @@ export function useCommandPalette() {
       } else if (e.key === "Escape" && isOpen) {
         e.preventDefault();
         setIsOpen(false);
+        void hideHudBackend().catch(() => {});
       }
     };
 
@@ -48,8 +49,7 @@ export function useCommandPalette() {
   const hideHud = async () => {
     setIsOpen(false);
     try {
-      const win = getCurrentWebviewWindow();
-      await win.hide();
+      await hideHudBackend();
     } catch {
       // Ignored when running outside Tauri webview
     }

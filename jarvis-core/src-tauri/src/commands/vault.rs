@@ -99,15 +99,38 @@ pub async fn scan_vault(
     .map_err(|e| format!("Lỗi runtime worker scan_vault: {e}"))?
 }
 
+/// Sets the active vault path in the settings table.
+#[tauri::command]
+pub fn set_vault_path(path: String, db: tauri::State<'_, SharedDb>) -> Result<(), String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err("Đường dẫn vault không được để trống".to_string());
+    }
+    let conn = db.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
+    crate::db::settings::set_setting(&conn, "vault_path", trimmed)
+        .map_err(|e| format!("Lỗi lưu vault_path: {e}"))
+}
+
+/// Retrieves the active vault path from the settings table.
+#[tauri::command]
+pub fn get_vault_path(db: tauri::State<'_, SharedDb>) -> Result<Option<String>, String> {
+    let conn = db.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
+    crate::db::settings::get_setting(&conn, "vault_path")
+        .map_err(|e| format!("Lỗi đọc vault_path: {e}"))
+}
+
 /// Creates a new structured note, writes markdown file to disk, and updates FTS5 immediately.
 #[tauri::command]
 pub async fn create_structured_note(
     dto: CreateStructuredNoteDto,
     db: tauri::State<'_, SharedDb>,
 ) -> Result<String, String> {
-    // 1. Kiểm tra OneNote URI nếu có
+    // 1. Chỉ validate OneNote URI khi external_uri có giá trị thực
     if let Some(ref uri) = dto.external_uri {
-        crate::modules::vault::validate_onenote_uri(uri)?;
+        let trimmed = uri.trim();
+        if !trimmed.is_empty() {
+            crate::modules::vault::validate_onenote_uri(trimmed)?;
+        }
     }
 
     let db_arc = db.inner().clone();
@@ -125,14 +148,14 @@ pub async fn create_structured_note(
                 crate::db::settings::get_setting(&conn, "vault_path")
                     .map_err(|e| format!("Lỗi đọc cài đặt vault_path: {e}"))?
                     .ok_or_else(|| {
-                        "Chưa cấu hình đường dẫn Vault. Vui lòng nhập đường dẫn thư mục Vault trước khi tạo note.".to_string()
+                        "Chưa cấu hình thư mục Vault. Hãy chọn thư mục trước!".to_string()
                     })?
             }
         } else {
             crate::db::settings::get_setting(&conn, "vault_path")
                 .map_err(|e| format!("Lỗi đọc cài đặt vault_path: {e}"))?
                 .ok_or_else(|| {
-                    "Chưa cấu hình đường dẫn Vault. Vui lòng nhập đường dẫn thư mục Vault trước khi tạo note.".to_string()
+                    "Chưa cấu hình thư mục Vault. Hãy chọn thư mục trước!".to_string()
                 })?
         };
 
