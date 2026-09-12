@@ -1,12 +1,668 @@
 use serde::Deserialize;
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder, Emitter};
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::{Arc, Mutex as StdMutex};
+use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
+use tokio_util::sync::CancellationToken;
 use urlencoding::decode;
 use crate::db::SharedDb;
 
-const PROFILE_PAGE_MARKER: &str = "portal.uit.edu.vn/sinh-vien/ho-so";
+#[derive(Clone)]
+pub struct WatchdogRegistry(pub Arc<StdMutex<HashMap<String, CancellationToken>>>);
+
+impl WatchdogRegistry {
+    pub fn new() -> Self {
+        Self(Arc::new(StdMutex::new(HashMap::new())))
+    }
+
+    pub fn register(&self, label: &str) -> CancellationToken {
+        let token = CancellationToken::new();
+        if let Ok(mut map) = self.0.lock() {
+            map.insert(label.to_string(), token.clone());
+        }
+        token
+    }
+
+    pub fn cancel(&self, label: &str) {
+        if let Ok(mut map) = self.0.lock() {
+            if let Some(token) = map.remove(label) {
+                token.cancel();
+            }
+        }
+    }
+}
+
+#[derive(Default, Clone, Debug)]
+pub struct PartialAcademicState {
+    pub profile: Option<serde_json::Value>,
+    pub courses: Option<Vec<serde_json::Value>>,
+    pub drl: Option<Vec<serde_json::Value>>,
+}
+
+#[derive(Default, Clone)]
+pub struct PartialStateRegistry {
+    pub states: Arc<StdMutex<HashMap<String, PartialAcademicState>>>,
+}
+
+fn spawn_watchdog(app: AppHandle, window_label: String, token: CancellationToken) {
+    tauri::async_runtime::spawn(async move {
+        tokio::select! {
+            _ = tokio::time::sleep(std::time::Duration::from_secs(120)) => {
+                if let Some(win) = app.get_webview_window(&window_label) {
+                    let _ = win.destroy();
+                }
+                let _ = app.emit(
+                    "sso-callback-failed",
+                    "Quá thời gian đăng nhập (Timeout 120s)",
+                );
+                let _ = app.emit_to(
+                    "main",
+                    "portal-sync-failed",
+                    "Quá thời gian đăng nhập (Timeout 120s)",
+                );
+                let _ = app.emit_to(
+                    "main",
+                    "wecode-sync-failed",
+                    "Quá thời gian đăng nhập (Timeout 120s)",
+                );
+            }
+            _ = token.cancelled() => {
+                // Task hủy ngay lập tức khi nhận callback sớm
+            }
+        }
+    });
+}
+
+pub const UNIVERSAL_GUARDIAN_SCRIPT: &str = r#"
+(() => {
+  if (window.__DIARK_ACTIVE_GUARDIAN__) return;
+  window.__DIARK_ACTIVE_GUARDIAN__ = true;
+
+  // 1. Hidden Iframe Scheme Dispatcher (Khử Race Condition khi Trigger Scheme)
+  function dispatchCustomScheme(uri) {
+    try {
+      let iframe = document.getElementById('__diark_dispatch_frame');
+      if (!iframe) {
+        iframe = document.createElement('iframe');
+        iframe.id = '__diark_dispatch_frame';
+        iframe.style.display = 'none';
+        document.documentElement.appendChild(iframe);
+      }
+      iframe.src = uri;
+    } catch (e) {
+      window.location.href = uri;
+    }
+  }
+
+  // Bypass BeforeUnload Hooks & Robust Navigation
+  function forceNavigate(path, retries = 3) {
+    const before = window.location.pathname;
+    window.location.href = path;
+    setTimeout(() => {
+      if (window.location.pathname === before && retries > 0) {
+        forceNavigate(path, retries - 1);
+      }
+    }, 1500);
+  }
+
+  window.__diark_touch_network = function() {};
+
+  // --- 1. PROXY FETCH & XHR ---
+  const origFetch = window.fetch;
+  try {
+    window.fetch = async function(...args) {
+      try { window.__diark_touch_network?.(); } catch (_) {}
+      const response = await origFetch.apply(this, args);
+      try {
+        window.__diark_touch_network?.();
+        const clone = response.clone();
+        const url = typeof args[0] === 'string' ? args[0] : (args[0]?.url || '');
+        const lowerUrl = url.toLowerCase();
+        if (lowerUrl.includes('/api/sinh-vien/') || lowerUrl.includes('/api/academic/') || lowerUrl.includes('diem-ren-luyen') || lowerUrl.includes('drl') || lowerUrl.includes('ren-luyen')) {
+          clone.json().then(data => {
+            try { window.__diark_touch_network?.(); } catch (_) {}
+            const cache = JSON.parse(sessionStorage.getItem('__diark_cache') || '{}');
+            if (lowerUrl.includes('ho-so')) {
+              cache.profile = data;
+              sessionStorage.setItem('__diark_cache', JSON.stringify(cache));
+              dispatchCustomScheme('diark-sso://partial#target=academic&stage=profile&data=' + encodeURIComponent(JSON.stringify(cache)));
+            }
+            if (lowerUrl.includes('bang-diem')) {
+              cache.courses = Array.isArray(data) ? data : (data.courses || data.semester_groups || []);
+              sessionStorage.setItem('__diark_cache', JSON.stringify(cache));
+              dispatchCustomScheme('diark-sso://partial#target=academic&stage=courses&data=' + encodeURIComponent(JSON.stringify(cache)));
+            }
+            if (lowerUrl.includes('diem-ren-luyen') || lowerUrl.includes('drl') || lowerUrl.includes('ren-luyen')) {
+              cache.drl = Array.isArray(data) ? data : (data.drl || data.data || []);
+              sessionStorage.setItem('__diark_cache', JSON.stringify(cache));
+            }
+          }).catch(() => {});
+        }
+      } catch (e) {}
+      return response;
+    };
+  } catch (e) {}
+
+  try {
+    const origXHR = window.XMLHttpRequest;
+    function ProxiedXHR() {
+      const xhr = new origXHR();
+      const origSend = xhr.send;
+      xhr.send = function(...sArgs) {
+        try { window.__diark_touch_network?.(); } catch (_) {}
+        return origSend.apply(this, sArgs);
+      };
+      xhr.addEventListener('load', function() {
+        try {
+          window.__diark_touch_network?.();
+          const url = xhr.responseURL || '';
+          const lowerUrl = url.toLowerCase();
+          if (lowerUrl.includes('/api/sinh-vien/') || lowerUrl.includes('/api/academic/') || lowerUrl.includes('diem-ren-luyen') || lowerUrl.includes('drl') || lowerUrl.includes('ren-luyen')) {
+            const data = JSON.parse(xhr.responseText);
+            const cache = JSON.parse(sessionStorage.getItem('__diark_cache') || '{}');
+            if (lowerUrl.includes('ho-so')) {
+              cache.profile = data;
+              sessionStorage.setItem('__diark_cache', JSON.stringify(cache));
+              dispatchCustomScheme('diark-sso://partial#target=academic&stage=profile&data=' + encodeURIComponent(JSON.stringify(cache)));
+            }
+            if (lowerUrl.includes('bang-diem')) {
+              cache.courses = Array.isArray(data) ? data : (data.courses || data.semester_groups || []);
+              sessionStorage.setItem('__diark_cache', JSON.stringify(cache));
+              dispatchCustomScheme('diark-sso://partial#target=academic&stage=courses&data=' + encodeURIComponent(JSON.stringify(cache)));
+            }
+            if (lowerUrl.includes('diem-ren-luyen') || lowerUrl.includes('drl') || lowerUrl.includes('ren-luyen')) {
+              cache.drl = Array.isArray(data) ? data : (data.drl || data.data || []);
+              sessionStorage.setItem('__diark_cache', JSON.stringify(cache));
+            }
+          }
+        } catch (_) {}
+      });
+      return xhr;
+    }
+    window.XMLHttpRequest = ProxiedXHR;
+  } catch (e) {}
+
+  // --- 2. ACADEMIC HARVESTER (3-TIER NEXT.JS FLIGHT WATCHER + STATE MACHINE) ---
+  if (window.location.hostname.includes('portal.uit.edu.vn')) {
+    let identityResolved = false;
+
+    function onIdentityResolved(identity) {
+      if (identityResolved) return;
+      identityResolved = true;
+
+      const cache = JSON.parse(sessionStorage.getItem('__diark_cache') || '{}');
+      cache.profile = identity;
+      sessionStorage.setItem('__diark_cache', JSON.stringify(cache));
+
+      dispatchCustomScheme('diark-sso://partial#target=academic&stage=profile&data='
+        + encodeURIComponent(JSON.stringify(cache)));
+
+      const path = window.location.pathname;
+      if (/\/(trang-chu|sinh-vien|ho-so)$/.test(path) || path === '/' || path.endsWith('/ho-so')) {
+        setTimeout(() => { forceNavigate('/sinh-vien/bang-diem'); }, 100);
+      }
+    }
+
+    function setupFlightWatcher() {
+      window.__next_f = window.__next_f || [];
+      const originalPush = window.__next_f.push.bind(window.__next_f);
+
+      window.__next_f.push = function (...chunks) {
+        const result = originalPush(...chunks);
+        if (!identityResolved) tryExtractAndDispatch();
+        return result;
+      };
+
+      let pollCount = 0;
+      const pollInterval = setInterval(() => {
+        pollCount++;
+        if (identityResolved || pollCount > 40) { // 40 x 250ms = 10s
+          clearInterval(pollInterval);
+          return;
+        }
+        if (!window.__next_f.push || !window.__next_f.push.__diark_wrapped) {
+          setupFlightWatcher();
+        }
+        tryExtractAndDispatch();
+      }, 250);
+
+      function extractStudentIdentity() {
+        if (Array.isArray(window.__next_f)) {
+          for (const chunk of window.__next_f) {
+            if (Array.isArray(chunk) && typeof chunk[1] === 'string') {
+              const match = chunk[1].match(/"user":\{"sub":"[^"]*","id":null,"username":"(\d{8})","displayName":"([^"]+)","email":"([^"]+)"/);
+              if (match) {
+                return { student_id: match[1], full_name: match[2], email: match[3] };
+              }
+            }
+          }
+        }
+        const idElem = document.querySelector('header button span.text-xs.text-muted-foreground');
+        const nameElem = document.querySelector('header button span.text-sm.font-medium');
+        if (idElem && nameElem) {
+          const mssv = idElem.textContent.trim();
+          if (/^\d{8}$/.test(mssv)) {
+            return {
+              student_id: mssv,
+              full_name: nameElem.textContent.trim(),
+              email: mssv + '@gm.uit.edu.vn'
+            };
+          }
+        }
+        // DOM label inspection fallback
+        const nodes = Array.from(document.querySelectorAll('div, span, td, p'));
+        const idLabel = nodes.find(n => n.textContent?.trim().startsWith('Mã sinh viên'));
+        if (idLabel) {
+          const valNode = idLabel.nextElementSibling || idLabel.parentElement?.querySelector('.font-medium, .font-semibold');
+          const mssv = valNode?.textContent?.trim() || '';
+          if (/^\d{8}$/.test(mssv)) {
+            const nameNode = nodes.find(n => n.textContent?.trim().startsWith('Họ và tên'));
+            const name = nameNode?.nextElementSibling?.textContent?.trim() || nameNode?.parentElement?.querySelector('.font-medium, .font-semibold')?.textContent?.trim() || '';
+            return {
+              student_id: mssv,
+              full_name: name,
+              email: mssv + '@gm.uit.edu.vn'
+            };
+          }
+        }
+        return null;
+      }
+
+      function tryExtractAndDispatch() {
+        const identity = extractStudentIdentity();
+        if (identity && !identityResolved) {
+          clearInterval(pollInterval);
+          onIdentityResolved(identity);
+        }
+      }
+      window.__next_f.push.__diark_wrapped = true;
+    }
+
+    // Stage 2: /sinh-vien/bang-diem
+    function runStageCourses() {
+      let attempts = 0;
+      const maxAttempts = 40;
+      let settled = false;
+
+      const checkCourses = () => {
+        if (settled) return;
+        attempts++;
+
+        const isPulse = document.querySelector('.animate-pulse, .loading-spinner, .ant-spin, [aria-busy="true"], .spinner');
+        if (isPulse && attempts < maxAttempts) {
+          setTimeout(checkCourses, 250);
+          return;
+        }
+
+        const tables = Array.from(document.querySelectorAll('table'));
+        const courses = [];
+        const semesterGroups = [];
+
+        for (const table of tables) {
+          const heading = table.closest('div')?.querySelector('h3, h4, h5, .font-bold, .font-semibold')?.textContent?.trim() || 'Học kỳ';
+          const rows = Array.from(table.querySelectorAll('tbody tr'));
+          const grpCourses = [];
+          for (const row of rows) {
+            const cells = Array.from(row.querySelectorAll('td')).map(td => td.textContent?.trim() || '');
+            if (cells.length >= 4) {
+              const code = cells[1] || cells[0];
+              const name = cells[2] || cells[1];
+              const cred = parseInt(cells[3] || cells[2] || '0', 10) || 0;
+              const score = parseFloat(cells[4] || cells[3] || '0') || null;
+              if (code && name) {
+                const c = {
+                  course_code: code,
+                  course_name: name,
+                  credits: cred,
+                  total_score: score,
+                  semester_id: heading
+                };
+                courses.push(c);
+                grpCourses.push(c);
+              }
+            }
+          }
+          if (grpCourses.length > 0) {
+            semesterGroups.push({ semester_name: heading, courses: grpCourses });
+          }
+        }
+
+        if (courses.length > 0 || attempts >= maxAttempts) {
+          settled = true;
+          const cache = JSON.parse(sessionStorage.getItem('__diark_cache') || '{}');
+          cache.courses = courses;
+          if (semesterGroups.length > 0) {
+            cache.transcript = { semester_groups: semesterGroups };
+          }
+          sessionStorage.setItem('__diark_cache', JSON.stringify(cache));
+
+          dispatchCustomScheme('diark-sso://partial#target=academic&stage=courses&data='
+            + encodeURIComponent(JSON.stringify(cache)));
+
+          setTimeout(() => { forceNavigate('/sinh-vien/diem-ren-luyen'); }, 100);
+          return;
+        }
+
+        setTimeout(checkCourses, 250);
+      };
+
+      checkCourses();
+    }
+
+    // Stage 3: /sinh-vien/diem-ren-luyen với Column-Index Scraper & Quiet-Period Guard
+    function extractDRLFromDOM() {
+      // 1. Kiểm tra tiêu đề trang và đảm bảo skeleton đã biến mất
+      const hasPulse = document.querySelector('.animate-pulse');
+      if (hasPulse) return null;
+
+      const results = [];
+      
+      // 2. Định vị bảng dữ liệu (STT | Học kỳ | Lớp chuyên ngành | Điểm | Xếp loại | Ghi chú)
+      const rows = document.querySelectorAll('table tbody tr, div[role="row"]');
+      if (rows.length > 0) {
+        rows.forEach(row => {
+          // Tìm các ô con (td hoặc div cell)
+          const cells = row.querySelectorAll('td, div[role="cell"], div.grid > div');
+          
+          if (cells.length >= 4) {
+            // Cột 1: Học kỳ (index 1)
+            const semesterText = cells[1].textContent.trim();
+            // Cột 3: Điểm rèn luyện (index 3)
+            const scoreText = cells[3].textContent.trim();
+            // Cột 4: Xếp loại (index 4 nếu có)
+            const gradeText = cells.length >= 5 ? cells[4].textContent.trim() : '';
+
+            // Validate: Ô học kỳ phải chứa từ khóa "Học kỳ" hoặc "Hè"
+            if (/Học kỳ|Hè/i.test(semesterText)) {
+              // Bóc tách điểm số từ ô điểm duy nhất, không quét cả dòng
+              const scoreMatch = scoreText.match(/\b([0-9]{1,2}|100)\b/);
+              if (scoreMatch) {
+                const scoreVal = parseInt(scoreMatch[1], 10);
+                
+                // Chuẩn hóa xếp loại trung tính, KHÔNG gán ngầm "Xuất sắc"
+                let normalizedGrade = '';
+                if (/Xuất sắc/i.test(gradeText)) normalizedGrade = 'Xuất sắc';
+                else if (/Tốt/i.test(gradeText)) normalizedGrade = 'Tốt';
+                else if (/Khá/i.test(gradeText)) normalizedGrade = 'Khá';
+                else if (/Trung bình/i.test(gradeText)) normalizedGrade = 'Trung bình';
+                else if (/Yếu/i.test(gradeText)) normalizedGrade = 'Yếu';
+                else normalizedGrade = gradeText || 'Chưa xếp loại';
+
+                results.push({
+                  semester: semesterText.replace(/\s+/g, ' '),
+                  score: scoreVal,
+                  grade_text: normalizedGrade
+                });
+              }
+            }
+          }
+        });
+      }
+
+      // 3. Fallback Quét Cấu Trúc Khối (nếu Next.js render layout dạng Div Flexbox)
+      if (results.length === 0) {
+        const textNodes = Array.from(document.querySelectorAll('div, p, span'));
+        const termNodes = textNodes.filter(n => 
+          n.children.length === 0 && /(Học kỳ\s+[123]|Hè)(\s+Năm học\s+\d{4}[–-]\d{4})?/i.test(n.textContent)
+        );
+
+        termNodes.forEach(termNode => {
+          const parentRow = termNode.closest('div.flex, div.grid, tr') || termNode.parentElement;
+          if (parentRow) {
+            const text = parentRow.textContent || '';
+            // Bắt điểm số nằm cạnh text học kỳ
+            const scoreMatch = text.match(/(?:Điểm|STT)?.*?(\b[0-9]{1,2}|100\b)/);
+            if (scoreMatch) {
+              let grade = 'Chưa xếp loại';
+              if (/Xuất sắc/i.test(text)) grade = 'Xuất sắc';
+              else if (/Tốt/i.test(text)) grade = 'Tốt';
+              else if (/Khá/i.test(text)) grade = 'Khá';
+
+              results.push({
+                semester: termNode.textContent.trim().replace(/\s+/g, ' '),
+                score: parseInt(scoreMatch[1], 10),
+                grade_text: grade
+              });
+            }
+          }
+        });
+      }
+
+      return results.length > 0 ? results : null;
+    }
+
+    function finalizeCallback(drl, status) {
+      const cache = JSON.parse(sessionStorage.getItem('__diark_cache') || '{}');
+      cache.drl = drl;
+      cache.drl_sync_status = status; // 'confirmed' | 'timeout_unknown'
+
+      // Không cần sessionStorage.setItem nữa, bắn trực tiếp scheme độc quyền
+      window.location.href = 'diark-sso://callback#target=academic&data=' + encodeURIComponent(JSON.stringify(cache));
+    }
+
+    function harvestDRLWithGuard() {
+      const startTime = performance.now();
+      let lastNetworkActivity = startTime;
+      let resolved = false;
+      const HARD_CAP_MS = 6000;     // Trần tối đa 6s
+      const QUIET_PERIOD_MS = 3000; // 3s không phát sinh network mới sau khi DOM complete
+
+      window.__diark_touch_network = function() {
+        lastNetworkActivity = performance.now();
+      };
+
+      function attemptFinalize() {
+        if (resolved) return;
+        let drlData = extractDRLFromDOM();
+        if (!drlData) {
+          try {
+            const cache = JSON.parse(sessionStorage.getItem('__diark_cache') || '{}');
+            if (Array.isArray(cache.drl) && cache.drl.length > 0) {
+              drlData = cache.drl;
+            }
+          } catch (_) {}
+        }
+        const elapsed = performance.now() - startTime;
+        const sinceLastActivity = performance.now() - lastNetworkActivity;
+
+        // Case 1: Đã bóc tách được dữ liệu DRL hợp lệ (>= 1 bản ghi) -> chốt ngay lập tức
+        if (drlData !== null && drlData.length > 0) {
+          resolved = true;
+          finalizeCallback(drlData, 'confirmed');
+          return;
+        }
+
+        // Case 2: Đạt trần thời gian 6s
+        if (elapsed >= HARD_CAP_MS) {
+          resolved = true;
+          finalizeCallback(null, 'timeout_unknown');
+          return;
+        }
+
+        // Case 3: Trang đã load xong và yên ắng trong 3s
+        if (sinceLastActivity >= QUIET_PERIOD_MS && document.readyState === 'complete') {
+          resolved = true;
+          finalizeCallback(drlData, drlData === null ? 'timeout_unknown' : 'confirmed');
+          return;
+        }
+      }
+
+      const checkInterval = setInterval(() => {
+        attemptFinalize();
+        if (resolved) clearInterval(checkInterval);
+      }, 200);
+    }
+
+    // Route inspection & dispatcher
+    const routeDispatcher = () => {
+      const path = window.location.pathname;
+      if (path.includes('/sinh-vien/diem-ren-luyen')) {
+        harvestDRLWithGuard();
+      } else if (path.includes('/sinh-vien/bang-diem')) {
+        runStageCourses();
+      } else {
+        setupFlightWatcher();
+      }
+    };
+
+    routeDispatcher();
+
+    // Hook SPA History transitions
+    try {
+      const origPush = history.pushState;
+      history.pushState = function(...args) {
+        const ret = origPush.apply(this, args);
+        routeDispatcher();
+        return ret;
+      };
+      const origReplace = history.replaceState;
+      history.replaceState = function(...args) {
+        const ret = origReplace.apply(this, args);
+        routeDispatcher();
+        return ret;
+      };
+      window.addEventListener('popstate', routeDispatcher);
+    } catch (_) {}
+  }
+
+  // --- 3. WECODE SCRAPING WITH STATUS ENUM ---
+  const parseAssignmentRows = (rows) => {
+    return rows.map(tr => {
+      const idStr = tr.getAttribute('data-id') || tr.querySelector('td:nth-child(1)')?.textContent?.trim() || '0';
+      const className = tr.querySelector('td:nth-child(2)')?.textContent?.trim() || '';
+      const titleEl = tr.querySelector('td:nth-child(3) a') || tr.querySelector('td:nth-child(3)');
+      const title = titleEl?.textContent?.trim() || '';
+      const statsText = tr.querySelector('td:nth-child(4)')?.textContent?.trim() || '';
+      const startTime = tr.querySelector('td:nth-child(5)')?.textContent?.trim() || '';
+      const finishTime = tr.querySelector('td:nth-child(6)')?.textContent?.trim() || '';
+
+      let totalSubmits = 0, totalProblems = 0;
+      const subMatch = statsText.match(/(\d+)\s*sub/i);
+      if (subMatch) totalSubmits = parseInt(subMatch[1], 10);
+      const probMatch = statsText.match(/(\d+)\s*prob/i);
+      if (probMatch) totalProblems = parseInt(probMatch[1], 10);
+
+      return {
+        id: parseInt(idStr, 10),
+        class_name: className,
+        title: title,
+        author: null,
+        total_problems: totalProblems,
+        total_submits: totalSubmits,
+        status_text: statsText,
+        start_time: startTime,
+        finish_time: finishTime,
+        is_finished: statsText.toLowerCase().includes('finished')
+      };
+    }).filter(a => a.id > 0);
+  };
+
+  let harvestedWecode = false;
+  let wecodePollingStarted = false;
+
+  const waitForAssignmentTableReady = () => {
+    if (wecodePollingStarted) return;
+    wecodePollingStarted = true;
+
+    let attempts = 0;
+    const maxAttempts = 40;
+    let emptyRetries = 0;
+    const maxEmptyRetries = 10;
+
+    const checkTable = () => {
+      if (harvestedWecode) return;
+      attempts++;
+
+      // Check loading indicators
+      const isSpinning = document.querySelector('.loading-spinner, .ant-spin, [aria-busy="true"], .spinner-border, .spinner');
+      if (isSpinning && attempts < maxAttempts) {
+        setTimeout(checkTable, 250);
+        return;
+      }
+
+      // Check table rows
+      const rows = Array.from(document.querySelectorAll('#DataTables_Table_0 tbody tr, table tbody tr'));
+      const realRows = rows.filter(r => !r.classList.contains('dataTables_empty') && !r.querySelector('.dataTables_empty') && r.querySelectorAll('td').length > 1);
+
+      if (realRows.length > 0) {
+        harvestedWecode = true;
+        const assignments = parseAssignmentRows(realRows);
+        const result = { status: 'has_data', rows: assignments };
+        window.location.href = 'diark-sso://callback#target=wecode&data=' + encodeURIComponent(JSON.stringify(result));
+        return;
+      }
+
+      // Check empty markers
+      const hasEmptyMarker = document.querySelector('.empty-state, .ant-empty, .no-data, .dataTables_empty');
+      if (hasEmptyMarker) {
+        harvestedWecode = true;
+        const result = { status: 'empty_confirmed', rows: [] };
+        window.location.href = 'diark-sso://callback#target=wecode&data=' + encodeURIComponent(JSON.stringify(result));
+        return;
+      }
+
+      // Table exists but no rows & no empty indicator
+      const table = document.querySelector('#DataTables_Table_0, table');
+      if (table && emptyRetries < maxEmptyRetries) {
+        emptyRetries++;
+        setTimeout(checkTable, 300);
+        return;
+      }
+
+      if (attempts < maxAttempts) {
+        setTimeout(checkTable, 250);
+        return;
+      }
+
+      // Final fallback
+      harvestedWecode = true;
+      const result = { status: 'empty_unconfirmed', rows: [] };
+      window.location.href = 'diark-sso://callback#target=wecode&data=' + encodeURIComponent(JSON.stringify(result));
+    };
+
+    checkTable();
+  };
+
+  const inspectWecode = () => {
+    if (harvestedWecode) return;
+    if (!window.location.href.includes('/wecode25/it00x/')) return;
+
+    const isLogin = window.location.href.includes('/login');
+    const profileLink = document.querySelector('#profile_link, a[href*="logout"]');
+
+    if (profileLink && isLogin) {
+      window.location.href = 'https://khmt.uit.edu.vn/wecode25/it00x/assignments';
+      return;
+    }
+    if (profileLink && !window.location.href.includes('/assignments') && !window.location.href.includes('/submissions')) {
+      window.location.href = 'https://khmt.uit.edu.vn/wecode25/it00x/assignments';
+      return;
+    }
+
+    if (window.location.href.includes('/assignments')) {
+      waitForAssignmentTableReady();
+    }
+  };
+
+  if (window.location.href.includes('/wecode25/it00x/')) {
+    setInterval(() => {
+      inspectWecode();
+    }, 250);
+  }
+})();
+"#;
+
 const CALLBACK_SCHEME: &str = "diark-sso://callback";
 const CALLBACK_FAIL_SCHEME: &str = "diark-sso://failed";
 
+const WECODE_LOGIN_URL: &str = "https://khmt.uit.edu.vn/wecode25/it00x/login";
+#[allow(dead_code)]
+const WECODE_ASSIGNMENTS_URL: &str = "https://khmt.uit.edu.vn/wecode25/it00x/assignments";
+const WECODE_LOGIN_MARKER: &str = "/wecode25/it00x/login";
+const WECODE_ASSIGNMENTS_MARKER: &str = "/wecode25/it00x/assignments";
+const MAX_LOGIN_REDIRECT_ATTEMPTS: u8 = 2;
+
+#[allow(dead_code)]
 #[derive(Deserialize, Debug)]
 struct PortalIngestionPayload {
     profile: crate::commands::academic::StudentProfilePayload,
@@ -14,36 +670,383 @@ struct PortalIngestionPayload {
     drl: serde_json::Value,
 }
 
-const HARVEST_SCRIPT: &str = r#"
-(async () => {
+const WECODE_SUBMISSION_HARVEST_SCRIPT: &str = r#"
+(() => {
   try {
-    const [profileRes, transcriptRes, drlRes] = await Promise.all([
-      fetch('/api/sinh-vien/ho-so', { credentials: 'same-origin' }),
-      fetch('/api/sinh-vien/bang-diem', { credentials: 'same-origin' }),
-      fetch('/api/sinh-vien/diem-ren-luyen', { credentials: 'same-origin' }),
-    ]);
+    const rows = Array.from(document.querySelectorAll('table tbody tr[data-id]'));
+    const submissions = rows.map(tr => {
+      const subId = parseInt(tr.getAttribute('data-id') || '0', 10);
+      const assignId = parseInt(tr.getAttribute('data-a') || '0', 10);
+      const probId = parseInt(tr.getAttribute('data-p') || '0', 10);
 
-    if (profileRes.status === 401 || transcriptRes.status === 401 || drlRes.status === 401) {
-      window.location.href = 'diark-sso://failed#reason=session_expired';
-      return;
-    }
-    if (!profileRes.ok || !transcriptRes.ok || !drlRes.ok) {
-      window.location.href = 'diark-sso://failed#reason=api_error';
-      return;
-    }
+      const isFinal = tr.querySelector('.set_final')?.classList.contains('bi-check-circle') || false;
+      const problemName = tr.querySelector('td:nth-child(3) a')?.textContent?.trim() || '';
+      const timeText = tr.querySelector('td:nth-child(4) .small')?.textContent?.trim() || '';
+      const verdict = tr.querySelector('td.js-verdict div')?.textContent?.trim() || '';
+      const execTime = parseFloat(tr.querySelector('td.js-time')?.textContent?.trim() || '0');
+      const memKib = parseInt(tr.querySelector('td.js-mem')?.textContent?.trim() || '0', 10);
+      const score = parseInt(tr.querySelector('td.js-score span')?.textContent?.trim() || '0', 10);
+      const lang = tr.querySelector('td div[data-type="code"]')?.textContent?.trim() || 'C++';
 
-    const payload = {
-      profile: await profileRes.json(),
-      transcript: await transcriptRes.json(),
-      drl: await drlRes.json(),
-    };
+      return {
+        submission_id: subId,
+        assignment_id: assignId,
+        problem_id: probId,
+        problem_name: problemName,
+        submit_time_str: timeText,
+        verdict: verdict,
+        score: score,
+        execution_time: execTime,
+        memory_kib: memKib,
+        language: lang,
+        is_final: isFinal
+      };
+    });
 
-    window.location.href = 'diark-sso://callback#' + encodeURIComponent(JSON.stringify(payload));
-  } catch (e) {
-    window.location.href = 'diark-sso://failed#reason=network_error';
+    window.location.href = 'diark-sso://callback#target=wecode_submissions&data=' + encodeURIComponent(JSON.stringify(submissions));
+  } catch (err) {
+    window.location.href = 'diark-sso://failed#reason=wecode_sub_parse_error';
   }
 })();
 "#;
+
+const WECODE_ASSIGNMENTS_HARVEST_SCRIPT: &str = r#"
+(() => {
+  try {
+    let attempts = 0;
+    const maxAttempts = 40;
+    let emptyRetries = 0;
+    const maxEmptyRetries = 10;
+
+    const parseRows = (rows) => {
+      return rows.map(tr => {
+        const idStr = tr.getAttribute('data-id') || tr.querySelector('td:nth-child(1)')?.textContent?.trim() || '0';
+        const className = tr.querySelector('td:nth-child(2)')?.textContent?.trim() || '';
+        const titleEl = tr.querySelector('td:nth-child(3) a') || tr.querySelector('td:nth-child(3)');
+        const title = titleEl?.textContent?.trim() || '';
+        const statsText = tr.querySelector('td:nth-child(4)')?.textContent?.trim() || '';
+        const startTime = tr.querySelector('td:nth-child(5)')?.textContent?.trim() || '';
+        const finishTime = tr.querySelector('td:nth-child(6)')?.textContent?.trim() || '';
+
+        let totalSubmits = 0, totalProblems = 0;
+        const subMatch = statsText.match(/(\d+)\s*sub/i);
+        if (subMatch) totalSubmits = parseInt(subMatch[1], 10);
+        const probMatch = statsText.match(/(\d+)\s*prob/i);
+        if (probMatch) totalProblems = parseInt(probMatch[1], 10);
+
+        return {
+          id: parseInt(idStr, 10),
+          class_name: className,
+          title: title,
+          author: null,
+          total_problems: totalProblems,
+          total_submits: totalSubmits,
+          status_text: statsText,
+          start_time: startTime,
+          finish_time: finishTime,
+          is_finished: statsText.toLowerCase().includes('finished')
+        };
+      }).filter(a => a.id > 0);
+    };
+
+    const check = () => {
+      attempts++;
+      const isSpinning = document.querySelector('.loading-spinner, .ant-spin, [aria-busy="true"], .spinner-border, .spinner');
+      if (isSpinning && attempts < maxAttempts) {
+        setTimeout(check, 250);
+        return;
+      }
+
+      const rows = Array.from(document.querySelectorAll('#DataTables_Table_0 tbody tr, table tbody tr'));
+      const realRows = rows.filter(r => !r.classList.contains('dataTables_empty') && !r.querySelector('.dataTables_empty') && r.querySelectorAll('td').length > 1);
+
+      if (realRows.length > 0) {
+        const assignments = parseRows(realRows);
+        const result = { status: 'has_data', rows: assignments };
+        window.location.href = 'diark-sso://callback#target=wecode&data=' + encodeURIComponent(JSON.stringify(result));
+        return;
+      }
+
+      const hasEmptyMarker = document.querySelector('.empty-state, .ant-empty, .no-data, .dataTables_empty');
+      if (hasEmptyMarker) {
+        const result = { status: 'empty_confirmed', rows: [] };
+        window.location.href = 'diark-sso://callback#target=wecode&data=' + encodeURIComponent(JSON.stringify(result));
+        return;
+      }
+
+      const table = document.querySelector('#DataTables_Table_0, table');
+      if (table && emptyRetries < maxEmptyRetries) {
+        emptyRetries++;
+        setTimeout(check, 300);
+        return;
+      }
+
+      if (attempts < maxAttempts) {
+        setTimeout(check, 250);
+        return;
+      }
+
+      const result = { status: 'empty_unconfirmed', rows: [] };
+      window.location.href = 'diark-sso://callback#target=wecode&data=' + encodeURIComponent(JSON.stringify(result));
+    };
+
+    check();
+  } catch (err) {
+    window.location.href = 'diark-sso://failed#reason=wecode_assignments_parse_error';
+  }
+})();
+"#;
+
+pub fn parse_callback_fragment(fragment: &str) -> Result<(String, String), String> {
+    let decoded = decode(fragment)
+        .map_err(|e| format!("URL decode error: {e}"))?
+        .into_owned();
+
+    let target = if let Some(idx) = decoded.find("target=") {
+        let after_target = &decoded[idx + "target=".len()..];
+        let end_idx = after_target.find('&').unwrap_or(after_target.len());
+        after_target[..end_idx].to_string()
+    } else {
+        "unknown".to_string()
+    };
+
+    let data_str = if let Some(idx) = decoded.find("data=") {
+        let after_data = &decoded[idx + "data=".len()..];
+        if after_data.starts_with('%') {
+            decode(after_data)
+                .unwrap_or(std::borrow::Cow::Borrowed(after_data))
+                .into_owned()
+        } else {
+            after_data.to_string()
+        }
+    } else {
+        String::new()
+    };
+
+    Ok((target, data_str))
+}
+
+pub fn extract_query_param(url_str: &str, param_name: &str) -> String {
+    let search_key = format!("{param_name}=");
+    if let Some(pos) = url_str.find(&search_key) {
+        let remainder = &url_str[pos + search_key.len()..];
+        let end = remainder.find('&').unwrap_or(remainder.len());
+        decode(&remainder[..end])
+            .unwrap_or(std::borrow::Cow::Borrowed(&remainder[..end]))
+            .into_owned()
+    } else {
+        "unknown".to_string()
+    }
+}
+
+#[derive(serde::Deserialize, serde::Serialize, Debug, Clone)]
+pub struct WecodeScrapeResultDto {
+    #[serde(default)]
+    pub status: String,
+    #[serde(default)]
+    pub rows: Vec<AssignmentItem>,
+}
+
+#[derive(serde::Deserialize, serde::Serialize, Debug, Clone)]
+pub struct AssignmentItem {
+    pub id: i64,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub class_name: Option<String>,
+}
+
+#[derive(serde::Deserialize, serde::Serialize, Debug, Clone)]
+pub struct TranscriptDataPayload {
+    #[serde(default)]
+    pub transcript: serde_json::Value,
+    #[serde(default)]
+    pub drl: serde_json::Value,
+}
+
+pub fn handle_partial_checkpoint_sync(
+    registry: &PartialStateRegistry,
+    window_label: &str,
+    fragment: &str,
+) -> Result<(), String> {
+    let decoded = decode(fragment)
+        .map_err(|e| format!("URL decode error: {e}"))?
+        .into_owned();
+
+    let stage = extract_query_param(&decoded, "stage");
+    let data_str = extract_query_param(&decoded, "data");
+
+    let parsed_data: serde_json::Value = if !data_str.is_empty() && data_str != "unknown" {
+        serde_json::from_str(&data_str).map_err(|e| format!("JSON parse error in partial data: {e}"))?
+    } else {
+        serde_json::Value::Null
+    };
+
+    if let Ok(mut guard) = registry.states.lock() {
+        let entry = guard.entry(window_label.to_string()).or_default();
+
+        match stage.as_str() {
+            "profile" => {
+                if let Some(p) = parsed_data.get("profile") {
+                    entry.profile = Some(p.clone());
+                } else if parsed_data.get("student_id").is_some() {
+                    entry.profile = Some(parsed_data.clone());
+                }
+            }
+            "courses" => {
+                if let Some(c) = parsed_data.get("courses").and_then(|v| v.as_array()) {
+                    entry.courses = Some(c.clone());
+                } else if let Some(arr) = parsed_data.as_array() {
+                    entry.courses = Some(arr.clone());
+                }
+            }
+            "drl" => {
+                if let Some(d) = parsed_data.get("drl").and_then(|v| v.as_array()) {
+                    entry.drl = Some(d.clone());
+                } else if let Some(arr) = parsed_data.as_array() {
+                    entry.drl = Some(arr.clone());
+                }
+            }
+            _ => {
+                if let Some(p) = parsed_data.get("profile") {
+                    entry.profile = Some(p.clone());
+                }
+                if let Some(c) = parsed_data.get("courses").and_then(|v| v.as_array()) {
+                    entry.courses = Some(c.clone());
+                }
+                if let Some(d) = parsed_data.get("drl").and_then(|v| v.as_array()) {
+                    entry.drl = Some(d.clone());
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+pub fn merge_with_partial_state(
+    registry: &PartialStateRegistry,
+    window_label: &str,
+    data_str: &str,
+) -> serde_json::Value {
+    let mut payload: serde_json::Value = serde_json::from_str(data_str)
+        .unwrap_or_else(|_| serde_json::json!({}));
+
+    if let Ok(guard) = registry.states.lock() {
+        if let Some(partial) = guard.get(window_label) {
+            if let Some(obj) = payload.as_object_mut() {
+                if (!obj.contains_key("profile") || obj["profile"].is_null()) && partial.profile.is_some() {
+                    if let Some(ref p) = partial.profile {
+                        obj.insert("profile".to_string(), p.clone());
+                    }
+                }
+                if (!obj.contains_key("courses") || obj["courses"].as_array().map(|a| a.is_empty()).unwrap_or(true))
+                    && partial.courses.is_some()
+                {
+                    if let Some(ref c) = partial.courses {
+                        obj.insert("courses".to_string(), serde_json::Value::Array(c.clone()));
+                    }
+                }
+                if (!obj.contains_key("drl") || obj["drl"].is_null() || obj["drl"].as_array().map(|a| a.is_empty()).unwrap_or(true))
+                    && partial.drl.is_some()
+                {
+                    if let Some(ref d) = partial.drl {
+                        obj.insert("drl".to_string(), serde_json::Value::Array(d.clone()));
+                    }
+                }
+            }
+        }
+    }
+
+    payload
+}
+
+pub fn cleanup_window_session(
+    partial_registry: &PartialStateRegistry,
+    watchdog_registry: &WatchdogRegistry,
+    app_handle: &AppHandle,
+    window_label: &str,
+) {
+    if let Ok(mut states) = partial_registry.states.lock() {
+        states.remove(window_label);
+    }
+    watchdog_registry.cancel(window_label);
+    if let Some(w) = app_handle.get_webview_window(window_label) {
+        let _ = w.destroy();
+    }
+}
+
+pub fn handle_callback_payload_sync(
+    app: &AppHandle,
+    target: &str,
+    data_str: &str,
+) -> Result<serde_json::Value, String> {
+    match target {
+        "portal_profile" => {
+            let profile: crate::commands::academic::StudentProfilePayload =
+                serde_json::from_str(data_str).map_err(|e| format!("Parse profile error: {e}"))?;
+            let state = app.state::<SharedDb>();
+            crate::commands::academic::save_student_profile_internal(app, &state, profile.clone())?;
+            let _ = app.emit_to("main", "portal-profile-synced", ());
+            serde_json::to_value(&profile).map_err(|e| e.to_string())
+        }
+        "portal_transcript" => {
+            let data: TranscriptDataPayload =
+                serde_json::from_str(data_str).map_err(|e| format!("Parse transcript error: {e}"))?;
+            let state = app.state::<SharedDb>();
+            crate::commands::academic::ingest_full_academic_payload_internal(
+                app,
+                &state,
+                data.transcript.clone(),
+                data.drl.clone(),
+            )?;
+            let _ = app.emit_to("main", "academic-data-synced", ());
+            serde_json::to_value(&data).map_err(|e| e.to_string())
+        }
+        "academic" => {
+            let raw_val: serde_json::Value =
+                serde_json::from_str(data_str).map_err(|e| format!("Parse academic error: {e}"))?;
+            crate::commands::academic::ingest_full_academic_payload_sync(app, raw_val.clone())?;
+            let _ = app.emit_to("main", "academic-data-synced", ());
+            Ok(raw_val)
+        }
+        "wecode" | "wecode_assignments" => {
+            let mut assignments_to_save: Vec<AssignmentItem> = Vec::new();
+            let mut result_val = serde_json::json!({ "status": "ok" });
+
+            if let Ok(envelope) = serde_json::from_str::<WecodeScrapeResultDto>(data_str) {
+                result_val = serde_json::to_value(&envelope).unwrap_or(result_val);
+                assignments_to_save = envelope.rows;
+            } else if let Ok(list) = serde_json::from_str::<Vec<AssignmentItem>>(data_str) {
+                result_val = serde_json::to_value(&list).unwrap_or(result_val);
+                assignments_to_save = list;
+            }
+
+            let state = app.state::<SharedDb>();
+            if let Ok(conn) = state.lock() {
+                for a in &assignments_to_save {
+                    let _ = conn.execute(
+                        "INSERT INTO wecode_assignments (id, name) VALUES (?1, ?2)
+                         ON CONFLICT(id) DO UPDATE SET name = excluded.name",
+                        rusqlite::params![a.id, a.title],
+                    );
+                }
+            }
+
+            let _ = app.emit_to("main", "wecode-assignments-synced", ());
+            Ok(result_val)
+        }
+        "wecode_submissions" => {
+            let submissions: Vec<crate::commands::wecode::WecodeSubmissionDto> =
+                serde_json::from_str(data_str).map_err(|e| format!("Parse wecode submissions error: {e}"))?;
+            let state = app.state::<crate::AppState>();
+            crate::commands::wecode::ingest_wecode_submissions_internal(app, &state, submissions.clone())?;
+            let _ = app.emit_to("main", "wecode-submissions-synced", ());
+            serde_json::to_value(&submissions).map_err(|e| e.to_string())
+        }
+        _ => Err(format!("Unknown callback target: {target}")),
+    }
+}
 
 #[tauri::command]
 pub async fn launch_portal_sso_sync(app: AppHandle) -> Result<(), String> {
@@ -59,36 +1062,200 @@ pub async fn launch_portal_sso_sync(app: AppHandle) -> Result<(), String> {
             .map_err(|e| format!("Invalid auth URL: {e}"))?,
     );
 
-    let app_for_nav = app.clone();
+    let watchdog_registry = if let Some(watchdog) = app.try_state::<WatchdogRegistry>() {
+        watchdog.inner().clone()
+    } else {
+        WatchdogRegistry::new()
+    };
+    let token = watchdog_registry.register("uit-sso-login");
+    spawn_watchdog(app.clone(), "uit-sso-login".to_string(), token);
 
-    let window = WebviewWindowBuilder::new(&app, "uit-sso-login", auth_url)
+    let partial_state_registry = if let Some(reg) = app.try_state::<PartialStateRegistry>() {
+        reg.inner().clone()
+    } else {
+        PartialStateRegistry::default()
+    };
+
+    let app_handle = app.clone();
+    let window_label = "uit-sso-login".to_string();
+    let partial_for_nav = partial_state_registry.clone();
+    let watchdog_for_nav = watchdog_registry.clone();
+
+    let window = WebviewWindowBuilder::new(&app, &window_label, auth_url)
         .title("Đăng nhập Cổng Thông Tin UIT")
         .inner_size(860.0, 720.0)
         .resizable(true)
         .always_on_top(true)
+        .initialization_script(UNIVERSAL_GUARDIAN_SCRIPT)
         .on_navigation(move |url| {
             let url_str = url.as_str();
 
-            if url_str.starts_with(CALLBACK_SCHEME) {
-                if let Some(fragment) = url.fragment() {
-                    if let Ok(decoded) = decode(fragment) {
-                        handle_sync_payload(&app_for_nav, decoded.into_owned());
+            // 1. Pass-through các trang nội bộ cần scrape
+            if url_str.contains("/sinh-vien/") || url_str.contains("/trang-chu") || url_str.contains("/home") {
+                return true;
+            }
+
+            // 2. Intercept Partial Checkpoints (TUYỆT ĐỐI KHÔNG GHI PRODUCTION SQLITE, KHÔNG DESTROY)
+            let partial_fragment = url.fragment().or_else(|| url_str.strip_prefix("diark-sso://partial#"));
+            if url_str.starts_with("diark-sso://partial") || partial_fragment.is_some() {
+                if let Some(fragment) = partial_fragment {
+                    let _ = handle_partial_checkpoint_sync(&partial_for_nav, &window_label, fragment);
+                }
+                return false; // Chặn iframe navigation thật
+            }
+
+            // 3. Intercept Final Callback (Atomic Persist)
+            let callback_fragment = url.fragment().or_else(|| url_str.strip_prefix("diark-sso://callback#"));
+            if url_str.starts_with("diark-sso://callback") || callback_fragment.is_some() {
+                if let Some(fragment) = callback_fragment {
+                    match parse_callback_fragment(fragment) {
+                        Ok((_target, data_str)) => {
+                            let final_payload = merge_with_partial_state(&partial_for_nav, &window_label, &data_str);
+
+                            match crate::commands::academic::ingest_full_academic_payload_sync(&app_handle, final_payload) {
+                                Ok(_) => {
+                                    let _ = app_handle.emit("academic-data-synced", ());
+                                    let _ = app_handle.emit("sso-callback-success", "academic");
+                                }
+                                Err(err) => {
+                                    let _ = app_handle.emit("sso-callback-error", err.to_string());
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            let _ = app_handle.emit("sso-callback-error", err.to_string());
+                        }
                     }
                 }
-                close_sso_window(&app_for_nav);
+
+                // Dọn dẹp in-memory registry và hủy cửa sổ
+                cleanup_window_session(&partial_for_nav, &watchdog_for_nav, &app_handle, &window_label);
                 return false;
             }
 
+            // 4. Intercept Failure
+            if url_str.starts_with("diark-sso://failed") {
+                let reason = extract_query_param(url_str, "reason");
+                let _ = app_handle.emit("sso-callback-failed", &reason);
+                let _ = app_handle.emit_to("main", "portal-sync-failed", &reason);
+                cleanup_window_session(&partial_for_nav, &watchdog_for_nav, &app_handle, &window_label);
+                return false;
+            }
+
+            true
+        })
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let _ = window.show();
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn launch_wecode_sso_sync(app: AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("wecode-sso-login") {
+        let _ = window.show();
+        let _ = window.set_focus();
+        return Ok(());
+    }
+
+    let auth_url = WebviewUrl::External(
+        WECODE_LOGIN_URL
+            .parse()
+            .map_err(|e| format!("Invalid Wecode URL: {e}"))?,
+    );
+
+    let token = if let Some(watchdog) = app.try_state::<WatchdogRegistry>() {
+        watchdog.register("wecode-sso-login")
+    } else {
+        CancellationToken::new()
+    };
+    spawn_watchdog(app.clone(), "wecode-sso-login".to_string(), token);
+
+    let redirect_attempts = Arc::new(AtomicU8::new(0));
+    let already_navigated_to_assignments = Arc::new(AtomicBool::new(false));
+
+    let redirect_attempts_for_nav = redirect_attempts.clone();
+    let already_nav_for_nav = already_navigated_to_assignments.clone();
+    let app_for_nav = app.clone();
+
+    let window = WebviewWindowBuilder::new(&app, "wecode-sso-login", auth_url)
+        .title("Đồng bộ Wecode Submissions")
+        .inner_size(900.0, 750.0)
+        .resizable(true)
+        .always_on_top(true)
+        .initialization_script(UNIVERSAL_GUARDIAN_SCRIPT)
+        .on_navigation(move |url| {
+            let url_str = url.as_str();
+
+            // Pass-through các trang trung gian cần scrape, tuyệt đối không close
+            if url_str.contains("/assignment") || url_str.contains("/home") {
+                // Return true to allow page load and scraping
+            }
+
+            // Intercept Callback Success
+            let fragment_opt = url.fragment().or_else(|| url_str.strip_prefix("diark-sso://callback#"));
+            if url_str.starts_with(CALLBACK_SCHEME) || fragment_opt.is_some() {
+                if let Some(fragment) = fragment_opt {
+                    match parse_callback_fragment(fragment) {
+                        Ok((target, data_str)) => {
+                            // Parse ĐỒNG BỘ ngay tại đây trước khi đóng window
+                            let parse_res = handle_callback_payload_sync(&app_for_nav, &target, &data_str);
+                            match parse_res {
+                                Ok(val) => {
+                                    let _ = app_for_nav.emit("sso-callback-success", val);
+                                }
+                                Err(err) => {
+                                    let _ = app_for_nav.emit("sso-callback-error", err);
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            let _ = app_for_nav.emit("sso-callback-error", err);
+                        }
+                    }
+                }
+                close_wecode_window(&app_for_nav);
+                return false;
+            }
+
+            // Intercept Callback Failed
             if url_str.starts_with(CALLBACK_FAIL_SCHEME) {
-                let reason = url.fragment().unwrap_or("unknown").to_string();
-                let _ = app_for_nav.emit_to("main", "portal-sync-failed", reason);
-                close_sso_window(&app_for_nav);
+                let reason = extract_query_param(url_str, "reason");
+                let _ = app_for_nav.emit("sso-callback-failed", &reason);
+                let _ = app_for_nav.emit_to("main", "wecode-sync-failed", &reason);
+                close_wecode_window(&app_for_nav);
                 return false;
             }
 
-            if url_str.contains(PROFILE_PAGE_MARKER) {
-                if let Some(win) = app_for_nav.get_webview_window("uit-sso-login") {
-                    let _ = win.eval(HARVEST_SCRIPT);
+            // Redirect-loop guard for login page
+            if url_str.contains(WECODE_LOGIN_MARKER) {
+                let attempts = redirect_attempts_for_nav.fetch_add(1, Ordering::SeqCst);
+                if attempts >= MAX_LOGIN_REDIRECT_ATTEMPTS {
+                    let _ = app_for_nav.emit("sso-callback-failed", "Quá số lần chuyển hướng đăng nhập (phát hiện vòng lặp)");
+                    let _ = app_for_nav.emit_to(
+                        "main",
+                        "wecode-sync-failed",
+                        "Quá số lần chuyển hướng đăng nhập (phát hiện vòng lặp)".to_string(),
+                    );
+                    close_wecode_window(&app_for_nav);
+                    return false;
+                }
+            }
+
+            // On assignments page: trigger harvest
+            if url_str.contains(WECODE_ASSIGNMENTS_MARKER) || url_str.contains("/assignment") {
+                if !already_nav_for_nav.swap(true, Ordering::SeqCst) {
+                    if let Some(win) = app_for_nav.get_webview_window("wecode-sso-login") {
+                        let _ = win.eval(WECODE_ASSIGNMENTS_HARVEST_SCRIPT);
+                    }
+                }
+            }
+
+            // Support submissions page harvest
+            if url_str.contains("submissions") {
+                if let Some(win) = app_for_nav.get_webview_window("wecode-sso-login") {
+                    let _ = win.eval(WECODE_SUBMISSION_HARVEST_SCRIPT);
                 }
             }
 
@@ -101,46 +1268,14 @@ pub async fn launch_portal_sso_sync(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-fn close_sso_window(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window("uit-sso-login") {
+
+fn close_wecode_window(app: &AppHandle) {
+    if let Some(watchdog) = app.try_state::<WatchdogRegistry>() {
+        watchdog.cancel("wecode-sso-login");
+    }
+    if let Some(window) = app.get_webview_window("wecode-sso-login") {
         let _ = window.destroy();
     }
-}
-
-fn handle_sync_payload(app: &AppHandle, raw_json: String) {
-    let app = app.clone();
-    tauri::async_runtime::spawn(async move {
-        let payload: PortalIngestionPayload = match serde_json::from_str(&raw_json) {
-            Ok(p) => p,
-            Err(e) => {
-                let _ = app.emit_to("main", "portal-sync-failed", format!("parse_error: {e}"));
-                return;
-            }
-        };
-
-        let state = app.state::<SharedDb>();
-
-        if let Err(e) = crate::commands::academic::save_student_profile_internal(
-            &app,
-            &state,
-            payload.profile,
-        ) {
-            let _ = app.emit_to("main", "portal-sync-failed", e);
-            return;
-        }
-
-        if let Err(e) = crate::commands::academic::ingest_full_academic_payload_internal(
-            &app,
-            &state,
-            payload.transcript,
-            payload.drl,
-        ) {
-            let _ = app.emit_to("main", "portal-sync-failed", e);
-            return;
-        }
-
-        let _ = app.emit_to("main", "academic-data-synced", ());
-    });
 }
 
 #[cfg(test)]
@@ -178,6 +1313,69 @@ mod tests {
     }
 
     #[test]
+    fn test_portal_profile_callback_decoding() {
+        let profile_raw = json!({
+            "student_id": "23520123",
+            "full_name": "Lê Văn C",
+            "faculty": "Khoa Khoa học máy tính",
+            "major_code": "7480101",
+            "specialization": "Khoa học máy tính",
+            "student_class": "KHMT2023.1",
+            "curriculum_code": "CQ2023",
+            "cohort": "2023"
+        });
+
+        let json_str = serde_json::to_string(&profile_raw).unwrap();
+        let encoded_data = urlencoding::encode(&json_str);
+        let fragment = format!("target=portal_profile&data={encoded_data}");
+        let callback_url = format!("diark-sso://callback#{fragment}");
+
+        assert!(callback_url.starts_with(CALLBACK_SCHEME));
+        let extracted_fragment = callback_url.split('#').nth(1).unwrap();
+        let decoded = decode(extracted_fragment).unwrap();
+        assert!(decoded.starts_with("target=portal_profile&data="));
+
+        let data_part = &decoded["target=portal_profile&data=".len()..];
+        let p: Result<crate::commands::academic::StudentProfilePayload, _> = serde_json::from_str(data_part);
+        assert!(p.is_ok());
+        assert_eq!(p.unwrap().student_id, "23520123");
+    }
+
+    #[test]
+    fn test_portal_transcript_callback_decoding() {
+        let transcript_raw = json!({
+            "transcript": {
+                "semester_groups": [
+                    {
+                        "semester_name": "Học kỳ 1 Năm học 2023-2024",
+                        "courses": [
+                            {
+                                "course_code": "IT001",
+                                "course_name": "Nhập môn lập trình",
+                                "credits": 4,
+                                "total_score": 9.5
+                            }
+                        ]
+                    }
+                ]
+            },
+            "drl": {
+                "drl": []
+            }
+        });
+
+        let json_str = serde_json::to_string(&transcript_raw).unwrap();
+        let encoded_data = urlencoding::encode(&json_str);
+        let fragment = format!("target=portal_transcript&data={encoded_data}");
+        let callback_url = format!("diark-sso://callback#{fragment}");
+
+        assert!(callback_url.starts_with(CALLBACK_SCHEME));
+        let extracted_fragment = callback_url.split('#').nth(1).unwrap();
+        let decoded = decode(extracted_fragment).unwrap();
+        assert!(decoded.starts_with("target=portal_transcript&data="));
+    }
+
+    #[test]
     fn test_url_fragment_decoding() {
         let raw = json!({
             "profile": {
@@ -209,8 +1407,169 @@ mod tests {
     fn test_failed_callback_scheme_detection() {
         let fail_url = "diark-sso://failed#reason=session_expired";
         assert!(fail_url.starts_with(CALLBACK_FAIL_SCHEME));
-        let reason = fail_url.split('#').nth(1).unwrap();
-        assert_eq!(reason, "reason=session_expired");
+        let reason = extract_query_param(fail_url, "reason");
+        assert_eq!(reason, "session_expired");
+    }
+
+    #[test]
+    fn test_wecode_callback_url_decoding() {
+        let raw_submissions = json!([
+            {
+                "submission_id": 999123,
+                "assignment_id": 42,
+                "problem_id": 105,
+                "problem_name": "Two Sum Fast",
+                "submit_time_str": "Fri, 17 Jul 2026 01:50:46",
+                "verdict": "CORRECT ANSWER",
+                "score": 100,
+                "execution_time": 0.05,
+                "memory_kib": 1024,
+                "language": "C++",
+                "is_final": true
+            }
+        ]);
+        let json_str = serde_json::to_string(&raw_submissions).unwrap();
+        let encoded_data = urlencoding::encode(&json_str);
+        let fragment = format!("target=wecode_submissions&data={encoded_data}");
+        let callback_url = format!("diark-sso://callback#{fragment}");
+
+        assert!(callback_url.starts_with(CALLBACK_SCHEME));
+        let extracted_fragment = callback_url.split('#').nth(1).unwrap();
+        let decoded = decode(extracted_fragment).unwrap();
+        assert!(decoded.starts_with("target=wecode_submissions&data="));
+
+        let data_part = &decoded["target=wecode_submissions&data=".len()..];
+        let subs: Result<Vec<crate::commands::wecode::WecodeSubmissionDto>, _> = serde_json::from_str(data_part);
+        assert!(subs.is_ok());
+        let list = subs.unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].submission_id, 999123);
+        assert_eq!(list[0].score, 100);
+    }
+
+    #[test]
+    fn test_wecode_assignments_callback_decoding() {
+        let raw_assignments = json!([
+            {
+                "id": 101,
+                "class_name": "IT001.N11",
+                "title": "Thực hành tuần 1 - Cấu trúc dữ liệu",
+                "author": null,
+                "total_problems": 5,
+                "total_submits": 12,
+                "status_text": "Finished - 5/5 prob",
+                "start_time": "2026-09-01 08:00:00",
+                "finish_time": "2026-09-07 23:59:59",
+                "is_finished": true
+            }
+        ]);
+        let json_str = serde_json::to_string(&raw_assignments).unwrap();
+        let encoded_data = urlencoding::encode(&json_str);
+        let fragment = format!("target=wecode_assignments&data={encoded_data}");
+        let callback_url = format!("diark-sso://callback#{fragment}");
+
+        assert!(callback_url.starts_with(CALLBACK_SCHEME));
+        let extracted_fragment = callback_url.split('#').nth(1).unwrap();
+        let decoded = decode(extracted_fragment).unwrap();
+        assert!(decoded.starts_with("target=wecode_assignments&data="));
+    }
+
+    #[test]
+    fn test_wecode_scrape_envelope_status_enum() {
+        let raw_envelope = json!({
+            "status": "has_data",
+            "rows": [
+                {
+                    "id": 201,
+                    "class_name": "IT002.O21",
+                    "title": "Assignment 2 - OOP"
+                }
+            ]
+        });
+        let json_str = serde_json::to_string(&raw_envelope).unwrap();
+        let encoded_data = urlencoding::encode(&json_str);
+        let fragment = format!("target=wecode&data={encoded_data}");
+
+        let (target, data_str) = parse_callback_fragment(&fragment).unwrap();
+        assert_eq!(target, "wecode");
+
+        let parsed: Result<WecodeScrapeResultDto, _> = serde_json::from_str(&data_str);
+        assert!(parsed.is_ok());
+        let dto = parsed.unwrap();
+        assert_eq!(dto.status, "has_data");
+        assert_eq!(dto.rows.len(), 1);
+        assert_eq!(dto.rows[0].id, 201);
+    }
+
+    #[test]
+    fn test_watchdog_registry_cancel() {
+        let registry = WatchdogRegistry::new();
+        let token = registry.register("test-window");
+        assert!(!token.is_cancelled());
+        registry.cancel("test-window");
+        assert!(token.is_cancelled());
+    }
+
+    #[test]
+    fn test_watchdog_registry_cancel_nonexistent() {
+        let registry = WatchdogRegistry::new();
+        registry.cancel("nonexistent-window");
+    }
+
+    #[test]
+    fn test_partial_checkpoint_sync_and_merge() {
+        let registry = PartialStateRegistry::default();
+        let label = "test-sso-window";
+
+        // Step 1: Stage profile
+        let profile_json = json!({
+            "profile": {
+                "student_id": "21520001",
+                "full_name": "Nguyen Van B",
+                "email": "21520001@gm.uit.edu.vn"
+            }
+        });
+        let fragment_profile = format!("target=academic&stage=profile&data={}", urlencoding::encode(&profile_json.to_string()));
+        let res = handle_partial_checkpoint_sync(&registry, label, &fragment_profile);
+        assert!(res.is_ok());
+
+        // Verify partial state recorded in-memory
+        {
+            let guard = registry.states.lock().unwrap();
+            let state = guard.get(label).unwrap();
+            assert!(state.profile.is_some());
+            assert_eq!(state.profile.as_ref().unwrap()["student_id"], "21520001");
+            assert!(state.courses.is_none());
+        }
+
+        // Step 2: Stage courses
+        let courses_json = json!({
+            "courses": [
+                {
+                    "course_code": "CS001",
+                    "course_name": "CS Intro",
+                    "credits": 4,
+                    "total_score": 9.0
+                }
+            ]
+        });
+        let fragment_courses = format!("target=academic&stage=courses&data={}", urlencoding::encode(&courses_json.to_string()));
+        let res = handle_partial_checkpoint_sync(&registry, label, &fragment_courses);
+        assert!(res.is_ok());
+
+        // Step 3: Final callback with only DRL data
+        let final_drl = json!({
+            "drl": [
+                {
+                    "semester": "2025-2026.1",
+                    "score": 95
+                }
+            ]
+        });
+        let merged = merge_with_partial_state(&registry, label, &final_drl.to_string());
+
+        assert_eq!(merged["profile"]["student_id"], "21520001");
+        assert_eq!(merged["courses"][0]["course_code"], "CS001");
+        assert_eq!(merged["drl"][0]["score"], 95);
     }
 }
-

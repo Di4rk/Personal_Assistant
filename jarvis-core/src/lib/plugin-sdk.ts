@@ -51,3 +51,13 @@ export async function togglePlugin(pluginId: string, enabled: boolean): Promise<
 export async function triggerRecomputeDailyMatrix(date: string): Promise<void> {
   return invoke<void>('trigger_recompute_daily_matrix', { date });
 }
+
+import type { RemotePluginDto } from '@/types/plugin';
+
+export async function fetchRemoteRegistry(): Promise<RemotePluginDto[]> {
+  return invoke<RemotePluginDto[]>('fetch_remote_registry');
+}
+
+export async function installRemotePlugin(plugin: RemotePluginDto): Promise<void> {
+  return invoke<void>('install_remote_plugin', { plugin });
+}

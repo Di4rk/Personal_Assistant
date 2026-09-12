@@ -73,7 +73,7 @@ export const SemesterTabs: React.FC<SemesterTabsProps> = ({
                   <span className="text-zinc-600">|</span>
                   <span className="text-zinc-300">{m.termCredits} TC</span>
                   <span className="text-zinc-600">|</span>
-                  <span className="text-amber-400/90">DRL: {m.drlScore}</span>
+                  <span className="text-amber-400/90">{m.drlScore > 0 ? `DRL: ${m.drlScore}` : "Chưa đồng bộ DRL"}</span>
                 </div>
               </button>
             );

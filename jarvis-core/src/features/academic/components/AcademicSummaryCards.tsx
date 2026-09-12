@@ -126,7 +126,7 @@ export const AcademicSummaryCards: React.FC<AcademicSummaryCardsProps> = ({
           <div className="text-[11px] text-zinc-500 mt-1 flex items-center justify-between">
             <span>Đánh giá rèn luyện</span>
             <span className="text-amber-400/90 font-medium">
-              {hasData ? `Hạng: ${drlRank}` : "Chưa có"}
+              {hasData ? (avgDrl > 0 ? `Hạng: ${drlRank}` : "Chưa đồng bộ DRL") : "Chưa có"}
             </span>
           </div>
         </div>

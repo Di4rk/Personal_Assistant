@@ -203,6 +203,134 @@ pub fn trigger_recompute_daily_matrix(date: String, db: State<'_, SharedDb>) -> 
     recompute_daily_matrix(&conn, &date)
 }
 
+use sha2::{Digest, Sha256};
+use std::io::Write;
+use tauri::Manager;
+
+#[derive(serde::Deserialize, serde::Serialize, Clone, Debug)]
+pub struct RemotePluginDto {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub author: String,
+    pub download_url: String,
+    pub sha256: String,
+    pub manifest_url: String,
+}
+
+#[tauri::command]
+pub async fn fetch_remote_registry() -> Result<Vec<RemotePluginDto>, String> {
+    // Mock registry hoặc fetch từ GitHub raw
+    Ok(vec![
+        RemotePluginDto {
+            id: "community-anki-sync".to_string(),
+            name: "Anki Flashcard Sync".to_string(),
+            version: "1.0.0".to_string(),
+            author: "UIT Community".to_string(),
+            download_url: "https://raw.githubusercontent.com/diark-os/plugins-repo/main/dist/anki-sync.zip".to_string(),
+            sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".to_string(),
+            manifest_url: "https://raw.githubusercontent.com/diark-os/plugins-repo/main/dist/manifest.json".to_string(),
+        }
+    ])
+}
+
+#[tauri::command]
+pub async fn install_remote_plugin(
+    app: tauri::AppHandle,
+    plugin: RemotePluginDto,
+    state: tauri::State<'_, crate::AppState>,
+) -> Result<(), String> {
+    let bytes = reqwest::get(&plugin.download_url)
+        .await
+        .map_err(|e| format!("Lỗi tải plugin: {e}"))?
+        .bytes()
+        .await
+        .map_err(|e| format!("Lỗi đọc dữ liệu: {e}"))?;
+
+    // Kiểm tra Checksum SHA-256 trước khi giải nén
+    let mut hasher = Sha256::new();
+    hasher.update(&bytes);
+    let computed_hash = format!("{:x}", hasher.finalize());
+
+    if computed_hash != plugin.sha256.to_lowercase() {
+        return Err(format!(
+            "Sai lệch Checksum: kỳ vọng {}, nhận được {computed_hash}. Hủy cài đặt.",
+            plugin.sha256
+        ));
+    }
+
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Không tìm thấy thư mục app_data: {e}"))?;
+
+    let quarantine_dir = app_data_dir.join("plugins_quarantine").join(&plugin.id);
+    let final_dir = app_data_dir.join("plugins").join(&plugin.id);
+
+    std::fs::create_dir_all(&quarantine_dir).map_err(|e| e.to_string())?;
+
+    let zip_path = quarantine_dir.join("bundle.zip");
+    {
+        let mut file = std::fs::File::create(&zip_path).map_err(|e| e.to_string())?;
+        file.write_all(&bytes).map_err(|e| e.to_string())?;
+    }
+
+    // Giải nén với Zip-Slip protection
+    extract_zip_safely(&zip_path, &quarantine_dir)?;
+    let _ = std::fs::remove_file(&zip_path);
+
+    if final_dir.exists() {
+        std::fs::remove_dir_all(&final_dir).map_err(|e| e.to_string())?;
+    }
+    std::fs::rename(&quarantine_dir, &final_dir).map_err(|e| e.to_string())?;
+
+    // Ghi danh với is_builtin = 0 (luôn chạy sandboxed iframe)
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "INSERT INTO plugin_registry (plugin_id, name, version, author, category, is_enabled, is_builtin)
+         VALUES (?1, ?2, ?3, ?4, 'community', 0, 0)
+         ON CONFLICT(plugin_id) DO UPDATE SET
+            version = excluded.version, name = excluded.name",
+        rusqlite::params![plugin.id, plugin.name, plugin.version, plugin.author],
+    ).map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+pub fn extract_zip_safely(zip_path: &std::path::Path, dest_dir: &std::path::Path) -> Result<(), String> {
+    let file = std::fs::File::open(zip_path).map_err(|e| e.to_string())?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
+
+    const MAX_UNCOMPRESSED_SIZE: u64 = 20 * 1024 * 1024; // 20MB limit
+    let mut total_size: u64 = 0;
+
+    for i in 0..archive.len() {
+        let mut entry = archive.by_index(i).map_err(|e| e.to_string())?;
+        let entry_name = entry.name().to_string();
+
+        if entry_name.contains("..") || std::path::Path::new(&entry_name).is_absolute() {
+            return Err(format!("Phát hiện đường dẫn không an toàn: {entry_name}"));
+        }
+
+        total_size += entry.size();
+        if total_size > MAX_UNCOMPRESSED_SIZE {
+            return Err("Kích thước giải nén vượt quá 20MB cho phép (chống Zip Bomb)".to_string());
+        }
+
+        let out_path = dest_dir.join(&entry_name);
+        if entry.is_dir() {
+            std::fs::create_dir_all(&out_path).map_err(|e| e.to_string())?;
+        } else {
+            if let Some(parent) = out_path.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            }
+            let mut out_file = std::fs::File::create(&out_path).map_err(|e| e.to_string())?;
+            std::io::copy(&mut entry, &mut out_file).map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -311,5 +439,66 @@ mod tests {
         assert_eq!(deadlines_cleared, 1);
         assert_eq!(total_xp, 35);
         assert_eq!(state_tier, 2); // 21..=50 -> 2
+    }
+
+    #[test]
+    fn test_extract_zip_safely_valid_and_zip_slip() {
+        use std::io::Write;
+        use zip::write::SimpleFileOptions;
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let zip_path = temp_dir.path().join("test.zip");
+        let extract_dir = temp_dir.path().join("extracted");
+        std::fs::create_dir_all(&extract_dir).unwrap();
+
+        // 1. Create valid zip
+        {
+            let file = std::fs::File::create(&zip_path).unwrap();
+            let mut zip = zip::ZipWriter::new(file);
+            let options = SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Stored);
+
+            zip.start_file("index.html", options).unwrap();
+            zip.write_all(b"<h1>Hello Plugin</h1>").unwrap();
+            zip.finish().unwrap();
+        }
+
+        // Test safe extraction
+        let res = extract_zip_safely(&zip_path, &extract_dir);
+        assert!(res.is_ok());
+        let content = std::fs::read_to_string(extract_dir.join("index.html")).unwrap();
+        assert_eq!(content, "<h1>Hello Plugin</h1>");
+
+        // 2. Create zip with zip-slip entry (containing ..)
+        let evil_zip_path = temp_dir.path().join("evil.zip");
+        {
+            let file = std::fs::File::create(&evil_zip_path).unwrap();
+            let mut zip = zip::ZipWriter::new(file);
+            let options = SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Stored);
+
+            zip.start_file("../outside.txt", options).unwrap();
+            zip.write_all(b"malicious content").unwrap();
+            zip.finish().unwrap();
+        }
+
+        // Safe extraction must reject entry containing ".."
+        let evil_res = extract_zip_safely(&evil_zip_path, &extract_dir);
+        assert!(evil_res.is_err());
+        assert!(evil_res.unwrap_err().contains("Phát hiện đường dẫn không an toàn"));
+    }
+
+    #[test]
+    fn test_sha256_checksum_verification() {
+        let data = b"test plugin bundle content";
+        let mut hasher = Sha256::new();
+        hasher.update(data);
+        let hash = format!("{:x}", hasher.finalize());
+
+        assert_eq!(hash.len(), 64);
+        assert_eq!(
+            hash,
+            "bc32188c7d64023bef1c80e0e249cc87e58627242e991b4a9ff75d3590c441e4"
+        );
     }
 }

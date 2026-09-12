@@ -420,6 +420,357 @@ pub fn get_academic_macro_metrics(
 
 #[derive(Debug, Clone, Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct AcademicRadarMetrics {
+    pub semester_id: String,
+    pub term_gpa: f64,
+    pub cumulative_gpa: f64,
+    pub classification: String,
+    pub term_credits: i64,
+    pub cumulative_credits: i64,
+    pub drl: Option<i64>,
+}
+
+/// Lấy toàn bộ radar metrics (hỗ trợ hiển thị và đối soát ĐRL với Option<i64> chuẩn xác).
+#[tauri::command]
+pub fn get_academic_radar_metrics(
+    db: tauri::State<'_, SharedDb>,
+) -> Result<Vec<AcademicRadarMetrics>, String> {
+    let conn = db.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT semester_id, term_gpa, cumulative_gpa, classification, term_credits, cumulative_credits, drl
+             FROM academic_macro_metrics
+             ORDER BY semester_id ASC",
+        )
+        .map_err(|e| format!("Lỗi prepare query: {e}"))?;
+
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(AcademicRadarMetrics {
+                semester_id: row.get(0)?,
+                term_gpa: row.get(1)?,
+                cumulative_gpa: row.get(2)?,
+                classification: row.get(3)?,
+                term_credits: row.get(4)?,
+                cumulative_credits: row.get(5)?,
+                drl: row.get::<_, Option<i64>>(6)?,
+            })
+        })
+        .map_err(|e| format!("Lỗi query: {e}"))?;
+
+    let mut list = Vec::new();
+    for r in rows {
+        list.push(r.map_err(|e| e.to_string())?);
+    }
+    Ok(list)
+}
+
+pub fn ingest_drl_records(tx: &rusqlite::Transaction, drl_list: &[serde_json::Value]) -> Result<(), String> {
+    for entry in drl_list {
+        let semester = entry.get("semester")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| "DRL entry missing 'semester' field".to_string())?;
+        let score = entry.get("score")
+            .and_then(|v| {
+                if let Some(i) = v.as_i64() {
+                    Some(i)
+                } else if let Some(s) = v.as_str() {
+                    s.trim().parse::<i64>().ok()
+                } else if let Some(f) = v.as_f64() {
+                    Some(f as i64)
+                } else {
+                    None
+                }
+            })
+            .ok_or_else(|| format!("DRL entry for '{semester}' missing valid 'score'"))?;
+        let grade_text = entry.get("grade_text")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        tx.execute(
+            "INSERT INTO academic_drl (semester, score, grade_text, updated_at)
+             VALUES (?1, ?2, ?3, strftime('%s','now'))
+             ON CONFLICT(semester) DO UPDATE SET
+               score = excluded.score,
+               grade_text = excluded.grade_text,
+               updated_at = excluded.updated_at",
+            rusqlite::params![semester, score, grade_text],
+        ).map_err(|e| format!("Insert DRL for '{semester}' failed: {e}"))?;
+    }
+    Ok(())
+}
+
+/// Ghi đồng bộ dữ liệu học vụ vào SQLite trong 1 transaction duy nhất (Atomic Ingestion).
+/// Tuyệt đối không ghi partial data trước đó; xử lý DRL Option<i64> (lưu NULL nếu vắng mặt, không ép về 0).
+pub fn ingest_full_academic_payload_sync(
+    app: &tauri::AppHandle,
+    final_payload: serde_json::Value,
+) -> Result<(), String> {
+    use rusqlite::OptionalExtension;
+
+    let state = app.state::<SharedDb>();
+    let mut conn = state.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
+
+    let tx = conn.transaction().map_err(|e| format!("Transaction error: {e}"))?;
+
+    // 0. Đảm bảo bảng academic_drl tồn tại và có cột grade_text
+    tx.execute(
+        "CREATE TABLE IF NOT EXISTS academic_drl (
+            semester TEXT PRIMARY KEY,
+            score INTEGER NOT NULL,
+            grade_text TEXT NOT NULL DEFAULT '',
+            updated_at INTEGER NOT NULL
+        )",
+        [],
+    ).map_err(|e| format!("Lỗi tạo bảng academic_drl: {e}"))?;
+    let _ = tx.execute("ALTER TABLE academic_drl ADD COLUMN grade_text TEXT NOT NULL DEFAULT ''", []);
+
+    // 1. Lưu student_profile nếu có dữ liệu hồ sơ
+    let profile_opt: Option<StudentProfilePayload> = if let Some(p_val) = final_payload.get("profile") {
+        serde_json::from_value(p_val.clone()).ok()
+    } else if final_payload.get("student_id").is_some() {
+        serde_json::from_value(final_payload.clone()).ok()
+    } else {
+        None
+    };
+
+    if let Some(ref profile) = profile_opt {
+        let upsert_setting = |key: &str, value: &str, t: &rusqlite::Transaction| -> Result<(), String> {
+            t.execute(
+                "INSERT INTO settings (key, value) VALUES (?1, ?2)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                rusqlite::params![key, value],
+            )
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+        };
+
+        upsert_setting("student_id", &profile.student_id, &tx)?;
+        upsert_setting("student_name", &profile.full_name, &tx)?;
+        if !profile.faculty.is_empty() {
+            upsert_setting("faculty", &profile.faculty, &tx)?;
+        }
+        if !profile.major_code.is_empty() {
+            upsert_setting("major_code", &profile.major_code, &tx)?;
+        }
+        if !profile.specialization.is_empty() {
+            upsert_setting("specialization", &profile.specialization, &tx)?;
+        }
+        if !profile.student_class.is_empty() {
+            upsert_setting("student_class", &profile.student_class, &tx)?;
+        }
+        if !profile.curriculum_code.is_empty() {
+            upsert_setting("curriculum_code", &profile.curriculum_code, &tx)?;
+        }
+        if !profile.cohort.is_empty() {
+            upsert_setting("admission_year", &profile.cohort, &tx)?;
+        }
+
+        let current_major: Option<String> = tx
+            .query_row(
+                "SELECT value FROM settings WHERE key = 'user_major'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?;
+
+        let should_upgrade_major = match current_major.as_deref() {
+            None => true,
+            Some(v) => v == DEFAULT_MAJOR_SENTINEL,
+        };
+
+        if should_upgrade_major && !profile.specialization.trim().is_empty() {
+            upsert_setting("user_major", &profile.specialization, &tx)?;
+        }
+
+        if let Ok(res) = crate::modules::academic::curriculum_resolver::resolve_curriculum(
+            &tx,
+            &profile.curriculum_code,
+            Some(&profile.major_code),
+        ) {
+            let _ = tx.execute(
+                "INSERT INTO academic_program_summary (id, total_degree_credits, updated_at)
+                 VALUES ('MAIN', ?1, ?2)
+                 ON CONFLICT(id) DO UPDATE SET total_degree_credits = excluded.total_degree_credits",
+                rusqlite::params![res.total_credits, chrono::Utc::now().timestamp()],
+            );
+        }
+    }
+
+    // 2. Lưu danh sách môn học vào academic_courses
+    let now = chrono::Utc::now().timestamp();
+    let mut term_credits_sum: i64 = 0;
+    let mut gpa_numerator: f64 = 0.0;
+    let mut gpa_credits: i64 = 0;
+    let mut semester_id_resolved = "2025-2026.1".to_string();
+
+    let mut courses_to_insert: Vec<(String, String, String, i64, Option<f64>)> = Vec::new();
+
+    if let Some(courses_arr) = final_payload.get("courses").and_then(|v| v.as_array()) {
+        for c_val in courses_arr {
+            let code = c_val.get("course_code").or_else(|| c_val.get("subject_code")).and_then(|v| v.as_str()).unwrap_or("");
+            let name = c_val.get("course_name").or_else(|| c_val.get("subject_name")).and_then(|v| v.as_str()).unwrap_or("");
+            let credits = c_val.get("credits").or_else(|| c_val.get("number_of_credit")).and_then(|v| v.as_i64()).unwrap_or(0);
+            let sem_id = c_val.get("semester_id").and_then(|v| v.as_str()).unwrap_or("2025-2026.1");
+            let score = c_val.get("total_score").or_else(|| c_val.get("final_score")).or_else(|| c_val.get("course_point"))
+                .and_then(|v| if let Some(n) = v.as_f64() { Some(n) } else if let Some(s) = v.as_str() { s.trim().parse::<f64>().ok() } else { None });
+
+            if !code.is_empty() {
+                courses_to_insert.push((sem_id.to_string(), code.to_string(), name.to_string(), credits, score));
+            }
+        }
+    }
+
+    if courses_to_insert.is_empty() {
+        if let Some(t_obj) = final_payload.get("transcript").or_else(|| final_payload.get("semester_groups")) {
+            let groups = if let Some(arr) = t_obj.as_array() {
+                Some(arr.clone())
+            } else {
+                t_obj.get("semester_groups").and_then(|v| v.as_array()).cloned()
+            };
+
+            if let Some(arr) = groups {
+                for grp in arr {
+                    let sem_name = grp.get("semester_name").or_else(|| grp.get("semester_label")).and_then(|v| v.as_str()).unwrap_or("2025-2026.1");
+                    if let Some(subj_arr) = grp.get("courses").or_else(|| grp.get("subjects")).and_then(|v| v.as_array()) {
+                        for c_val in subj_arr {
+                            let code = c_val.get("course_code").or_else(|| c_val.get("subject_code")).and_then(|v| v.as_str()).unwrap_or("");
+                            let name = c_val.get("course_name").or_else(|| c_val.get("subject_name")).and_then(|v| v.as_str()).unwrap_or("");
+                            let credits = c_val.get("credits").or_else(|| c_val.get("number_of_credit")).and_then(|v| v.as_i64()).unwrap_or(0);
+                            let score = c_val.get("total_score").or_else(|| c_val.get("final_score")).or_else(|| c_val.get("course_point"))
+                                .and_then(|v| if let Some(n) = v.as_f64() { Some(n) } else if let Some(s) = v.as_str() { s.trim().parse::<f64>().ok() } else { None });
+
+                            if !code.is_empty() {
+                                courses_to_insert.push((sem_name.to_string(), code.to_string(), name.to_string(), credits, score));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for (sem_id, code, name, credits, score) in courses_to_insert {
+        semester_id_resolved = sem_id.clone();
+        if let Some(sc) = score {
+            if credits > 0 {
+                gpa_numerator += sc * (credits as f64);
+                gpa_credits += credits;
+            }
+        }
+        term_credits_sum += credits;
+
+        // Đảm bảo academic_semesters có bản ghi để thỏa mãn foreign key
+        let _ = tx.execute(
+            "INSERT INTO academic_semesters (id, academic_year, semester_term, is_completed, created_at, updated_at)
+             VALUES (?1, ?2, ?3, 1, ?4, ?4)
+             ON CONFLICT(id) DO UPDATE SET updated_at = excluded.updated_at",
+            rusqlite::params![sem_id, "2025-2026", 1, now],
+        );
+
+        let id = format!("{sem_id}_{code}");
+        let is_passed = score.map(|s| s >= 5.0).unwrap_or(false);
+
+        tx.execute(
+            "INSERT INTO academic_courses 
+                (id, semester_id, course_code, course_name, credits, course_point, final_score, summary_score_10, is_passed, is_gpa_calculated, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6, ?6, ?7, 1, ?8, ?8)
+             ON CONFLICT(semester_id, course_code) DO UPDATE SET
+                course_name = excluded.course_name,
+                credits = excluded.credits,
+                course_point = excluded.course_point,
+                final_score = excluded.final_score,
+                summary_score_10 = excluded.summary_score_10,
+                is_passed = excluded.is_passed,
+                updated_at = excluded.updated_at",
+            rusqlite::params![id, sem_id, code, name, credits, score, is_passed as i64, now],
+        ).map_err(|e| format!("Lỗi insert academic_courses: {e}"))?;
+    }
+
+    // 3. Xử lý DRL (Data Integrity Guard) & Macro Metrics
+    let sync_status = final_payload.get("drl_sync_status")
+        .and_then(|s| s.as_str())
+        .unwrap_or("confirmed");
+
+    let drl_array = final_payload.get("drl").and_then(|d| d.as_array());
+
+    // 1. Lưu từng học kỳ DRL nếu status là 'confirmed' và mảng có dữ liệu
+    if sync_status == "confirmed" {
+        if let Some(list) = drl_array {
+            ingest_drl_records(&tx, list)?;
+        }
+    }
+
+    // 2. Tính toán điểm DRL đại diện cho macro metrics (Học kỳ mới nhất hoặc trung bình)
+    let latest_drl_score: Option<i64> = if sync_status == "timeout_unknown" {
+        None
+    } else {
+        drl_array
+            .and_then(|arr| arr.first())
+            .and_then(|v| {
+                if let Some(i) = v.get("score").and_then(|s| s.as_i64()) {
+                    Some(i)
+                } else if let Some(s) = v.get("score").and_then(|s| s.as_str()) {
+                    s.trim().parse::<i64>().ok()
+                } else if let Some(f) = v.get("score").and_then(|s| s.as_f64()) {
+                    Some(f as i64)
+                } else {
+                    None
+                }
+            })
+    };
+
+    let calculated_gpa = if gpa_credits > 0 {
+        (gpa_numerator / (gpa_credits as f64) * 100.0).round() / 100.0
+    } else {
+        0.0
+    };
+    let term_gpa = calculated_gpa;
+    let cumulative_gpa = calculated_gpa;
+    let classification = if cumulative_gpa >= 9.0 {
+        "Xuất sắc"
+    } else if cumulative_gpa >= 8.0 {
+        "Giỏi"
+    } else if cumulative_gpa >= 6.5 {
+        "Khá"
+    } else if cumulative_gpa >= 5.0 {
+        "Trung bình"
+    } else if cumulative_gpa > 0.0 {
+        "Yếu"
+    } else {
+        "Chưa xếp loại"
+    };
+    let term_credits = term_credits_sum;
+    let cumulative_credits = term_credits_sum;
+
+    tx.execute(
+        "INSERT INTO academic_macro_metrics (semester_id, term_gpa, cumulative_gpa, classification, term_credits, cumulative_credits, drl, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, strftime('%s','now'))
+         ON CONFLICT(semester_id) DO UPDATE SET
+           term_gpa = excluded.term_gpa,
+           cumulative_gpa = excluded.cumulative_gpa,
+           classification = excluded.classification,
+           term_credits = excluded.term_credits,
+           cumulative_credits = excluded.cumulative_credits,
+           drl = excluded.drl,
+           updated_at = excluded.updated_at",
+        rusqlite::params![semester_id_resolved, term_gpa, cumulative_gpa, classification, term_credits, cumulative_credits, latest_drl_score],
+    ).map_err(|e| format!("Failed to update macro metrics with DRL: {e}"))?;
+
+    tx.commit().map_err(|e| format!("Lỗi commit transaction: {e}"))?;
+
+    if let Some(profile) = profile_opt {
+        let _ = app.emit("student-profile-synced", &profile);
+    }
+    let _ = app.emit("academic://sync-complete", ());
+    let _ = app.emit("academic-data-synced", ());
+
+    Ok(())
+}
+
+#[derive(Debug, Clone, Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AcademicMacroMetricSSOT {
     pub semester_id: String,
     pub semester_label: String,
@@ -612,8 +963,8 @@ pub fn get_academic_macro_metrics_ssot(
 
     let mut list = query_fn(&conn)?;
 
-    // Tự động dọn dẹp mock và seed dữ liệu chuẩn nếu phát hiện mock courses hoặc DB trống
-    if list.is_empty() || has_mock {
+    // Tự động dọn dẹp mock và seed dữ liệu chuẩn nếu phát hiện mock courses
+    if has_mock {
         crate::db::academic::purge_and_seed_canonical_data(&mut conn)
             .map_err(|e| format!("Lỗi purge_and_seed_canonical_data: {e}"))?;
         list = query_fn(&conn)?;
@@ -913,5 +1264,96 @@ mod tests {
             |row| row.get(0),
         ).unwrap();
         assert_eq!(major_preserved, "Software Engineering");
+    }
+
+    #[test]
+    fn test_academic_radar_metrics_drl_preserves_null() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE academic_macro_metrics (
+                semester_id TEXT PRIMARY KEY,
+                term_gpa REAL NOT NULL DEFAULT 0.0,
+                cumulative_gpa REAL NOT NULL DEFAULT 0.0,
+                classification TEXT NOT NULL DEFAULT 'Chưa xếp loại',
+                term_credits INTEGER NOT NULL DEFAULT 0,
+                cumulative_credits INTEGER NOT NULL DEFAULT 0,
+                drl INTEGER,
+                updated_at INTEGER NOT NULL
+            );
+            INSERT INTO academic_macro_metrics (semester_id, term_gpa, cumulative_gpa, classification, term_credits, cumulative_credits, drl, updated_at)
+            VALUES ('2025-2026.1', 8.5, 8.5, 'Giỏi', 18, 18, NULL, 1234567890);
+            INSERT INTO academic_macro_metrics (semester_id, term_gpa, cumulative_gpa, classification, term_credits, cumulative_credits, drl, updated_at)
+            VALUES ('2025-2026.2', 9.0, 8.75, 'Xuất sắc', 20, 38, 95, 1234567891);
+            "
+        ).unwrap();
+
+        let mut stmt = conn.prepare(
+            "SELECT semester_id, term_gpa, cumulative_gpa, classification, term_credits, cumulative_credits, drl
+             FROM academic_macro_metrics
+             ORDER BY semester_id ASC"
+        ).unwrap();
+
+        let rows = stmt.query_map([], |row| {
+            Ok(AcademicRadarMetrics {
+                semester_id: row.get(0)?,
+                term_gpa: row.get(1)?,
+                cumulative_gpa: row.get(2)?,
+                classification: row.get(3)?,
+                term_credits: row.get(4)?,
+                cumulative_credits: row.get(5)?,
+                drl: row.get::<_, Option<i64>>(6)?,
+            })
+        }).unwrap().collect::<Result<Vec<_>, _>>().unwrap();
+
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].semester_id, "2025-2026.1");
+        assert_eq!(rows[0].drl, None);
+        assert_eq!(rows[1].semester_id, "2025-2026.2");
+        assert_eq!(rows[1].drl, Some(95));
+    }
+
+    #[test]
+    fn test_ingest_drl_records_multi_semester_and_upsert() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE academic_drl (
+                semester TEXT PRIMARY KEY,
+                score INTEGER NOT NULL,
+                grade_text TEXT NOT NULL DEFAULT '',
+                updated_at INTEGER NOT NULL
+            );"
+        ).unwrap();
+
+        let tx = conn.transaction().unwrap();
+
+        let json_data = serde_json::json!([
+            {
+                "semester": "Học kỳ 2 Năm học 2024-2025",
+                "score": 100,
+                "grade_text": "Xuất sắc"
+            },
+            {
+                "semester": "Học kỳ 1 Năm học 2024-2025",
+                "score": 95,
+                "grade_text": "Xuất sắc"
+            }
+        ]);
+
+        let list = json_data.as_array().unwrap();
+        ingest_drl_records(&tx, list).unwrap();
+        tx.commit().unwrap();
+
+        let mut stmt = conn.prepare("SELECT semester, score, grade_text FROM academic_drl ORDER BY score DESC").unwrap();
+        let rows = stmt.query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, String>(2)?))
+        }).unwrap().collect::<Result<Vec<_>, _>>().unwrap();
+
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].0, "Học kỳ 2 Năm học 2024-2025");
+        assert_eq!(rows[0].1, 100);
+        assert_eq!(rows[0].2, "Xuất sắc");
+        assert_eq!(rows[1].0, "Học kỳ 1 Năm học 2024-2025");
+        assert_eq!(rows[1].1, 95);
+        assert_eq!(rows[1].2, "Xuất sắc");
     }
 }

@@ -33,6 +33,7 @@ rusqlite = { version = "0.31", features = ["bundled", "bundled-full"] }
 # --- Local HTTP server (nhận webhook từ Chrome extension) ---
 axum = "0.7"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+tokio-util = "0.7"
 tower-http = { version = "0.5", features = ["cors"] }
 
 # --- HTTP client cho background worker gọi Codeforces API ---
@@ -56,6 +57,10 @@ regex = "1"
 # --- Lightweight HTTP parser cho sync server loopback (không kéo axum/actix) ---
 httparse = "1.8"
 urlencoding = "2.1"
+
+# --- Remote Plugin verification and extraction ---
+sha2 = "0.10"
+zip = "2"
 
 # --- Chỉ dùng cho mock data seeder (dev-only, xem cfg(debug_assertions)) ---
 rand = "0.8"

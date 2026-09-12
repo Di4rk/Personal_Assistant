@@ -21,9 +21,15 @@ import { DevControlDock } from "./components/DevControlDock";
 import { DemoModeBanner } from "./components/DemoModeBanner";
 import { PluginMarketplaceModal } from "./components/PluginMarketplaceModal";
 import { PluginViewportRouter } from "./features/plugins/PluginViewportRouter";
+import { SettingsModal } from "./components/SettingsModal";
+import { useSettingsStore } from "./stores/useSettingsStore";
+import { useAppStore } from "./stores/useAppStore";
+import { useAcademicStore } from "./stores/useAcademicStore";
+import { useWecodeStore } from "./stores/useWecodeStore";
+import { usePrivacyStore } from "./stores/usePrivacyStore";
 import { listInstalledPlugins } from "./lib/plugin-sdk";
 import type { PluginMetaDto } from "./types/plugin";
-import { Code2, GraduationCap, FolderGit2, Blocks } from "lucide-react";
+import { Code2, GraduationCap, FolderGit2, Blocks, Settings } from "lucide-react";
 import { APP_VERSION, APP_SUBTITLE } from "./constants/app";
 import {
   getUserProfile,
@@ -46,6 +52,18 @@ export default function App() {
     setProfileState({ status: "needs-onboarding" });
   };
 
+  const handleResetToGenesis = useCallback(() => {
+    // 1. Reset các stores cục bộ
+    useAcademicStore.getState().reset();
+    useWecodeStore.getState().reset();
+    useAppStore.getState().reset();
+    usePrivacyStore.getState().setDemoMode(false);
+
+    // 2. Chuyển view về Genesis onboarding flow và tab mặc định
+    setActiveTab("academic");
+    setProfileState({ status: "needs-onboarding" });
+  }, []);
+
   // Load Plugins on mount
   const loadPlugins = useCallback(async () => {
     try {
@@ -59,6 +77,16 @@ export default function App() {
   useEffect(() => {
     void loadPlugins();
   }, [loadPlugins]);
+
+  useEffect(() => {
+    const handleOpenSettings = (e: Event) => {
+      const customEvent = e as CustomEvent<{ tab?: "profile" | "plugins" | "services" | "system" }>;
+      const tab = customEvent.detail?.tab || "profile";
+      useSettingsStore.getState().openSettings(tab);
+    };
+    window.addEventListener("open-settings", handleOpenSettings);
+    return () => window.removeEventListener("open-settings", handleOpenSettings);
+  }, []);
 
   // Load User Profile on mount
   useEffect(() => {
@@ -86,16 +114,27 @@ export default function App() {
     };
   }, []);
 
-  const handleGenesisComplete = async (nickname: string, major: string) => {
+  const handleGenesisComplete = async (nickname?: string, major?: string) => {
     try {
-      await saveUserProfile(nickname, major);
+      if (nickname) {
+        await saveUserProfile(nickname, major || "CS");
+      }
+      const profile = await getUserProfile();
       await loadPlugins();
       setProfileState({
         status: "ready",
-        profile: { nickname, major, is_initialized: true },
+        profile: {
+          nickname: profile.nickname || nickname || "Diark",
+          major: profile.major || major || "CS",
+          is_initialized: true,
+        },
       });
     } catch (err) {
-      console.error("Failed to save user profile in genesis:", err);
+      console.error("Failed to complete genesis onboarding:", err);
+      setProfileState({
+        status: "ready",
+        profile: { nickname: "Diark", major: "CS", is_initialized: true },
+      });
     }
   };
 
@@ -205,6 +244,7 @@ export default function App() {
     total_daily_xp: number;
     first_ac_count: number;
   }>("cf://sync-event", handleLegacySync);
+  useTauriEvent<void>("system-genesis-reset", handleResetToGenesis);
 
   if (profileState.status === "loading") {
     return null;
@@ -280,14 +320,14 @@ export default function App() {
             </button>
           </nav>
 
-          {/* Plugin Hub Button */}
+          {/* Settings Hub Button */}
           <button
-            onClick={() => setIsPluginModalOpen(true)}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 text-xs font-mono text-cyan-400 transition-colors cursor-pointer"
-            title="Mở Plugin Hub & Registry"
+            onClick={() => useSettingsStore.getState().openSettings()}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 text-xs font-mono text-slate-300 hover:text-cyan-400 transition-colors cursor-pointer"
+            title="Cài đặt hệ thống (Settings Hub)"
           >
-            <Blocks className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Plugins</span>
+            <Settings className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Settings</span>
           </button>
 
           <span className="rounded border border-slate-700 bg-slate-900 px-2 py-0.5 font-mono text-xs text-cyan-400">
@@ -373,6 +413,7 @@ export default function App() {
         ))}
       </div>
 
+      <SettingsModal onResetGenesis={handleResetToGenesis} />
       <DevControlDock onResetIdentity={handleResetIdentity} />
     </div>
   );

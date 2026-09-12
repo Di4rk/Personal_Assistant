@@ -8,6 +8,7 @@ import type {
   UpsertSemesterDto,
   RawPortalSemester,
   AcademicMacroMetricSSOT,
+  AcademicRadarMetrics,
   FullPortalIngestionRequest,
 } from "../features/academic/types";
 import type { LifeMatrixEntryDto } from "../features/life-matrix/types";
@@ -238,6 +239,13 @@ export async function getAcademicMacroMetricsSsot(): Promise<AcademicMacroMetric
 }
 
 /**
+ * Lấy danh sách radar metrics đối soát từ Cổng UIT (với DRL nullable).
+ */
+export async function getAcademicRadarMetrics(): Promise<AcademicRadarMetrics[]> {
+  return invoke<AcademicRadarMetrics[]>("get_academic_radar_metrics");
+}
+
+/**
  * Nạp payload bảng điểm và DRL trực tiếp từ JSON portal vào SQLite.
  */
 export async function ingestFullAcademicPayload(
@@ -416,6 +424,30 @@ export async function getResolvedCurriculum(): Promise<CurriculumResolution> {
   return invoke<CurriculumResolution>("get_resolved_curriculum");
 }
 
+import type { WecodeSubmission } from "../types/wecode";
 
+export async function getWecodeSubmissions(assignmentId?: number): Promise<WecodeSubmission[]> {
+  return invoke<WecodeSubmission[]>("get_wecode_submissions", { assignmentId });
+}
 
+export async function launchWecodeSsoSync(): Promise<void> {
+  return invoke<void>("launch_wecode_sso_sync");
+}
+
+export interface SystemStorageStats {
+  db_size_bytes: number;
+  wal_size_bytes: number;
+  total_records_count: number;
+}
+
+export async function getSystemStorageStats(): Promise<SystemStorageStats> {
+  return invoke<SystemStorageStats>("get_system_storage_stats");
+}
+
+/**
+ * Xóa sạch toàn bộ dữ liệu người dùng (Atomic Purge), truncate WAL và nén DB (VACUUM).
+ */
+export async function resetUserDataToGenesis(): Promise<void> {
+  return invoke<void>("reset_user_data_to_genesis");
+}
 

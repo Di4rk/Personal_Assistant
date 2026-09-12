@@ -15,6 +15,11 @@ use tokio::sync::watch;
 
 use services::cf_worker::{self, SyncLock};
 
+#[derive(Clone)]
+pub struct AppState {
+    pub db: crate::db::SharedDb,
+}
+
 /// Chu kỳ sync bình thường - 60s là điểm cân bằng hợp lý: đủ nhanh để cảm
 /// giác "gần real-time" khi vừa AC 1 bài, nhưng không dồn dập tới mức có nguy
 /// cơ bị Codeforces coi là traffic bất thường. Có thể expose ra settings UI
@@ -49,6 +54,7 @@ macro_rules! registered_commands {
             commands::academic::submit_portal_transcript,
             commands::academic::get_academic_macro_metrics,
             commands::academic::get_academic_macro_metrics_ssot,
+            commands::academic::get_academic_radar_metrics,
             commands::academic::ingest_full_academic_payload,
             commands::academic::ingest_dynamic_academic_data,
             commands::academic::purge_and_seed_canonical_academic_data,
@@ -58,6 +64,9 @@ macro_rules! registered_commands {
             commands::academic::get_student_profile,
             // Portal In-App SSO
             commands::portal_auth::launch_portal_sso_sync,
+            commands::portal_auth::launch_wecode_sso_sync,
+            // Wecode
+            commands::wecode::get_wecode_submissions,
             // Moodle & Workspace
             commands::workspace::ingest_moodle_course_html,
             commands::workspace::get_upcoming_deadlines,
@@ -81,7 +90,10 @@ macro_rules! registered_commands {
             // Settings & Identity
             commands::settings::get_user_profile,
             commands::settings::save_user_profile,
+            commands::settings::save_setting,
+            commands::settings::get_system_storage_stats,
             commands::settings::reset_identity_state,
+            commands::settings::reset_user_data_to_genesis,
             // Plugin Engine
             commands::plugins::list_installed_plugins,
             commands::plugins::toggle_plugin,
@@ -89,6 +101,8 @@ macro_rules! registered_commands {
             commands::plugins::plugin_storage_set,
             commands::plugins::record_activity_event,
             commands::plugins::trigger_recompute_daily_matrix,
+            commands::plugins::fetch_remote_registry,
+            commands::plugins::install_remote_plugin,
             // Dev Tools (Debug Only)
             commands::dev_tools::seed_mock_academic_data,
             commands::dev_tools::clear_cf_cache,
@@ -124,6 +138,7 @@ macro_rules! registered_commands {
             commands::academic::submit_portal_transcript,
             commands::academic::get_academic_macro_metrics,
             commands::academic::get_academic_macro_metrics_ssot,
+            commands::academic::get_academic_radar_metrics,
             commands::academic::ingest_full_academic_payload,
             commands::academic::ingest_dynamic_academic_data,
             commands::academic::purge_and_seed_canonical_academic_data,
@@ -133,6 +148,9 @@ macro_rules! registered_commands {
             commands::academic::get_student_profile,
             // Portal In-App SSO
             commands::portal_auth::launch_portal_sso_sync,
+            commands::portal_auth::launch_wecode_sso_sync,
+            // Wecode
+            commands::wecode::get_wecode_submissions,
             // Moodle & Workspace
             commands::workspace::ingest_moodle_course_html,
             commands::workspace::get_upcoming_deadlines,
@@ -156,7 +174,10 @@ macro_rules! registered_commands {
             // Settings & Identity (Always available)
             commands::settings::get_user_profile,
             commands::settings::save_user_profile,
+            commands::settings::save_setting,
+            commands::settings::get_system_storage_stats,
             commands::settings::reset_identity_state,
+            commands::settings::reset_user_data_to_genesis,
             // Plugin Engine
             commands::plugins::list_installed_plugins,
             commands::plugins::toggle_plugin,
@@ -164,6 +185,8 @@ macro_rules! registered_commands {
             commands::plugins::plugin_storage_set,
             commands::plugins::record_activity_event,
             commands::plugins::trigger_recompute_daily_matrix,
+            commands::plugins::fetch_remote_registry,
+            commands::plugins::install_remote_plugin,
         ]
     };
 }
@@ -180,6 +203,9 @@ pub fn run() {
             let conn = db::init_db(&db_path)?;
             let shared_db: db::SharedDb = Arc::new(Mutex::new(conn));
             app.manage(shared_db.clone());
+            app.manage(AppState { db: shared_db.clone() });
+            app.manage(crate::commands::portal_auth::WatchdogRegistry::new());
+            app.manage(crate::commands::portal_auth::PartialStateRegistry::default());
 
             // HTTP client (15s timeout) — dùng chung giữa worker và IPC command
             // trigger_cf_sync, tránh tạo nhiều pool connection mỗi khi user bấm sync.
