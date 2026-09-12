@@ -1,10 +1,10 @@
 import React, { useCallback, useState } from "react";
-import { syncUitPortal } from "../../../lib/tauri-client";
+import { launchPortalSsoSync } from "../../../lib/tauri-client";
 import { useTauriEvent } from "../../../hooks/useTauriEvent";
 import type { AcademicOverviewDto, UitSyncState } from "../types";
 
 export interface SyncPortalButtonProps {
-  onSyncSuccess?: (overview: AcademicOverviewDto) => void;
+  onSyncSuccess?: (overview?: AcademicOverviewDto) => void;
   className?: string;
 }
 
@@ -62,6 +62,35 @@ export const SyncPortalButton: React.FC<SyncPortalButtonProps> = ({
 
   useTauriEvent<UitSyncState>("academic://sync-state", handleSyncState);
 
+  useTauriEvent<void>("academic-data-synced", () => {
+    setIsSyncing(false);
+    setSyncState({ state: "Completed" });
+    setToast({
+      type: "success",
+      message: "Đồng bộ bảng điểm Cổng thông tin UIT thành công! Đã cập nhật cGPA.",
+    });
+    if (onSyncSuccess) {
+      onSyncSuccess();
+    }
+    setTimeout(() => {
+      setToast(null);
+      setSyncState(null);
+    }, 4000);
+  });
+
+  useTauriEvent<string>("portal-sync-failed", (reason) => {
+    setIsSyncing(false);
+    setSyncState({ state: "Failed", message: reason });
+    const message = reason.includes("session_expired")
+      ? "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại."
+      : `Đồng bộ thất bại: ${reason}`;
+    setToast({ type: "error", message });
+    setTimeout(() => {
+      setToast(null);
+      setSyncState(null);
+    }, 6000);
+  });
+
   const handleStartSync = async () => {
     if (isSyncing) return;
 
@@ -70,10 +99,7 @@ export const SyncPortalButton: React.FC<SyncPortalButtonProps> = ({
     setSyncState({ state: "Opening" });
 
     try {
-      const overview = await syncUitPortal();
-      if (onSyncSuccess) {
-        onSyncSuccess(overview);
-      }
+      await launchPortalSsoSync();
     } catch (err) {
       const msg =
         typeof err === "string"
@@ -84,7 +110,10 @@ export const SyncPortalButton: React.FC<SyncPortalButtonProps> = ({
       setIsSyncing(false);
       setSyncState({ state: "Failed", message: msg });
       setToast({ type: "error", message: msg });
-      setTimeout(() => setToast(null), 6000);
+      setTimeout(() => {
+        setToast(null);
+        setSyncState(null);
+      }, 6000);
     }
   };
 

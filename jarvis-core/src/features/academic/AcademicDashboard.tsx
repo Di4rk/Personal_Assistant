@@ -19,8 +19,9 @@ import {
 import {
   getSemesterCourses,
   getAcademicMacroMetricsSsot,
-  syncUitPortal,
+  launchPortalSsoSync,
 } from "../../lib/tauri-client";
+import { listen } from "@tauri-apps/api/event";
 import type { AcademicCourseRecord, AcademicMacroMetricSSOT } from "./types";
 
 interface AcademicDashboardProps {
@@ -161,14 +162,38 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
     await Promise.all([refetchOverview(), loadMacroMetrics()]);
   }, [refetchOverview, loadMacroMetrics]);
 
+  // Lắng nghe event thất bại từ SSO sync window
+  useEffect(() => {
+    const unlisten = listen<string>("portal-sync-failed", (event) => {
+      const reason = event.payload;
+      if (reason.includes("session_expired")) {
+        alert("Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.");
+      } else {
+        alert(`Đồng bộ thất bại: ${reason}`);
+      }
+    });
+    return () => {
+      void unlisten.then((fn) => fn());
+    };
+  }, []);
+
+  // Tự động làm mới khi backend hoàn tất nạp dữ liệu từ portal SSO
+  useEffect(() => {
+    const unlisten = listen("academic-data-synced", () => {
+      void handleRefresh();
+    });
+    return () => {
+      void unlisten.then((fn) => fn());
+    };
+  }, [handleRefresh]);
+
   const handleSyncPortal = useCallback(async () => {
     try {
-      await syncUitPortal();
-      await handleRefresh();
+      await launchPortalSsoSync();
     } catch (err) {
-      console.error("Lỗi sync UIT portal:", err);
+      console.error("Khởi tạo cửa sổ SSO thất bại:", err);
     }
-  }, [handleRefresh]);
+  }, []);
 
   const isRefreshing = isLoadingOverview || isLoadingMacro;
 

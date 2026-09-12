@@ -55,6 +55,7 @@ regex = "1"
 
 # --- Lightweight HTTP parser cho sync server loopback (không kéo axum/actix) ---
 httparse = "1.8"
+urlencoding = "2.1"
 
 # --- Chỉ dùng cho mock data seeder (dev-only, xem cfg(debug_assertions)) ---
 rand = "0.8"
