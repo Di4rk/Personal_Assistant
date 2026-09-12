@@ -55,6 +55,8 @@ macro_rules! registered_commands {
             commands::academic::get_academic_curriculum,
             commands::academic::get_sync_token,
             commands::academic::get_student_profile,
+            // Portal In-App SSO
+            commands::portal_auth::launch_portal_sso_sync,
             // Moodle & Workspace
             commands::workspace::ingest_moodle_course_html,
             commands::workspace::get_upcoming_deadlines,
@@ -127,6 +129,8 @@ macro_rules! registered_commands {
             commands::academic::get_academic_curriculum,
             commands::academic::get_sync_token,
             commands::academic::get_student_profile,
+            // Portal In-App SSO
+            commands::portal_auth::launch_portal_sso_sync,
             // Moodle & Workspace
             commands::workspace::ingest_moodle_course_html,
             commands::workspace::get_upcoming_deadlines,

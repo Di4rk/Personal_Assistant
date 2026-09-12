@@ -396,4 +396,12 @@ export async function getStudentProfile(): Promise<StudentProfilePayload | null>
   }
 }
 
+/**
+ * Khởi chạy cửa sổ SSO UIT cô lập để xác thực và bóc tách dữ liệu zero-cookie.
+ */
+export async function launchPortalSsoSync(): Promise<void> {
+  return invoke<void>("launch_portal_sso_sync");
+}
+
+
 

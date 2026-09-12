@@ -1,6 +1,7 @@
 pub mod academic;
 pub mod matrix;
 pub mod plugins;
+pub mod portal_auth;
 pub mod post_mortem;
 pub mod settings;
 pub mod vault;

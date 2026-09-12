@@ -433,6 +433,42 @@ pub struct AcademicMacroMetricSSOT {
     pub updated_at: i64,
 }
 
+pub fn ingest_full_academic_payload_internal(
+    app: &tauri::AppHandle,
+    state: &tauri::State<crate::db::SharedDb>,
+    transcript: serde_json::Value,
+    drl: serde_json::Value,
+) -> Result<(), String> {
+    let mut conn = state.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
+
+    // Chuyển đổi transcript và drl thành IngestionPayload
+    let mut payload = if let Ok(dyn_payload) = serde_json::from_value::<crate::modules::academic::portal_ingestion::IngestionPayload>(transcript.clone()) {
+        dyn_payload
+    } else if let Ok(groups) = serde_json::from_value::<Vec<crate::modules::academic::portal_ingestion::GenericSemesterGroup>>(transcript.clone()) {
+        crate::modules::academic::portal_ingestion::IngestionPayload {
+            semester_groups: groups,
+            term_summaries: None,
+            drl: None,
+        }
+    } else {
+        return Err("Không thể parse transcript JSON payload".to_string());
+    };
+
+    if let Ok(drl_items) = serde_json::from_value::<Vec<crate::modules::academic::portal_ingestion::GenericDrlItem>>(drl.clone()) {
+        payload.drl = Some(drl_items);
+    } else if let Ok(drl_obj) = serde_json::from_value::<crate::modules::academic::portal_ingestion::IngestionPayload>(drl.clone()) {
+        if drl_obj.drl.is_some() {
+            payload.drl = drl_obj.drl;
+        }
+    }
+
+    crate::modules::academic::portal_ingestion::ingest_dynamic_academic_payload(&mut conn, payload)?;
+
+    let _ = app.emit("academic://sync-complete", ());
+    let _ = app.emit("academic-data-synced", ());
+    Ok(())
+}
+
 /// Nạp toàn bộ bảng điểm và lịch sử ĐRL từ JSON payload
 #[tauri::command]
 pub fn ingest_full_academic_payload(
@@ -469,6 +505,7 @@ pub fn ingest_full_academic_payload(
     };
 
     let _ = app.emit("academic://sync-complete", ());
+    let _ = app.emit("academic-data-synced", ());
     Ok(())
 }
 
