@@ -79,6 +79,13 @@ macro_rules! registered_commands {
             commands::settings::get_user_profile,
             commands::settings::save_user_profile,
             commands::settings::reset_identity_state,
+            // Plugin Engine
+            commands::plugins::list_installed_plugins,
+            commands::plugins::toggle_plugin,
+            commands::plugins::plugin_storage_get,
+            commands::plugins::plugin_storage_set,
+            commands::plugins::record_activity_event,
+            commands::plugins::trigger_recompute_daily_matrix,
             // Dev Tools (Debug Only)
             commands::dev_tools::seed_mock_academic_data,
             commands::dev_tools::clear_cf_cache,
@@ -144,6 +151,13 @@ macro_rules! registered_commands {
             commands::settings::get_user_profile,
             commands::settings::save_user_profile,
             commands::settings::reset_identity_state,
+            // Plugin Engine
+            commands::plugins::list_installed_plugins,
+            commands::plugins::toggle_plugin,
+            commands::plugins::plugin_storage_get,
+            commands::plugins::plugin_storage_set,
+            commands::plugins::record_activity_event,
+            commands::plugins::trigger_recompute_daily_matrix,
         ]
     };
 }
