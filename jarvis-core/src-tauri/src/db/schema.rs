@@ -39,6 +39,7 @@ pub fn init_db(db_path: &Path) -> SqlResult<Connection> {
     ensure_post_mortem_schema(&conn)?;
     crate::db::academic::init_academic_module(&conn)?;
     ensure_curriculum_schema(&conn)?;
+    ensure_wecode_schema(&conn)?;
     ensure_moodle_schema(&conn)?;
     ensure_matrix_schema(&conn)?;
     ensure_plugin_and_activity_schema(&conn)?;
@@ -56,6 +57,7 @@ pub fn create_tables(conn: &Connection) -> SqlResult<()> {
     ensure_post_mortem_schema(conn)?;
     crate::db::academic::init_academic_module(conn)?;
     ensure_curriculum_schema(conn)?;
+    ensure_wecode_schema(conn)?;
     ensure_moodle_schema(conn)?;
     ensure_matrix_schema(conn)?;
     ensure_plugin_and_activity_schema(conn)?;
@@ -407,6 +409,39 @@ pub fn ensure_curriculum_schema(conn: &Connection) -> SqlResult<()> {
             ('HTTT',      'D480104', NULL),
             ('MMT',       'D480102', NULL),
             ('KTMT',      'D520216', NULL);
+        "#,
+    )?;
+    Ok(())
+}
+
+/// Tạo schema cho Wecode submissions và assignments (idempotent).
+pub fn ensure_wecode_schema(conn: &Connection) -> SqlResult<()> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS wecode_assignments (
+            id          INTEGER PRIMARY KEY,
+            name        TEXT NOT NULL DEFAULT '',
+            created_at  INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS wecode_submissions (
+            submission_id   INTEGER PRIMARY KEY,
+            assignment_id   INTEGER NOT NULL,
+            problem_id      INTEGER NOT NULL,
+            problem_name    TEXT NOT NULL,
+            submit_time     INTEGER NOT NULL,
+            verdict         TEXT NOT NULL,
+            score           INTEGER NOT NULL DEFAULT 0,
+            execution_time  REAL NOT NULL DEFAULT 0.0,
+            memory_kib      INTEGER NOT NULL DEFAULT 0,
+            language        TEXT NOT NULL DEFAULT 'C++',
+            is_final        BOOLEAN NOT NULL DEFAULT 0,
+            created_at      INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+            FOREIGN KEY (assignment_id) REFERENCES wecode_assignments(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_wecode_sub_assign_prob ON wecode_submissions(assignment_id, problem_id);
+        CREATE INDEX IF NOT EXISTS idx_wecode_sub_time ON wecode_submissions(submit_time);
         "#,
     )?;
     Ok(())

@@ -15,6 +15,11 @@ use tokio::sync::watch;
 
 use services::cf_worker::{self, SyncLock};
 
+#[derive(Clone)]
+pub struct AppState {
+    pub db: crate::db::SharedDb,
+}
+
 /// Chu kỳ sync bình thường - 60s là điểm cân bằng hợp lý: đủ nhanh để cảm
 /// giác "gần real-time" khi vừa AC 1 bài, nhưng không dồn dập tới mức có nguy
 /// cơ bị Codeforces coi là traffic bất thường. Có thể expose ra settings UI
@@ -58,6 +63,9 @@ macro_rules! registered_commands {
             commands::academic::get_student_profile,
             // Portal In-App SSO
             commands::portal_auth::launch_portal_sso_sync,
+            commands::portal_auth::launch_wecode_sso_sync,
+            // Wecode
+            commands::wecode::get_wecode_submissions,
             // Moodle & Workspace
             commands::workspace::ingest_moodle_course_html,
             commands::workspace::get_upcoming_deadlines,
@@ -133,6 +141,9 @@ macro_rules! registered_commands {
             commands::academic::get_student_profile,
             // Portal In-App SSO
             commands::portal_auth::launch_portal_sso_sync,
+            commands::portal_auth::launch_wecode_sso_sync,
+            // Wecode
+            commands::wecode::get_wecode_submissions,
             // Moodle & Workspace
             commands::workspace::ingest_moodle_course_html,
             commands::workspace::get_upcoming_deadlines,
@@ -180,6 +191,7 @@ pub fn run() {
             let conn = db::init_db(&db_path)?;
             let shared_db: db::SharedDb = Arc::new(Mutex::new(conn));
             app.manage(shared_db.clone());
+            app.manage(AppState { db: shared_db.clone() });
 
             // HTTP client (15s timeout) — dùng chung giữa worker và IPC command
             // trigger_cf_sync, tránh tạo nhiều pool connection mỗi khi user bấm sync.

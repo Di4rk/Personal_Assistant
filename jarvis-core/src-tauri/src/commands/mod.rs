@@ -5,6 +5,7 @@ pub mod portal_auth;
 pub mod post_mortem;
 pub mod settings;
 pub mod vault;
+pub mod wecode;
 pub mod workspace;
 
 #[cfg(debug_assertions)]
