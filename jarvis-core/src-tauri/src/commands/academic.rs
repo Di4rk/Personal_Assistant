@@ -467,22 +467,24 @@ pub fn get_academic_radar_metrics(
 
 pub fn ingest_drl_records(tx: &rusqlite::Transaction, drl_list: &[serde_json::Value]) -> Result<(), String> {
     for entry in drl_list {
-        let semester = entry.get("semester")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| "DRL entry missing 'semester' field".to_string())?;
-        let score = entry.get("score")
-            .and_then(|v| {
-                if let Some(i) = v.as_i64() {
-                    Some(i)
-                } else if let Some(s) = v.as_str() {
-                    s.trim().parse::<i64>().ok()
-                } else if let Some(f) = v.as_f64() {
-                    Some(f as i64)
-                } else {
-                    None
-                }
-            })
-            .ok_or_else(|| format!("DRL entry for '{semester}' missing valid 'score'"))?;
+        let semester = match entry.get("semester").and_then(|v| v.as_str()) {
+            Some(s) if !s.trim().is_empty() => s.trim(),
+            _ => continue,
+        };
+        let score = match entry.get("score").and_then(|v| {
+            if let Some(i) = v.as_i64() {
+                Some(i)
+            } else if let Some(s) = v.as_str() {
+                s.trim().parse::<i64>().ok()
+            } else if let Some(f) = v.as_f64() {
+                Some(f as i64)
+            } else {
+                None
+            }
+        }) {
+            Some(s) => s,
+            None => continue,
+        };
         let grade_text = entry.get("grade_text")
             .and_then(|v| v.as_str())
             .unwrap_or("");
@@ -545,8 +547,12 @@ pub fn ingest_full_academic_payload_sync(
             .map_err(|e| e.to_string())
         };
 
-        upsert_setting("student_id", &profile.student_id, &tx)?;
-        upsert_setting("student_name", &profile.full_name, &tx)?;
+        if !profile.student_id.trim().is_empty() {
+            upsert_setting("student_id", profile.student_id.trim(), &tx)?;
+        }
+        if !profile.full_name.trim().is_empty() {
+            upsert_setting("student_name", profile.full_name.trim(), &tx)?;
+        }
         if !profile.faculty.is_empty() {
             upsert_setting("faculty", &profile.faculty, &tx)?;
         }
@@ -671,11 +677,12 @@ pub fn ingest_full_academic_payload_sync(
 
         let id = format!("{sem_id}_{code}");
         let is_passed = score.map(|s| s >= 5.0).unwrap_or(false);
+        let course_point_val: f64 = score.unwrap_or(0.0);
 
         tx.execute(
             "INSERT INTO academic_courses 
                 (id, semester_id, course_code, course_name, credits, course_point, final_score, summary_score_10, is_passed, is_gpa_calculated, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6, ?6, ?7, 1, ?8, ?8)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7, ?8, 1, ?9, ?9)
              ON CONFLICT(semester_id, course_code) DO UPDATE SET
                 course_name = excluded.course_name,
                 credits = excluded.credits,
@@ -684,8 +691,8 @@ pub fn ingest_full_academic_payload_sync(
                 summary_score_10 = excluded.summary_score_10,
                 is_passed = excluded.is_passed,
                 updated_at = excluded.updated_at",
-            rusqlite::params![id, sem_id, code, name, credits, score, is_passed as i64, now],
-        ).map_err(|e| format!("Lỗi insert academic_courses: {e}"))?;
+            rusqlite::params![id, sem_id, code, name, credits, course_point_val, score, is_passed as i64, now],
+        ).map_err(|e| format!("Lỗi insert academic_courses ({code}): {e}"))?;
     }
 
     // 3. Xử lý DRL (Data Integrity Guard) & Macro Metrics
@@ -1031,7 +1038,8 @@ pub fn get_sync_token(db: tauri::State<'_, SharedDb>) -> Result<String, String> 
 
 pub const DEFAULT_MAJOR_SENTINEL: &str = "CS";
 
-#[derive(serde::Deserialize, serde::Serialize, Clone, Debug, PartialEq, Eq)]
+#[derive(serde::Deserialize, serde::Serialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(default)]
 pub struct StudentProfilePayload {
     pub student_id: String,
     pub full_name: String,
@@ -1075,14 +1083,30 @@ pub fn execute_save_student_profile(
         .map_err(|e| e.to_string())
     };
 
-    upsert("student_id", &payload.student_id, &tx)?;
-    upsert("student_name", &payload.full_name, &tx)?;
-    upsert("faculty", &payload.faculty, &tx)?;
-    upsert("major_code", &payload.major_code, &tx)?;
-    upsert("specialization", &payload.specialization, &tx)?;
-    upsert("student_class", &payload.student_class, &tx)?;
-    upsert("curriculum_code", &payload.curriculum_code, &tx)?;
-    upsert("admission_year", &payload.cohort, &tx)?;
+    if !payload.student_id.trim().is_empty() {
+        upsert("student_id", payload.student_id.trim(), &tx)?;
+    }
+    if !payload.full_name.trim().is_empty() {
+        upsert("student_name", payload.full_name.trim(), &tx)?;
+    }
+    if !payload.faculty.trim().is_empty() {
+        upsert("faculty", payload.faculty.trim(), &tx)?;
+    }
+    if !payload.major_code.trim().is_empty() {
+        upsert("major_code", payload.major_code.trim(), &tx)?;
+    }
+    if !payload.specialization.trim().is_empty() {
+        upsert("specialization", payload.specialization.trim(), &tx)?;
+    }
+    if !payload.student_class.trim().is_empty() {
+        upsert("student_class", payload.student_class.trim(), &tx)?;
+    }
+    if !payload.curriculum_code.trim().is_empty() {
+        upsert("curriculum_code", payload.curriculum_code.trim(), &tx)?;
+    }
+    if !payload.cohort.trim().is_empty() {
+        upsert("admission_year", payload.cohort.trim(), &tx)?;
+    }
 
     // Kiểm tra giá trị user_major hiện tại trước khi nâng cấp
     let current_major: Option<String> = tx
@@ -1355,5 +1379,122 @@ mod tests {
         assert_eq!(rows[1].0, "Học kỳ 1 Năm học 2024-2025");
         assert_eq!(rows[1].1, 95);
         assert_eq!(rows[1].2, "Xuất sắc");
+    }
+
+    #[test]
+    fn test_partial_student_profile_deserialization_defaults() {
+        let partial_json = serde_json::json!({
+            "student_id": "21529999",
+            "full_name": "Le Thi C"
+        });
+        let res: Result<StudentProfilePayload, _> = serde_json::from_value(partial_json);
+        assert!(res.is_ok());
+        let profile = res.unwrap();
+        assert_eq!(profile.student_id, "21529999");
+        assert_eq!(profile.full_name, "Le Thi C");
+        assert_eq!(profile.faculty, "");
+        assert_eq!(profile.specialization, "");
+    }
+
+    #[test]
+    fn test_academic_course_insertion_with_none_score_defaults_course_point() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE academic_semesters (
+                id TEXT PRIMARY KEY,
+                academic_year TEXT NOT NULL,
+                semester_term INTEGER NOT NULL,
+                is_completed INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+            CREATE TABLE academic_courses (
+                id TEXT PRIMARY KEY,
+                semester_id TEXT NOT NULL,
+                course_code TEXT NOT NULL,
+                course_name TEXT NOT NULL,
+                credits INTEGER NOT NULL,
+                course_point REAL NOT NULL DEFAULT 0.0,
+                final_score REAL,
+                summary_score_10 REAL,
+                is_passed INTEGER NOT NULL DEFAULT 0,
+                is_gpa_calculated INTEGER NOT NULL DEFAULT 1,
+                created_at INTEGER NOT NULL DEFAULT 0,
+                updated_at INTEGER NOT NULL,
+                FOREIGN KEY(semester_id) REFERENCES academic_semesters(id) ON DELETE CASCADE,
+                UNIQUE(semester_id, course_code)
+            );"
+        ).unwrap();
+
+        let tx = conn.transaction().unwrap();
+        let sem_id = "2025-2026.1";
+        let now = 1000000;
+
+        tx.execute(
+            "INSERT INTO academic_semesters (id, academic_year, semester_term, is_completed, created_at, updated_at)
+             VALUES (?1, ?2, ?3, 1, ?4, ?4)",
+            rusqlite::params![sem_id, "2025-2026", 1, now],
+        ).unwrap();
+
+        let code = "PE001";
+        let name = "Giao duc the chat 1";
+        let credits = 0;
+        let score: Option<f64> = None;
+        let is_passed = false;
+        let course_point_val: f64 = score.unwrap_or(0.0);
+        let id = format!("{sem_id}_{code}");
+
+        let res = tx.execute(
+            "INSERT INTO academic_courses 
+                (id, semester_id, course_code, course_name, credits, course_point, final_score, summary_score_10, is_passed, is_gpa_calculated, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7, ?8, 1, ?9, ?9)
+             ON CONFLICT(semester_id, course_code) DO UPDATE SET
+                course_name = excluded.course_name,
+                credits = excluded.credits,
+                course_point = excluded.course_point,
+                final_score = excluded.final_score,
+                summary_score_10 = excluded.summary_score_10,
+                is_passed = excluded.is_passed,
+                updated_at = excluded.updated_at",
+            rusqlite::params![id, sem_id, code, name, credits, course_point_val, score, is_passed as i64, now],
+        );
+
+        assert!(res.is_ok());
+        tx.commit().unwrap();
+
+        let point: f64 = conn.query_row(
+            "SELECT course_point FROM academic_courses WHERE id = ?1",
+            rusqlite::params![id],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(point, 0.0);
+    }
+
+    #[test]
+    fn test_ingest_drl_records_skips_invalid_rows_gracefully() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE academic_drl (
+                semester TEXT PRIMARY KEY,
+                score INTEGER NOT NULL,
+                grade_text TEXT NOT NULL DEFAULT '',
+                updated_at INTEGER NOT NULL
+            );"
+        ).unwrap();
+
+        let tx = conn.transaction().unwrap();
+        let payload = serde_json::json!([
+            { "invalid_row": true },
+            { "semester": "", "score": 80 },
+            { "semester": "HK1 2025", "score": "not_a_number" },
+            { "semester": "HK1 2025", "score": 90, "grade_text": "Xuất sắc" }
+        ]);
+
+        let res = ingest_drl_records(&tx, payload.as_array().unwrap());
+        assert!(res.is_ok());
+        tx.commit().unwrap();
+
+        let count: i64 = conn.query_row("SELECT count(*) FROM academic_drl", [], |r| r.get(0)).unwrap();
+        assert_eq!(count, 1);
     }
 }

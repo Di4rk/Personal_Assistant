@@ -227,45 +227,58 @@ pub const UNIVERSAL_GUARDIAN_SCRIPT: &str = r#"
       }, 250);
 
       function extractStudentIdentity() {
+        let profile = {};
         if (Array.isArray(window.__next_f)) {
           for (const chunk of window.__next_f) {
             if (Array.isArray(chunk) && typeof chunk[1] === 'string') {
               const match = chunk[1].match(/"user":\{"sub":"[^"]*","id":null,"username":"(\d{8})","displayName":"([^"]+)","email":"([^"]+)"/);
               if (match) {
-                return { student_id: match[1], full_name: match[2], email: match[3] };
+                profile.student_id = match[1];
+                profile.full_name = match[2];
+                profile.email = match[3];
+                break;
               }
             }
           }
         }
-        const idElem = document.querySelector('header button span.text-xs.text-muted-foreground');
-        const nameElem = document.querySelector('header button span.text-sm.font-medium');
-        if (idElem && nameElem) {
-          const mssv = idElem.textContent.trim();
-          if (/^\d{8}$/.test(mssv)) {
-            return {
-              student_id: mssv,
-              full_name: nameElem.textContent.trim(),
-              email: mssv + '@gm.uit.edu.vn'
-            };
+        if (!profile.student_id) {
+          const idElem = document.querySelector('header button span.text-xs.text-muted-foreground');
+          const nameElem = document.querySelector('header button span.text-sm.font-medium');
+          if (idElem && nameElem) {
+            const mssv = idElem.textContent.trim();
+            if (/^\d{8}$/.test(mssv)) {
+              profile.student_id = mssv;
+              profile.full_name = nameElem.textContent.trim();
+              profile.email = mssv + '@gm.uit.edu.vn';
+            }
           }
         }
-        // DOM label inspection fallback
-        const nodes = Array.from(document.querySelectorAll('div, span, td, p'));
-        const idLabel = nodes.find(n => n.textContent?.trim().startsWith('Mã sinh viên'));
-        if (idLabel) {
-          const valNode = idLabel.nextElementSibling || idLabel.parentElement?.querySelector('.font-medium, .font-semibold');
-          const mssv = valNode?.textContent?.trim() || '';
+        // DOM label inspection fallback & enrichment
+        const nodes = Array.from(document.querySelectorAll('div, span, td, p, dt, dd'));
+        const findVal = (label) => {
+          const l = label.toLowerCase();
+          const node = nodes.find(n => n.textContent?.trim().toLowerCase().startsWith(l) || n.textContent?.trim().toLowerCase().includes(l));
+          if (!node) return '';
+          const valNode = node.nextElementSibling || node.parentElement?.querySelector('.font-medium, .font-semibold, dd') || node.parentElement?.children[1];
+          return valNode?.textContent?.trim() || '';
+        };
+
+        if (!profile.student_id) {
+          const mssv = findVal('mã sinh viên') || findVal('mssv');
           if (/^\d{8}$/.test(mssv)) {
-            const nameNode = nodes.find(n => n.textContent?.trim().startsWith('Họ và tên'));
-            const name = nameNode?.nextElementSibling?.textContent?.trim() || nameNode?.parentElement?.querySelector('.font-medium, .font-semibold')?.textContent?.trim() || '';
-            return {
-              student_id: mssv,
-              full_name: name,
-              email: mssv + '@gm.uit.edu.vn'
-            };
+            profile.student_id = mssv;
+            profile.full_name = findVal('họ và tên') || findVal('họ tên');
+            profile.email = mssv + '@gm.uit.edu.vn';
           }
         }
-        return null;
+
+        profile.faculty = findVal('khoa') || '';
+        profile.specialization = findVal('chuyên ngành') || findVal('ngành') || '';
+        profile.student_class = findVal('lớp sinh hoạt') || findVal('lớp') || '';
+        profile.curriculum_code = findVal('khung ctdt') || findVal('ctđt') || findVal('khóa học') || '';
+        profile.cohort = findVal('niên khóa') || findVal('khóa') || '';
+
+        return profile.student_id ? profile : null;
       }
 
       function tryExtractAndDispatch() {
@@ -284,6 +297,66 @@ pub const UNIVERSAL_GUARDIAN_SCRIPT: &str = r#"
       const maxAttempts = 40;
       let settled = false;
 
+      const isCourseCode = (s) => /^[A-Z]{2,5}\d{2,4}(\.[A-Z0-9]+)?$/i.test((s || '').trim());
+
+      const extractSummaryDRL = () => {
+        const summaryRecords = [];
+        const tables = Array.from(document.querySelectorAll('table'));
+        for (const table of tables) {
+          const ths = Array.from(table.querySelectorAll('th, thead td')).map(t => t.textContent.trim().toLowerCase());
+          const drlColIdx = ths.findIndex(t => t.includes('rèn luyện') || t.includes('đrl'));
+          const semColIdx = ths.findIndex(t => t.includes('kỳ') || t.includes('học kỳ'));
+          const rankColIdx = ths.findIndex(t => t.includes('xếp loại') || t.includes('loại'));
+
+          const rows = Array.from(table.querySelectorAll('tbody tr, tr'));
+          for (const row of rows) {
+            const cells = Array.from(row.querySelectorAll('td')).map(td => td.textContent?.trim() || '');
+            if (cells.length < 3) continue;
+
+            let semText = '';
+            let scoreVal = null;
+            let rankText = '';
+
+            if (drlColIdx >= 0 && cells[drlColIdx]) {
+              const sm = cells[drlColIdx].match(/\b([0-9]{1,2}|100)\b/);
+              if (sm) scoreVal = parseInt(sm[1], 10);
+            }
+            if (semColIdx >= 0 && cells[semColIdx]) {
+              semText = cells[semColIdx];
+            }
+            if (rankColIdx >= 0 && cells[rankColIdx]) {
+              rankText = cells[rankColIdx];
+            }
+
+            if (!semText) {
+              const sCell = cells.find(c => /Học kỳ|HK|Hè/i.test(c));
+              if (sCell) semText = sCell;
+            }
+            if (scoreVal === null && semText) {
+              for (let i = cells.length - 1; i >= 1; i--) {
+                const sm = cells[i].match(/^\s*([0-9]{1,2}|100)\s*$/);
+                if (sm) {
+                  const val = parseInt(sm[1], 10);
+                  if (val >= 0 && val <= 100) {
+                    scoreVal = val;
+                    break;
+                  }
+                }
+              }
+            }
+
+            if (semText && /Học kỳ|HK|Hè/i.test(semText) && scoreVal !== null) {
+              summaryRecords.push({
+                semester: semText.replace(/\s+/g, ' '),
+                score: scoreVal,
+                grade_text: rankText
+              });
+            }
+          }
+        }
+        return summaryRecords;
+      };
+
       const checkCourses = () => {
         if (settled) return;
         attempts++;
@@ -294,34 +367,96 @@ pub const UNIVERSAL_GUARDIAN_SCRIPT: &str = r#"
           return;
         }
 
+        // 1. Quét DRL từ bảng tổng kết (nếu có) để dự phòng
+        const summaryDRL = extractSummaryDRL();
+        if (summaryDRL.length > 0) {
+          try {
+            const cache = JSON.parse(sessionStorage.getItem('__diark_cache') || '{}');
+            if (!cache.drl || cache.drl.length === 0) {
+              cache.drl = summaryDRL;
+              sessionStorage.setItem('__diark_cache', JSON.stringify(cache));
+            }
+          } catch (_) {}
+        }
+
+        // 2. Chuyển sang tab "Chi tiết môn học"
+        const tabs = Array.from(document.querySelectorAll('button[role="tab"], [role="tablist"] button, nav button, button'));
+        const detailTab = tabs.find(b => {
+          const text = (b.textContent || '').trim().toLowerCase();
+          return (text.includes('chi tiết') || text.includes('môn học') || text.includes('bảng điểm chi tiết')) && !text.includes('tổng kết');
+        });
+
+        if (detailTab && detailTab.getAttribute('aria-selected') !== 'true') {
+          detailTab.click();
+          setTimeout(checkCourses, 300);
+          return;
+        }
+
+        // 3. Quét bảng môn học theo mã môn
         const tables = Array.from(document.querySelectorAll('table'));
         const courses = [];
         const semesterGroups = [];
 
         for (const table of tables) {
-          const heading = table.closest('div')?.querySelector('h3, h4, h5, .font-bold, .font-semibold')?.textContent?.trim() || 'Học kỳ';
-          const rows = Array.from(table.querySelectorAll('tbody tr'));
+          let heading = '';
+          let prev = table.previousElementSibling;
+          while (prev && !heading) {
+            if (/Học kỳ|Năm học|HK/i.test(prev.textContent || '')) {
+              heading = prev.textContent.trim();
+              break;
+            }
+            prev = prev.previousElementSibling;
+          }
+          if (!heading) {
+            heading = table.closest('div')?.querySelector('h2, h3, h4, h5, .font-bold, .font-semibold')?.textContent?.trim() || 'Học kỳ';
+          }
+
+          const rows = Array.from(table.querySelectorAll('tbody tr, tr'));
           const grpCourses = [];
+
           for (const row of rows) {
             const cells = Array.from(row.querySelectorAll('td')).map(td => td.textContent?.trim() || '');
-            if (cells.length >= 4) {
-              const code = cells[1] || cells[0];
-              const name = cells[2] || cells[1];
-              const cred = parseInt(cells[3] || cells[2] || '0', 10) || 0;
-              const score = parseFloat(cells[4] || cells[3] || '0') || null;
-              if (code && name) {
-                const c = {
-                  course_code: code,
-                  course_name: name,
-                  credits: cred,
-                  total_score: score,
-                  semester_id: heading
-                };
-                courses.push(c);
-                grpCourses.push(c);
+            if (cells.length < 3) continue;
+
+            let codeIdx = -1;
+            if (isCourseCode(cells[0])) codeIdx = 0;
+            else if (isCourseCode(cells[1])) codeIdx = 1;
+            else if (isCourseCode(cells[2])) codeIdx = 2;
+
+            if (codeIdx >= 0) {
+              const code = cells[codeIdx];
+              const name = cells[codeIdx + 1] || '';
+
+              let cred = 0;
+              for (let c = codeIdx + 2; c < Math.min(cells.length, codeIdx + 5); c++) {
+                const credVal = parseInt(cells[c], 10);
+                if (!isNaN(credVal) && credVal >= 1 && credVal <= 15 && /^\d+$/.test(cells[c])) {
+                  cred = credVal;
+                  break;
+                }
               }
+
+              let score = null;
+              for (let s = cells.length - 1; s > codeIdx + 1; s--) {
+                const parsed = parseFloat(cells[s]);
+                if (!isNaN(parsed) && parsed >= 0.0 && parsed <= 10.0 && /^\d+(\.\d+)?$/.test(cells[s])) {
+                  score = parsed;
+                  break;
+                }
+              }
+
+              const c = {
+                course_code: code,
+                course_name: name,
+                credits: cred,
+                total_score: score,
+                semester_id: heading
+              };
+              courses.push(c);
+              grpCourses.push(c);
             }
           }
+
           if (grpCourses.length > 0) {
             semesterGroups.push({ semester_name: heading, courses: grpCourses });
           }
@@ -467,15 +602,19 @@ pub const UNIVERSAL_GUARDIAN_SCRIPT: &str = r#"
     function finalizeCallback(drl, status) {
       try {
         const cache = JSON.parse(sessionStorage.getItem('__diark_cache') || '{}');
-        cache.drl = drl || [];
-        cache.drl_sync_status = status; // 'confirmed' | 'timeout_unknown'
+        const existingDrl = Array.isArray(cache.drl) ? cache.drl : [];
+        const finalDrl = (Array.isArray(drl) && drl.length > 0) ? drl : existingDrl;
+        const finalStatus = finalDrl.length > 0 ? 'confirmed' : status;
+
+        cache.drl = finalDrl;
+        cache.drl_sync_status = finalStatus;
 
         // Payload tinh gọn, tránh vượt quá giới hạn độ dài URI trên Windows WebView2
         const payload = {
           profile: cache.profile || null,
           courses: cache.courses || [],
-          drl: drl || [],
-          drl_sync_status: status
+          drl: finalDrl,
+          drl_sync_status: finalStatus
         };
 
         const uri = 'diark-sso://callback#target=academic&data=' + encodeURIComponent(JSON.stringify(payload));
@@ -932,12 +1071,13 @@ pub fn handle_partial_checkpoint_sync(
     window_label: &str,
     fragment: &str,
 ) -> Result<(), String> {
-    let decoded = decode(fragment)
-        .map_err(|e| format!("URL decode error: {e}"))?
-        .into_owned();
-
-    let stage = extract_query_param(&decoded, "stage");
-    let data_str = extract_query_param(&decoded, "data");
+    let stage = extract_query_param(fragment, "stage");
+    let data_str = if let Some(idx) = fragment.find("data=") {
+        let raw = &fragment[idx + "data=".len()..];
+        decode(raw).unwrap_or(std::borrow::Cow::Borrowed(raw)).into_owned()
+    } else {
+        String::new()
+    };
 
     let parsed_data: serde_json::Value = if !data_str.is_empty() && data_str != "unknown" {
         serde_json::from_str(&data_str).map_err(|e| format!("JSON parse error in partial data: {e}"))?
@@ -1160,18 +1300,25 @@ pub async fn launch_portal_sso_sync(app: AppHandle) -> Result<(), String> {
                     match parse_callback_fragment(fragment) {
                         Ok((_target, data_str)) => {
                             let final_payload = merge_with_partial_state(&partial_for_nav, &window_label, &data_str);
+                            let course_count = final_payload.get("courses").and_then(|c| c.as_array()).map(|a| a.len()).unwrap_or(0);
+                            let drl_count = final_payload.get("drl").and_then(|d| d.as_array()).map(|a| a.len()).unwrap_or(0);
+                            let has_profile = final_payload.get("profile").is_some() || final_payload.get("student_id").is_some();
+                            println!("[SSO Final] Ingesting academic payload: profile={has_profile}, courses={course_count}, drl={drl_count}");
 
                             match crate::commands::academic::ingest_full_academic_payload_sync(&app_handle, final_payload) {
                                 Ok(_) => {
+                                    println!("[SSO Final] Academic sync successfully committed to SQLite!");
                                     let _ = app_handle.emit("academic-data-synced", ());
                                     let _ = app_handle.emit("sso-callback-success", "academic");
                                 }
                                 Err(err) => {
+                                    eprintln!("[SSO Final] ERROR ingesting academic payload: {err}");
                                     let _ = app_handle.emit("sso-callback-error", err.to_string());
                                 }
                             }
                         }
                         Err(err) => {
+                            eprintln!("[SSO Final] ERROR parsing callback fragment: {err}");
                             let _ = app_handle.emit("sso-callback-error", err.to_string());
                         }
                     }
