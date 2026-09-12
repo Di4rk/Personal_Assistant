@@ -225,12 +225,19 @@ pub fn set_cf_handle(db: tauri::State<'_, SharedDb>, handle: String) -> Result<(
 
     let conn = db.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
     crate::db::set_setting(&conn, "cf_handle", trimmed)
-        .map_err(|e| format!("Lỗi lưu cf_handle: {e}"))
+        .map_err(|e| format!("Lỗi lưu cf_handle: {e}"))?;
+    crate::db::set_setting(&conn, "codeforces_handle", trimmed)
+        .map_err(|e| format!("Lỗi lưu codeforces_handle: {e}"))
 }
 
 #[tauri::command]
 pub fn get_cf_handle(db: tauri::State<'_, SharedDb>) -> Result<Option<String>, String> {
     let conn = db.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
+    if let Ok(Some(h)) = crate::db::get_setting(&conn, "codeforces_handle") {
+        if !h.trim().is_empty() {
+            return Ok(Some(h));
+        }
+    }
     crate::db::get_setting(&conn, "cf_handle").map_err(|e| format!("Lỗi đọc cf_handle: {e}"))
 }
 
@@ -285,7 +292,7 @@ pub fn purge_cf_data_internal(conn: &mut rusqlite::Connection) -> Result<(), Str
         DELETE FROM submissions;
         DELETE FROM post_mortems;
         DELETE FROM daily_activity;
-        DELETE FROM settings WHERE key = 'cf_handle';
+        DELETE FROM settings WHERE key IN ('cf_handle', 'codeforces_handle');
     ").map_err(|e| e.to_string())?;
 
     // Lấy các ngày có ac_count > 0 để tính toán lại, KHÔNG xóa dòng trong life_matrix_daily

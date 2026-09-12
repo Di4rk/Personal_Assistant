@@ -216,6 +216,16 @@ export interface AcademicMacroMetricSSOT {
   updatedAt: number;
 }
 
+export interface AcademicRadarMetrics {
+  semesterId: string;
+  termGpa: number;
+  cumulativeGpa: number;
+  classification: string;
+  termCredits: number;
+  cumulativeCredits: number;
+  drl: number | null;
+}
+
 export interface SubjectPayload {
   id: string;
   subject_code: string;

@@ -62,7 +62,7 @@ export const AcademicCourseTable: React.FC<AcademicCourseTableProps> = ({
               <span className="text-zinc-400">({gpaClassification})</span>{" "}
               • DRL:{" "}
               <span className="font-mono text-amber-400 font-bold">
-                {currentMacro.drlScore}
+                {currentMacro.drlScore > 0 ? currentMacro.drlScore : "Chưa đồng bộ DRL"}
               </span>{" "}
               • Thi đua:{" "}
               <span className="font-semibold text-emerald-400">
@@ -86,7 +86,7 @@ export const AcademicCourseTable: React.FC<AcademicCourseTableProps> = ({
               )}{" "}
               • DRL:{" "}
               <span className="font-mono text-amber-400 font-bold">
-                {currentSemester.actualDrl}
+                {currentSemester.actualDrl > 0 ? currentSemester.actualDrl : "Chưa đồng bộ DRL"}
               </span>{" "}
               • Thi đua:{" "}
               <span className="font-semibold text-emerald-400">

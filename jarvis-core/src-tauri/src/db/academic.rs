@@ -257,6 +257,13 @@ pub fn ensure_academic_schema(conn: &Connection) -> SqlResult<()> {
             FOREIGN KEY(semester_id) REFERENCES academic_semesters(id) ON DELETE CASCADE
         );
 
+        CREATE TABLE IF NOT EXISTS academic_drl (
+            semester   TEXT PRIMARY KEY,
+            score      INTEGER NOT NULL,
+            grade_text TEXT NOT NULL DEFAULT '',
+            updated_at INTEGER NOT NULL
+        );
+
         CREATE INDEX IF NOT EXISTS idx_courses_semester ON academic_courses(semester_id);
         CREATE INDEX IF NOT EXISTS idx_drl_semester    ON academic_drl_events(semester_id);
 
@@ -320,6 +327,7 @@ pub fn ensure_academic_schema(conn: &Connection) -> SqlResult<()> {
     ensure_column("academic_macro_metrics", "rank_label", "TEXT NOT NULL DEFAULT 'Chưa xếp loại'")?;
     ensure_column("academic_macro_metrics", "classification", "TEXT NOT NULL DEFAULT 'Chưa xếp loại'")?;
     ensure_column("academic_macro_metrics", "drl", "INTEGER")?;
+    ensure_column("academic_drl", "grade_text", "TEXT NOT NULL DEFAULT ''")?;
 
     ensure_column("academic_courses", "process_point", "REAL")?;
     ensure_column("academic_courses", "practice_point", "REAL")?;

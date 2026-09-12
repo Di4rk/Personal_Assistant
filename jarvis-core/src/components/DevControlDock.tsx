@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { IS_DEV } from "../constants/app";
 import { resetIdentityState } from "../lib/tauri-client";
 import { Wrench, RotateCcw, AlertTriangle, Loader2, Shield } from "lucide-react";
@@ -25,6 +26,28 @@ export const DevControlDock: React.FC<DevControlDockProps> = ({ onResetIdentity 
     } finally {
       setIsResetting(false);
       setIsOpen(false);
+    }
+  };
+
+  const handleDevFactoryReset = async () => {
+    const confirmed = window.confirm(
+      "[DEV] CẢNH BÁO: Thao tác này sẽ xóa sạch toàn bộ SQLite (trừ Curriculums tĩnh), xóa sạch Cache trình duyệt và đưa app về Genesis Zero-State. Bạn có chắc chắn không?"
+    );
+    if (!confirmed) return;
+
+    try {
+      // 1. Chờ backend xóa sạch SQLite và truncate WAL
+      await invoke('reset_user_data_to_genesis');
+
+      // 2. Dọn dẹp toàn bộ Web Storage
+      localStorage.clear();
+      sessionStorage.clear();
+
+      // 3. Khởi động lại cửa sổ để App tự rehydrate về Zero-State
+      window.location.reload();
+    } catch (err) {
+      console.error("Factory reset failed:", err);
+      alert(`Reset thất bại: ${err}`);
     }
   };
 
@@ -67,6 +90,15 @@ export const DevControlDock: React.FC<DevControlDockProps> = ({ onResetIdentity 
                 <span>⚡ RESET ONBOARDING</span>
               </>
             )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => void handleDevFactoryReset()}
+            className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg hover:bg-red-500/20 active:scale-95 transition-all cursor-pointer"
+          >
+            <AlertTriangle className="w-3.5 h-3.5 text-red-400" />
+            <span>Factory Reset (Genesis)</span>
           </button>
         </div>
       )}

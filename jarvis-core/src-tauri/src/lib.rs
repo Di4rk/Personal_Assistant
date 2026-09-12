@@ -54,6 +54,7 @@ macro_rules! registered_commands {
             commands::academic::submit_portal_transcript,
             commands::academic::get_academic_macro_metrics,
             commands::academic::get_academic_macro_metrics_ssot,
+            commands::academic::get_academic_radar_metrics,
             commands::academic::ingest_full_academic_payload,
             commands::academic::ingest_dynamic_academic_data,
             commands::academic::purge_and_seed_canonical_academic_data,
@@ -92,6 +93,7 @@ macro_rules! registered_commands {
             commands::settings::save_setting,
             commands::settings::get_system_storage_stats,
             commands::settings::reset_identity_state,
+            commands::settings::reset_user_data_to_genesis,
             // Plugin Engine
             commands::plugins::list_installed_plugins,
             commands::plugins::toggle_plugin,
@@ -136,6 +138,7 @@ macro_rules! registered_commands {
             commands::academic::submit_portal_transcript,
             commands::academic::get_academic_macro_metrics,
             commands::academic::get_academic_macro_metrics_ssot,
+            commands::academic::get_academic_radar_metrics,
             commands::academic::ingest_full_academic_payload,
             commands::academic::ingest_dynamic_academic_data,
             commands::academic::purge_and_seed_canonical_academic_data,
@@ -174,6 +177,7 @@ macro_rules! registered_commands {
             commands::settings::save_setting,
             commands::settings::get_system_storage_stats,
             commands::settings::reset_identity_state,
+            commands::settings::reset_user_data_to_genesis,
             // Plugin Engine
             commands::plugins::list_installed_plugins,
             commands::plugins::toggle_plugin,
@@ -201,6 +205,7 @@ pub fn run() {
             app.manage(shared_db.clone());
             app.manage(AppState { db: shared_db.clone() });
             app.manage(crate::commands::portal_auth::WatchdogRegistry::new());
+            app.manage(crate::commands::portal_auth::PartialStateRegistry::default());
 
             // HTTP client (15s timeout) — dùng chung giữa worker và IPC command
             // trigger_cf_sync, tránh tạo nhiều pool connection mỗi khi user bấm sync.

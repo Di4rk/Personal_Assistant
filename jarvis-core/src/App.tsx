@@ -23,6 +23,10 @@ import { PluginMarketplaceModal } from "./components/PluginMarketplaceModal";
 import { PluginViewportRouter } from "./features/plugins/PluginViewportRouter";
 import { SettingsModal } from "./components/SettingsModal";
 import { useSettingsStore } from "./stores/useSettingsStore";
+import { useAppStore } from "./stores/useAppStore";
+import { useAcademicStore } from "./stores/useAcademicStore";
+import { useWecodeStore } from "./stores/useWecodeStore";
+import { usePrivacyStore } from "./stores/usePrivacyStore";
 import { listInstalledPlugins } from "./lib/plugin-sdk";
 import type { PluginMetaDto } from "./types/plugin";
 import { Code2, GraduationCap, FolderGit2, Blocks, Settings } from "lucide-react";
@@ -48,6 +52,18 @@ export default function App() {
     setProfileState({ status: "needs-onboarding" });
   };
 
+  const handleResetToGenesis = useCallback(() => {
+    // 1. Reset các stores cục bộ
+    useAcademicStore.getState().reset();
+    useWecodeStore.getState().reset();
+    useAppStore.getState().reset();
+    usePrivacyStore.getState().setDemoMode(false);
+
+    // 2. Chuyển view về Genesis onboarding flow và tab mặc định
+    setActiveTab("academic");
+    setProfileState({ status: "needs-onboarding" });
+  }, []);
+
   // Load Plugins on mount
   const loadPlugins = useCallback(async () => {
     try {
@@ -61,6 +77,16 @@ export default function App() {
   useEffect(() => {
     void loadPlugins();
   }, [loadPlugins]);
+
+  useEffect(() => {
+    const handleOpenSettings = (e: Event) => {
+      const customEvent = e as CustomEvent<{ tab?: "profile" | "plugins" | "services" | "system" }>;
+      const tab = customEvent.detail?.tab || "profile";
+      useSettingsStore.getState().openSettings(tab);
+    };
+    window.addEventListener("open-settings", handleOpenSettings);
+    return () => window.removeEventListener("open-settings", handleOpenSettings);
+  }, []);
 
   // Load User Profile on mount
   useEffect(() => {
@@ -218,6 +244,7 @@ export default function App() {
     total_daily_xp: number;
     first_ac_count: number;
   }>("cf://sync-event", handleLegacySync);
+  useTauriEvent<void>("system-genesis-reset", handleResetToGenesis);
 
   if (profileState.status === "loading") {
     return null;
@@ -292,16 +319,6 @@ export default function App() {
               <span>Native Vault</span>
             </button>
           </nav>
-
-          {/* Plugin Hub Button */}
-          <button
-            onClick={() => setIsPluginModalOpen(true)}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 text-xs font-mono text-cyan-400 transition-colors cursor-pointer"
-            title="Mở Plugin Hub & Registry"
-          >
-            <Blocks className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Plugins</span>
-          </button>
 
           {/* Settings Hub Button */}
           <button
@@ -396,7 +413,7 @@ export default function App() {
         ))}
       </div>
 
-      <SettingsModal />
+      <SettingsModal onResetGenesis={handleResetToGenesis} />
       <DevControlDock onResetIdentity={handleResetIdentity} />
     </div>
   );

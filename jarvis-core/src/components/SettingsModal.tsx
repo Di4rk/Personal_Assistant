@@ -4,6 +4,8 @@ import { usePrivacyStore } from '../stores/usePrivacyStore';
 import {
   getUserProfile,
   saveUserProfile,
+  getCfHandle,
+  setCfHandle,
   getStudentProfile,
   getSystemStorageStats,
   launchPortalSsoSync,
@@ -27,7 +29,11 @@ import {
   ExternalLink,
 } from 'lucide-react';
 
-export const SettingsModal: React.FC = () => {
+interface SettingsModalProps {
+  onResetGenesis?: () => void;
+}
+
+export const SettingsModal: React.FC<SettingsModalProps> = () => {
   const { isOpen, activeTab, closeSettings, setActiveTab } = useSettingsStore();
   const { isDemoMode, toggleDemoMode } = usePrivacyStore();
 
@@ -35,6 +41,9 @@ export const SettingsModal: React.FC = () => {
   const [nickname, setNickname] = useState('');
   const [isSavingNick, setIsSavingNick] = useState(false);
   const [nickSavedSuccess, setNickSavedSuccess] = useState(false);
+  const [cfHandle, setCfHandleState] = useState('');
+  const [isSavingCf, setIsSavingCf] = useState(false);
+  const [cfSavedSuccess, setCfSavedSuccess] = useState(false);
   const [studentProfile, setStudentProfile] = useState<StudentProfilePayload | null>(null);
 
   // Tab: Plugins state
@@ -68,6 +77,10 @@ export const SettingsModal: React.FC = () => {
     getUserProfile()
       .then((p) => setNickname(p.nickname || 'Diark'))
       .catch((e) => console.error('Failed to get user profile:', e));
+
+    getCfHandle()
+      .then((h) => setCfHandleState(h || ''))
+      .catch((e) => console.error('Failed to get CF handle:', e));
 
     getStudentProfile()
       .then((sp) => setStudentProfile(sp))
@@ -103,6 +116,23 @@ export const SettingsModal: React.FC = () => {
       console.error('Lỗi khi lưu Nickname:', err);
     } finally {
       setIsSavingNick(false);
+    }
+  };
+
+  const handleSaveCfHandle = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = cfHandle.trim();
+    if (!trimmed || isSavingCf) return;
+    setIsSavingCf(true);
+    setCfSavedSuccess(false);
+    try {
+      await setCfHandle(trimmed);
+      setCfSavedSuccess(true);
+      setTimeout(() => setCfSavedSuccess(false), 2500);
+    } catch (err) {
+      console.error('Lỗi khi lưu Codeforces handle:', err);
+    } finally {
+      setIsSavingCf(false);
     }
   };
 
@@ -267,6 +297,33 @@ export const SettingsModal: React.FC = () => {
                   </div>
                   {nickSavedSuccess && (
                     <p className="font-mono text-xs text-emerald-400">✓ Đã cập nhật chữ ký định danh thành công.</p>
+                  )}
+                </form>
+
+                {/* Codeforces Handle Config */}
+                <form onSubmit={handleSaveCfHandle} className="space-y-3">
+                  <label className="block font-mono text-xs uppercase tracking-wider text-slate-300">
+                    Codeforces Handle
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={cfHandle}
+                      onChange={(e) => setCfHandleState(e.target.value)}
+                      className="flex-1 rounded-lg border border-slate-700 bg-slate-800/80 px-3 py-2 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500"
+                      placeholder="Nhập handle Codeforces (ví dụ: tourist)..."
+                    />
+                    <button
+                      type="submit"
+                      disabled={isSavingCf || !cfHandle.trim()}
+                      className="flex items-center gap-1.5 rounded-lg bg-cyan-600 px-4 py-2 font-mono text-xs font-bold uppercase text-slate-950 hover:bg-cyan-500 transition disabled:opacity-50 cursor-pointer"
+                    >
+                      {isSavingCf ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                      <span>Lưu</span>
+                    </button>
+                  </div>
+                  {cfSavedSuccess && (
+                    <p className="font-mono text-xs text-emerald-400">✓ Đã cập nhật Codeforces handle thành công.</p>
                   )}
                 </form>
 

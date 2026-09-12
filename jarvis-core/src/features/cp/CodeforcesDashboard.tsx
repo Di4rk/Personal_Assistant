@@ -1,9 +1,14 @@
-import React from "react";
-import CfSettingsPanel from "../../components/CfSettingsPanel";
+import React, { useEffect, useState } from "react";
 import LevelProgressBar from "../../components/LevelProgressBar";
 import ActivityHeatmap from "../../components/ActivityHeatmap";
 import { classifyVerdict, type DailyStats, type LevelInfo, type SubmissionRecord } from "../../types";
-import type { UserProfileDto, SyncCompletePayload } from "../../lib/tauri-client";
+import {
+  getCfHandle,
+  triggerCfSync,
+  type UserProfileDto,
+  type SyncCompletePayload,
+} from "../../lib/tauri-client";
+import { Loader2 } from "lucide-react";
 
 interface CodeforcesDashboardProps {
   stats?: DailyStats | null;
@@ -22,21 +27,130 @@ export const CodeforcesDashboard: React.FC<CodeforcesDashboardProps> = ({
   submissions = [],
   userProfile,
   onSyncComplete,
-  onProfileUpdated,
-  onResetIdentity,
   onSelectSubmission,
 }) => {
+  const [handle, setHandle] = useState<string>("");
+  const [isLoadingHandle, setIsLoadingHandle] = useState<boolean>(true);
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  const [syncFeedback, setSyncFeedback] = useState<{ success: boolean; message: string } | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const fetchHandle = () => {
+      getCfHandle()
+        .then((saved) => {
+          if (mounted) {
+            setHandle(saved ?? "");
+            setIsLoadingHandle(false);
+          }
+        })
+        .catch((err) => {
+          console.error("Lỗi lấy CF handle:", err);
+          if (mounted) setIsLoadingHandle(false);
+        });
+    };
+
+    fetchHandle();
+
+    window.addEventListener("focus", fetchHandle);
+    return () => {
+      mounted = false;
+      window.removeEventListener("focus", fetchHandle);
+    };
+  }, [userProfile]);
+
+  const handleTriggerSync = async () => {
+    if (!handle.trim() || isSyncing) return;
+    setIsSyncing(true);
+    setSyncFeedback(null);
+
+    try {
+      const result = await triggerCfSync();
+      onSyncComplete?.(result);
+      setSyncFeedback({
+        success: result.success,
+        message: result.success
+          ? (result.new_submissions_count > 0
+              ? `+${result.new_submissions_count} submission mới — ${result.message}`
+              : result.message)
+          : result.message,
+      });
+    } catch (err) {
+      setSyncFeedback({
+        success: false,
+        message: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
-      {/* Top row settings */}
-      <div>
-        <CfSettingsPanel
-          onSyncComplete={onSyncComplete}
-          userProfile={userProfile}
-          onProfileUpdated={onProfileUpdated}
-          onResetIdentity={onResetIdentity}
-        />
-      </div>
+      {/* Top row: Handle banner or Unlinked Empty State */}
+      {!isLoadingHandle && !handle.trim() ? (
+        <div className="flex flex-col items-center justify-center p-8 text-center rounded-xl border border-border bg-card/40">
+          <p className="text-sm text-muted-foreground">Chưa liên kết tài khoản Codeforces.</p>
+          <button
+            type="button"
+            onClick={() => {
+              // Mở Settings Modal và chuyển sang tab Profile
+              window.dispatchEvent(new CustomEvent("open-settings", { detail: { tab: "profile" } }));
+            }}
+            className="mt-3 px-4 py-1.5 text-xs font-medium rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+          >
+            Thiết lập Handle trong Cài đặt
+          </button>
+        </div>
+      ) : (
+        <div className="rounded-xl bg-zinc-900 border border-zinc-800 p-4 flex flex-col gap-3 font-mono shadow-sm">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <span className="relative flex h-2 w-2 shrink-0">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+              </span>
+              <h3 className="text-sm font-semibold text-zinc-100">
+                Codeforces Engine: <span className="text-cyan-400 font-bold">@{handle}</span>
+              </h3>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  window.dispatchEvent(new CustomEvent("open-settings", { detail: { tab: "profile" } }));
+                }}
+                className="text-xs text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer"
+              >
+                Đổi Handle
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleTriggerSync()}
+                disabled={isSyncing}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 active:bg-cyan-700 text-xs font-medium text-white transition-colors cursor-pointer disabled:opacity-50"
+              >
+                {isSyncing ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Syncing…</span>
+                  </>
+                ) : (
+                  <span>Đồng bộ ngay</span>
+                )}
+              </button>
+            </div>
+          </div>
+
+          {syncFeedback && (
+            <p className={`text-xs ${syncFeedback.success ? "text-emerald-400" : "text-red-400"}`}>
+              {syncFeedback.success ? "✓" : "✕"} {syncFeedback.message}
+            </p>
+          )}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* --- Stats card hôm nay --- */}
@@ -87,7 +201,7 @@ export const CodeforcesDashboard: React.FC<CodeforcesDashboardProps> = ({
         <h3 className="text-sm font-medium text-zinc-400 mb-3 font-mono">Recent Submissions</h3>
         {submissions.length === 0 ? (
           <p className="text-sm text-zinc-600 font-mono">
-            Chưa có submission nào. Nhập CF handle và bấm &quot;Save &amp; Sync&quot; để bắt đầu.
+            Chưa có submission nào. Bấm &quot;Đồng bộ ngay&quot; để tải các bài nộp gần đây.
           </p>
         ) : (
           <div className="space-y-1.5">
