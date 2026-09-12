@@ -5,6 +5,9 @@ pub mod settings;
 pub mod vault;
 pub mod workspace;
 
+#[cfg(debug_assertions)]
+pub mod dev_tools;
+
 use chrono::Local;
 use rusqlite::params;
 use serde::Serialize;
