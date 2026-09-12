@@ -33,6 +33,7 @@ rusqlite = { version = "0.31", features = ["bundled", "bundled-full"] }
 # --- Local HTTP server (nhận webhook từ Chrome extension) ---
 axum = "0.7"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+tokio-util = "0.7"
 tower-http = { version = "0.5", features = ["cors"] }
 
 # --- HTTP client cho background worker gọi Codeforces API ---
