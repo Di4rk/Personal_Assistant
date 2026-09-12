@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { AlertTriangle, RotateCcw, X, Loader2 } from "lucide-react";
+import { AlertTriangle, RotateCcw, X, Loader2, Shield } from "lucide-react";
+import { usePrivacyStore } from "../stores/usePrivacyStore";
 import {
   getCfHandle,
   setCfHandle,
@@ -285,7 +286,16 @@ export default function CfSettingsPanel({
           </button>
         </div>
 
-        <div className="flex justify-end pt-1">
+        <div className="flex items-center justify-end gap-2 pt-1">
+          <button
+            type="button"
+            onClick={() => usePrivacyStore.getState().toggleDemoMode()}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-slate-950/80 hover:bg-slate-900 text-cyan-400 border border-cyan-500/40 text-[11px] font-mono transition-colors cursor-pointer"
+            title="Bật/tắt chế độ Demo Privacy Masking"
+          >
+            <Shield className="w-3 h-3" />
+            <span>Demo Privacy Mode</span>
+          </button>
           <button
             type="button"
             onClick={() => setIsResetModalOpen(true)}
