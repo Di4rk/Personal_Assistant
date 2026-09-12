@@ -1,6 +1,8 @@
 import React, { useState } from "react";
 import { Terminal, Shield, ArrowRight, AlertCircle, Sparkles } from "lucide-react";
 import { DEFAULT_NICKNAME, DEFAULT_MAJOR, APP_SUBTITLE } from "../../../constants/app";
+import { ARCHETYPE_PRESETS } from "../../../constants/archetypes";
+import { togglePlugin } from "../../../lib/plugin-sdk";
 
 interface GenesisModalProps {
   onComplete: (nickname: string, major: string) => void;
@@ -9,6 +11,7 @@ interface GenesisModalProps {
 export const GenesisModal: React.FC<GenesisModalProps> = ({ onComplete }) => {
   const [nickname, setNickname] = useState<string>(DEFAULT_NICKNAME);
   const [major, setMajor] = useState<string>(DEFAULT_MAJOR);
+  const [selectedArchetype, setSelectedArchetype] = useState<string>("uit_standard");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
@@ -29,11 +32,26 @@ export const GenesisModal: React.FC<GenesisModalProps> = ({ onComplete }) => {
 
     setError(null);
     setIsSubmitting(true);
-    try {
-      onComplete(trimmedNick, trimmedMajor);
-    } catch (err) {
-      setError(typeof err === "string" ? err : "Đã xảy ra lỗi khi khởi tạo hệ thống.");
-      setIsSubmitting(false);
+
+    const preset = ARCHETYPE_PRESETS.find((p) => p.id === selectedArchetype);
+    if (preset) {
+      Promise.all(preset.defaultPlugins.map((pId) => togglePlugin(pId, true)))
+        .catch((err) => console.error("Lỗi kích hoạt plugin archetype:", err))
+        .finally(() => {
+          try {
+            onComplete(trimmedNick, trimmedMajor);
+          } catch (err) {
+            setError(typeof err === "string" ? err : "Đã xảy ra lỗi khi khởi tạo hệ thống.");
+            setIsSubmitting(false);
+          }
+        });
+    } else {
+      try {
+        onComplete(trimmedNick, trimmedMajor);
+      } catch (err) {
+        setError(typeof err === "string" ? err : "Đã xảy ra lỗi khi khởi tạo hệ thống.");
+        setIsSubmitting(false);
+      }
     }
   };
 
@@ -114,6 +132,39 @@ export const GenesisModal: React.FC<GenesisModalProps> = ({ onComplete }) => {
               disabled={isSubmitting}
               className="w-full rounded-lg bg-slate-900 border border-slate-800 px-4 py-2.5 text-sm text-white font-mono placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500 transition-colors"
             />
+          </div>
+
+          {/* 2x2 Archetype Cards */}
+          <div>
+            <label className="block text-xs font-mono font-medium text-slate-300 mb-2 uppercase tracking-wider">
+              Archetype Preset &amp; Plugin Bundle
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              {ARCHETYPE_PRESETS.map((arch) => {
+                const isSelected = selectedArchetype === arch.id;
+                return (
+                  <div
+                    key={arch.id}
+                    onClick={() => setSelectedArchetype(arch.id)}
+                    className={`cursor-pointer rounded-lg border p-3 transition-all ${
+                      isSelected
+                        ? "border-cyan-500 bg-cyan-950/40 shadow-[0_0_15px_rgba(6,182,212,0.15)]"
+                        : "border-slate-800 bg-slate-900/60 hover:border-slate-700"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs font-bold text-white font-mono">{arch.name}</span>
+                      <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-cyan-400">
+                        {arch.badge}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 font-mono leading-relaxed line-clamp-2">
+                      {arch.description}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
           </div>
 
           {/* Error display */}
