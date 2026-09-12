@@ -376,3 +376,24 @@ export async function resetIdentityState(): Promise<void> {
   return invoke<void>("reset_identity_state");
 }
 
+export interface StudentProfilePayload {
+  student_id: string;
+  full_name: string;
+  faculty: string;
+  major_code: string;
+  specialization: string;
+  student_class: string;
+  curriculum_code: string;
+  cohort: string;
+}
+
+export async function getStudentProfile(): Promise<StudentProfilePayload | null> {
+  try {
+    return await invoke<StudentProfilePayload | null>("get_student_profile");
+  } catch (err) {
+    console.error("[tauri-client] getStudentProfile lỗi:", err);
+    return null;
+  }
+}
+
+
