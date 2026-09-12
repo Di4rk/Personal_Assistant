@@ -73,6 +73,8 @@ fn spawn_watchdog(app: AppHandle, window_label: String, token: CancellationToken
     });
 }
 
+pub const INJECTED_PORTAL_SCRIPT: &str = include_str!("../../../injected_portal_script.js");
+
 pub const UNIVERSAL_GUARDIAN_SCRIPT: &str = r#"
 (() => {
   if (window.__DIARK_ACTIVE_GUARDIAN__) return;
@@ -1066,11 +1068,17 @@ pub struct TranscriptDataPayload {
     pub drl: serde_json::Value,
 }
 
+pub fn get_portal_harvester_registry_static() -> crate::services::portal_harvester::PortalHarvesterRegistry {
+    static REGISTRY: std::sync::OnceLock<crate::services::portal_harvester::PortalHarvesterRegistry> = std::sync::OnceLock::new();
+    REGISTRY.get_or_init(crate::services::portal_harvester::PortalHarvesterRegistry::new).clone()
+}
+
 pub fn handle_partial_checkpoint_sync(
     registry: &PartialStateRegistry,
     window_label: &str,
     fragment: &str,
 ) -> Result<(), String> {
+    let target = extract_query_param(fragment, "target");
     let stage = extract_query_param(fragment, "stage");
     let data_str = if let Some(idx) = fragment.find("data=") {
         let raw = &fragment[idx + "data=".len()..];
@@ -1084,6 +1092,23 @@ pub fn handle_partial_checkpoint_sync(
     } else {
         serde_json::Value::Null
     };
+
+    // Support Portal Harvester v2.1 (Chunked Scheme Protocol)
+    if target == "portal_meta" {
+        if let Ok(meta) = serde_json::from_value::<crate::services::portal_harvester::PortalMetaPayload>(parsed_data.clone()) {
+            let harvester_reg = get_portal_harvester_registry_static();
+            let _ = harvester_reg.handle_meta(window_label, meta);
+            println!("[SSO Checkpoint] Portal meta received for window: {window_label}");
+        }
+    } else if target == "portal_courses" {
+        let batch_idx: usize = extract_query_param(fragment, "batch_idx").parse().unwrap_or(0);
+        if let Ok(chunk) = serde_json::from_value::<Vec<crate::services::portal_harvester::AcademicCourseItem>>(parsed_data.clone()) {
+            let harvester_reg = get_portal_harvester_registry_static();
+            let chunk_len = chunk.len();
+            let _ = harvester_reg.handle_course_batch(window_label, batch_idx, chunk);
+            println!("[SSO Checkpoint] Portal course batch {batch_idx} ({chunk_len} courses) received for window: {window_label}");
+        }
+    }
 
     if let Ok(mut guard) = registry.states.lock() {
         let entry = guard.entry(window_label.to_string()).or_default();
@@ -1172,6 +1197,10 @@ pub fn cleanup_window_session(
 ) {
     if let Ok(mut states) = partial_registry.states.lock() {
         states.remove(window_label);
+    }
+    let harvester_reg = get_portal_harvester_registry_static();
+    if let Ok(mut sessions) = harvester_reg.sessions.lock() {
+        sessions.remove(window_label);
     }
     watchdog_registry.cancel(window_label);
     if let Some(w) = app_handle.get_webview_window(window_label) {
@@ -1289,7 +1318,7 @@ pub async fn launch_portal_sso_sync(app: AppHandle) -> Result<(), String> {
         .inner_size(860.0, 720.0)
         .resizable(true)
         .always_on_top(true)
-        .initialization_script(UNIVERSAL_GUARDIAN_SCRIPT)
+        .initialization_script(INJECTED_PORTAL_SCRIPT)
         .on_navigation(move |url| {
             let url_str = url.as_str();
 
@@ -1298,22 +1327,40 @@ pub async fn launch_portal_sso_sync(app: AppHandle) -> Result<(), String> {
                 let callback_fragment = url.fragment().or_else(|| url_str.strip_prefix("diark-sso://callback#"));
                 if let Some(fragment) = callback_fragment {
                     match parse_callback_fragment(fragment) {
-                        Ok((_target, data_str)) => {
-                            let final_payload = merge_with_partial_state(&partial_for_nav, &window_label, &data_str);
-                            let course_count = final_payload.get("courses").and_then(|c| c.as_array()).map(|a| a.len()).unwrap_or(0);
-                            let drl_count = final_payload.get("drl").and_then(|d| d.as_array()).map(|a| a.len()).unwrap_or(0);
-                            let has_profile = final_payload.get("profile").is_some() || final_payload.get("student_id").is_some();
-                            println!("[SSO Final] Ingesting academic payload: profile={has_profile}, courses={course_count}, drl={drl_count}");
-
-                            match crate::commands::academic::ingest_full_academic_payload_sync(&app_handle, final_payload) {
-                                Ok(_) => {
-                                    println!("[SSO Final] Academic sync successfully committed to SQLite!");
-                                    let _ = app_handle.emit("academic-data-synced", ());
-                                    let _ = app_handle.emit("sso-callback-success", "academic");
+                        Ok((target, data_str)) => {
+                            if target == "portal" {
+                                let harvester_reg = get_portal_harvester_registry_static();
+                                let db_state = app_handle.state::<SharedDb>();
+                                let db_arc = db_state.inner().clone();
+                                match harvester_reg.commit_session(&window_label, db_arc) {
+                                    Ok(total_courses) => {
+                                        println!("[SSO Final] Portal Harvester committed {total_courses} courses successfully!");
+                                        let _ = app_handle.emit("academic-data-synced", ());
+                                        let _ = app_handle.emit("sso-callback-success", "portal");
+                                    }
+                                    Err(err) => {
+                                        eprintln!("[SSO Final] ERROR in Portal Harvester commit: {err}");
+                                        let _ = app_handle.emit("sso-callback-error", err.to_string());
+                                        let _ = app_handle.emit_to("main", "portal-sync-failed", err.to_string());
+                                    }
                                 }
-                                Err(err) => {
-                                    eprintln!("[SSO Final] ERROR ingesting academic payload: {err}");
-                                    let _ = app_handle.emit("sso-callback-error", err.to_string());
+                            } else {
+                                let final_payload = merge_with_partial_state(&partial_for_nav, &window_label, &data_str);
+                                let course_count = final_payload.get("courses").and_then(|c| c.as_array()).map(|a| a.len()).unwrap_or(0);
+                                let drl_count = final_payload.get("drl").and_then(|d| d.as_array()).map(|a| a.len()).unwrap_or(0);
+                                let has_profile = final_payload.get("profile").is_some() || final_payload.get("student_id").is_some();
+                                println!("[SSO Final] Ingesting academic payload: profile={has_profile}, courses={course_count}, drl={drl_count}");
+
+                                match crate::commands::academic::ingest_full_academic_payload_sync(&app_handle, final_payload) {
+                                    Ok(_) => {
+                                        println!("[SSO Final] Academic sync successfully committed to SQLite!");
+                                        let _ = app_handle.emit("academic-data-synced", ());
+                                        let _ = app_handle.emit("sso-callback-success", "academic");
+                                    }
+                                    Err(err) => {
+                                        eprintln!("[SSO Final] ERROR ingesting academic payload: {err}");
+                                        let _ = app_handle.emit("sso-callback-error", err.to_string());
+                                    }
                                 }
                             }
                         }
