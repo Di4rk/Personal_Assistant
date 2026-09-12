@@ -349,52 +349,86 @@ pub const UNIVERSAL_GUARDIAN_SCRIPT: &str = r#"
       checkCourses();
     }
 
-    // Stage 3: /sinh-vien/diem-ren-luyen với Column-Index Scraper & Quiet-Period Guard
+    // Stage 3: /sinh-vien/diem-ren-luyen với Dynamic Header Scraper & Quiet-Period Guard
     function extractDRLFromDOM() {
-      // 1. Kiểm tra tiêu đề trang và đảm bảo skeleton đã biến mất
-      const hasPulse = document.querySelector('.animate-pulse');
-      if (hasPulse) return null;
+      // 1. Chỉ hoãn khi container bảng thực sự đang hiển thị hiệu ứng loading/skeleton
+      const table = document.querySelector('table, div[role="table"], div[role="rowgroup"]');
+      if (table && table.querySelector('.animate-pulse, .loading-spinner, .ant-spin')) {
+        const rowCount = table.querySelectorAll('tbody tr, div[role="row"]').length;
+        if (rowCount === 0) return null;
+      }
 
       const results = [];
       
-      // 2. Định vị bảng dữ liệu (STT | Học kỳ | Lớp chuyên ngành | Điểm | Xếp loại | Ghi chú)
-      const rows = document.querySelectorAll('table tbody tr, div[role="row"]');
-      if (rows.length > 0) {
-        rows.forEach(row => {
-          // Tìm các ô con (td hoặc div cell)
-          const cells = row.querySelectorAll('td, div[role="cell"], div.grid > div');
-          
-          if (cells.length >= 4) {
-            // Cột 1: Học kỳ (index 1)
-            const semesterText = cells[1].textContent.trim();
-            // Cột 3: Điểm rèn luyện (index 3)
-            const scoreText = cells[3].textContent.trim();
-            // Cột 4: Xếp loại (index 4 nếu có)
-            const gradeText = cells.length >= 5 ? cells[4].textContent.trim() : '';
+      // 2. Định vị bảng dữ liệu và quét header nếu có
+      const allRows = Array.from(document.querySelectorAll('table tbody tr, table tr, div[role="row"]'));
+      // Lọc bỏ header rows
+      const dataRows = allRows.filter(r => !r.querySelector('th') && r.querySelectorAll('td, div[role="cell"], div.grid > div').length >= 2);
 
-            // Validate: Ô học kỳ phải chứa từ khóa "Học kỳ" hoặc "Hè"
-            if (/Học kỳ|Hè/i.test(semesterText)) {
-              // Bóc tách điểm số từ ô điểm duy nhất, không quét cả dòng
-              const scoreMatch = scoreText.match(/\b([0-9]{1,2}|100)\b/);
-              if (scoreMatch) {
-                const scoreVal = parseInt(scoreMatch[1], 10);
-                
-                // Chuẩn hóa xếp loại trung tính, KHÔNG gán ngầm "Xuất sắc"
-                let normalizedGrade = '';
-                if (/Xuất sắc/i.test(gradeText)) normalizedGrade = 'Xuất sắc';
-                else if (/Tốt/i.test(gradeText)) normalizedGrade = 'Tốt';
-                else if (/Khá/i.test(gradeText)) normalizedGrade = 'Khá';
-                else if (/Trung bình/i.test(gradeText)) normalizedGrade = 'Trung bình';
-                else if (/Yếu/i.test(gradeText)) normalizedGrade = 'Yếu';
-                else normalizedGrade = gradeText || 'Chưa xếp loại';
+      let headerSemIdx = -1;
+      let headerScoreIdx = -1;
+      let headerGradeIdx = -1;
 
-                results.push({
-                  semester: semesterText.replace(/\s+/g, ' '),
-                  score: scoreVal,
-                  grade_text: normalizedGrade
-                });
+      if (table) {
+        const ths = Array.from(table.querySelectorAll('th, thead td'));
+        ths.forEach((th, idx) => {
+          const t = th.textContent.trim().toLowerCase();
+          if (t.includes('học kỳ') || t.includes('kỳ')) headerSemIdx = idx;
+          else if (t.includes('điểm') || t.includes('đrl')) headerScoreIdx = idx;
+          else if (t.includes('xếp loại') || t.includes('loại')) headerGradeIdx = idx;
+        });
+      }
+
+      if (dataRows.length > 0) {
+        dataRows.forEach(row => {
+          const cells = Array.from(row.querySelectorAll('td, div[role="cell"], div.grid > div'));
+          if (cells.length < 2) return;
+
+          let semText = '';
+          let scoreVal = null;
+          let gradeText = '';
+
+          if (headerSemIdx >= 0 && headerScoreIdx >= 0 && cells[headerSemIdx] && cells[headerScoreIdx]) {
+            semText = cells[headerSemIdx].textContent.trim();
+            const scoreMatch = cells[headerScoreIdx].textContent.trim().match(/\b([0-9]{1,2}|100)\b/);
+            if (scoreMatch) scoreVal = parseInt(scoreMatch[1], 10);
+            if (headerGradeIdx >= 0 && cells[headerGradeIdx]) {
+              gradeText = cells[headerGradeIdx].textContent.trim();
+            }
+          } else {
+            // Flexible cell scanning
+            for (let i = 0; i < cells.length; i++) {
+              const txt = cells[i].textContent.trim();
+              if (/Học kỳ|Hè/i.test(txt) && !semText) {
+                semText = txt;
+                continue;
+              }
+              if (scoreVal === null) {
+                const sm = txt.match(/^\s*([0-9]{1,2}|100)\s*$/);
+                if (sm) {
+                  scoreVal = parseInt(sm[1], 10);
+                  if (cells[i + 1]) {
+                    gradeText = cells[i + 1].textContent.trim();
+                  }
+                }
               }
             }
+          }
+
+          if (semText && /Học kỳ|Hè/i.test(semText) && scoreVal !== null) {
+            let normalizedGrade = '';
+            if (/Xuất sắc/i.test(gradeText)) normalizedGrade = 'Xuất sắc';
+            else if (/Tốt/i.test(gradeText)) normalizedGrade = 'Tốt';
+            else if (/Khá/i.test(gradeText)) normalizedGrade = 'Khá';
+            else if (/Trung bình/i.test(gradeText)) normalizedGrade = 'Trung bình';
+            else if (/Yếu/i.test(gradeText)) normalizedGrade = 'Yếu';
+            else normalizedGrade = gradeText || 'Chưa xếp loại';
+
+            results.push({
+              semester: semText.replace(/\s+/g, ' '),
+              score: scoreVal,
+              grade_text: normalizedGrade
+            });
           }
         });
       }
@@ -410,7 +444,6 @@ pub const UNIVERSAL_GUARDIAN_SCRIPT: &str = r#"
           const parentRow = termNode.closest('div.flex, div.grid, tr') || termNode.parentElement;
           if (parentRow) {
             const text = parentRow.textContent || '';
-            // Bắt điểm số nằm cạnh text học kỳ
             const scoreMatch = text.match(/(?:Điểm|STT)?.*?(\b[0-9]{1,2}|100\b)/);
             if (scoreMatch) {
               let grade = 'Chưa xếp loại';
@@ -432,20 +465,45 @@ pub const UNIVERSAL_GUARDIAN_SCRIPT: &str = r#"
     }
 
     function finalizeCallback(drl, status) {
-      const cache = JSON.parse(sessionStorage.getItem('__diark_cache') || '{}');
-      cache.drl = drl;
-      cache.drl_sync_status = status; // 'confirmed' | 'timeout_unknown'
+      try {
+        const cache = JSON.parse(sessionStorage.getItem('__diark_cache') || '{}');
+        cache.drl = drl || [];
+        cache.drl_sync_status = status; // 'confirmed' | 'timeout_unknown'
 
-      // Không cần sessionStorage.setItem nữa, bắn trực tiếp scheme độc quyền
-      window.location.href = 'diark-sso://callback#target=academic&data=' + encodeURIComponent(JSON.stringify(cache));
+        // Payload tinh gọn, tránh vượt quá giới hạn độ dài URI trên Windows WebView2
+        const payload = {
+          profile: cache.profile || null,
+          courses: cache.courses || [],
+          drl: drl || [],
+          drl_sync_status: status
+        };
+
+        const uri = 'diark-sso://callback#target=academic&data=' + encodeURIComponent(JSON.stringify(payload));
+        dispatchCustomScheme(uri);
+
+        // Fallback sau 250ms phòng trường hợp iframe scheme bị chặn
+        setTimeout(() => {
+          try { window.location.href = uri; } catch (_) {}
+        }, 250);
+      } catch (err) {
+        const fallbackUri = 'diark-sso://callback#target=academic&data=' + encodeURIComponent(JSON.stringify({
+          drl: drl || [],
+          drl_sync_status: status
+        }));
+        dispatchCustomScheme(fallbackUri);
+      }
     }
 
+    let drlHarvestStarted = false;
     function harvestDRLWithGuard() {
+      if (drlHarvestStarted) return;
+      drlHarvestStarted = true;
+
       const startTime = performance.now();
       let lastNetworkActivity = startTime;
       let resolved = false;
       const HARD_CAP_MS = 6000;     // Trần tối đa 6s
-      const QUIET_PERIOD_MS = 3000; // 3s không phát sinh network mới sau khi DOM complete
+      const QUIET_PERIOD_MS = 2500; // 2.5s không phát sinh network mới sau khi DOM complete
 
       window.__diark_touch_network = function() {
         lastNetworkActivity = performance.now();
@@ -453,37 +511,42 @@ pub const UNIVERSAL_GUARDIAN_SCRIPT: &str = r#"
 
       function attemptFinalize() {
         if (resolved) return;
-        let drlData = extractDRLFromDOM();
-        if (!drlData) {
-          try {
-            const cache = JSON.parse(sessionStorage.getItem('__diark_cache') || '{}');
-            if (Array.isArray(cache.drl) && cache.drl.length > 0) {
-              drlData = cache.drl;
-            }
-          } catch (_) {}
-        }
-        const elapsed = performance.now() - startTime;
-        const sinceLastActivity = performance.now() - lastNetworkActivity;
+        try {
+          let drlData = extractDRLFromDOM();
+          if (!drlData) {
+            try {
+              const cache = JSON.parse(sessionStorage.getItem('__diark_cache') || '{}');
+              if (Array.isArray(cache.drl) && cache.drl.length > 0) {
+                drlData = cache.drl;
+              }
+            } catch (_) {}
+          }
+          const elapsed = performance.now() - startTime;
+          const sinceLastActivity = performance.now() - lastNetworkActivity;
 
-        // Case 1: Đã bóc tách được dữ liệu DRL hợp lệ (>= 1 bản ghi) -> chốt ngay lập tức
-        if (drlData !== null && drlData.length > 0) {
-          resolved = true;
-          finalizeCallback(drlData, 'confirmed');
-          return;
-        }
+          // Case 1: Đã bóc tách được dữ liệu DRL hợp lệ (>= 1 bản ghi) -> chốt ngay lập tức
+          if (drlData !== null && drlData.length > 0) {
+            resolved = true;
+            finalizeCallback(drlData, 'confirmed');
+            return;
+          }
 
-        // Case 2: Đạt trần thời gian 6s
-        if (elapsed >= HARD_CAP_MS) {
+          // Case 2: Đạt trần thời gian 6s
+          if (elapsed >= HARD_CAP_MS) {
+            resolved = true;
+            finalizeCallback(drlData, drlData === null ? 'timeout_unknown' : 'confirmed');
+            return;
+          }
+
+          // Case 3: Trang đã load xong và yên ắng trong quiet period
+          if (sinceLastActivity >= QUIET_PERIOD_MS && document.readyState === 'complete') {
+            resolved = true;
+            finalizeCallback(drlData, drlData === null ? 'timeout_unknown' : 'confirmed');
+            return;
+          }
+        } catch (err) {
           resolved = true;
           finalizeCallback(null, 'timeout_unknown');
-          return;
-        }
-
-        // Case 3: Trang đã load xong và yên ắng trong 3s
-        if (sinceLastActivity >= QUIET_PERIOD_MS && document.readyState === 'complete') {
-          resolved = true;
-          finalizeCallback(drlData, drlData === null ? 'timeout_unknown' : 'confirmed');
-          return;
         }
       }
 
@@ -1090,23 +1153,9 @@ pub async fn launch_portal_sso_sync(app: AppHandle) -> Result<(), String> {
         .on_navigation(move |url| {
             let url_str = url.as_str();
 
-            // 1. Pass-through các trang nội bộ cần scrape
-            if url_str.contains("/sinh-vien/") || url_str.contains("/trang-chu") || url_str.contains("/home") {
-                return true;
-            }
-
-            // 2. Intercept Partial Checkpoints (TUYỆT ĐỐI KHÔNG GHI PRODUCTION SQLITE, KHÔNG DESTROY)
-            let partial_fragment = url.fragment().or_else(|| url_str.strip_prefix("diark-sso://partial#"));
-            if url_str.starts_with("diark-sso://partial") || partial_fragment.is_some() {
-                if let Some(fragment) = partial_fragment {
-                    let _ = handle_partial_checkpoint_sync(&partial_for_nav, &window_label, fragment);
-                }
-                return false; // Chặn iframe navigation thật
-            }
-
-            // 3. Intercept Final Callback (Atomic Persist)
-            let callback_fragment = url.fragment().or_else(|| url_str.strip_prefix("diark-sso://callback#"));
-            if url_str.starts_with("diark-sso://callback") || callback_fragment.is_some() {
+            // 1. Intercept Final Callback (Atomic Persist)
+            if url_str.starts_with("diark-sso://callback") {
+                let callback_fragment = url.fragment().or_else(|| url_str.strip_prefix("diark-sso://callback#"));
                 if let Some(fragment) = callback_fragment {
                     match parse_callback_fragment(fragment) {
                         Ok((_target, data_str)) => {
@@ -1133,13 +1182,32 @@ pub async fn launch_portal_sso_sync(app: AppHandle) -> Result<(), String> {
                 return false;
             }
 
-            // 4. Intercept Failure
+            // 2. Intercept Partial Checkpoints (TUYỆT ĐỐI KHÔNG GHI PRODUCTION SQLITE, KHÔNG DESTROY)
+            if url_str.starts_with("diark-sso://partial") {
+                let partial_fragment = url.fragment().or_else(|| url_str.strip_prefix("diark-sso://partial#"));
+                if let Some(fragment) = partial_fragment {
+                    let _ = handle_partial_checkpoint_sync(&partial_for_nav, &window_label, fragment);
+                }
+                return false; // Chặn iframe navigation thật
+            }
+
+            // 3. Intercept Failure
             if url_str.starts_with("diark-sso://failed") {
                 let reason = extract_query_param(url_str, "reason");
                 let _ = app_handle.emit("sso-callback-failed", &reason);
                 let _ = app_handle.emit_to("main", "portal-sync-failed", &reason);
                 cleanup_window_session(&partial_for_nav, &watchdog_for_nav, &app_handle, &window_label);
                 return false;
+            }
+
+            // 4. Chặn bất kỳ scheme nội bộ diark-sso:// nào khác không bị rò rỉ ra WebView
+            if url_str.starts_with("diark-sso://") {
+                return false;
+            }
+
+            // 5. Pass-through các trang nội bộ cần scrape
+            if url_str.contains("/sinh-vien/") || url_str.contains("/trang-chu") || url_str.contains("/home") {
+                return true;
             }
 
             true
@@ -1194,8 +1262,8 @@ pub async fn launch_wecode_sso_sync(app: AppHandle) -> Result<(), String> {
             }
 
             // Intercept Callback Success
-            let fragment_opt = url.fragment().or_else(|| url_str.strip_prefix("diark-sso://callback#"));
-            if url_str.starts_with(CALLBACK_SCHEME) || fragment_opt.is_some() {
+            if url_str.starts_with(CALLBACK_SCHEME) {
+                let fragment_opt = url.fragment().or_else(|| url_str.strip_prefix("diark-sso://callback#"));
                 if let Some(fragment) = fragment_opt {
                     match parse_callback_fragment(fragment) {
                         Ok((target, data_str)) => {
@@ -1572,4 +1640,33 @@ mod tests {
         assert_eq!(merged["courses"][0]["course_code"], "CS001");
         assert_eq!(merged["drl"][0]["score"], 95);
     }
+
+    #[test]
+    fn test_academic_callback_scheme_parsing_and_isolation() {
+        let payload = json!({
+            "drl": [
+                {
+                    "semester": "2024-2025.2",
+                    "score": 88,
+                    "grade_text": "Tốt"
+                }
+            ],
+            "drl_sync_status": "confirmed"
+        });
+        let payload_str = payload.to_string();
+        let encoded_payload = urlencoding::encode(&payload_str);
+        let uri = format!("diark-sso://callback#target=academic&data={encoded_payload}");
+
+        assert!(uri.starts_with("diark-sso://callback"));
+        assert!(!uri.starts_with("diark-sso://partial"));
+
+        let fragment = uri.strip_prefix("diark-sso://callback#").unwrap();
+        let (target, data_str) = parse_callback_fragment(fragment).unwrap();
+        assert_eq!(target, "academic");
+
+        let parsed: serde_json::Value = serde_json::from_str(&data_str).unwrap();
+        assert_eq!(parsed["drl_sync_status"], "confirmed");
+        assert_eq!(parsed["drl"][0]["score"], 88);
+    }
 }
+
