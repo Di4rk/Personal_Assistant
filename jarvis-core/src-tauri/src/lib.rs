@@ -135,6 +135,21 @@ pub fn run() {
 
             // Chặn sự kiện đóng cửa sổ (CloseRequested) trên main window để ẩn vào System Tray
             if let Some(main_window) = app.get_webview_window("main") {
+                let nickname: String = {
+                    if let Ok(conn) = shared_db.lock() {
+                        conn.query_row(
+                            "SELECT value FROM settings WHERE key = 'user_nickname'",
+                            [],
+                            |row| row.get(0),
+                        ).unwrap_or_else(|_| "Diark".to_string())
+                    } else {
+                        "Diark".to_string()
+                    }
+                };
+
+                let _ = main_window.set_title(&format!("{nickname} // OS"));
+                let _ = main_window.show();
+
                 let window_clone = main_window.clone();
                 main_window.on_window_event(move |event| {
                     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
@@ -163,6 +178,8 @@ pub fn run() {
             commands::set_cf_handle,
             commands::get_cf_handle,
             commands::trigger_cf_sync,
+            commands::settings::get_user_profile,
+            commands::settings::save_user_profile,
             commands::post_mortem::save_post_mortem,
             commands::post_mortem::get_post_mortem,
             commands::post_mortem::delete_post_mortem,

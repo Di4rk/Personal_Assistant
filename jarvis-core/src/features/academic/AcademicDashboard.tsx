@@ -11,7 +11,6 @@ import { SyncPortalButton } from "./components/SyncPortalButton";
 import { AcademicSummaryCards } from "./components/AcademicSummaryCards";
 import { SemesterTabs } from "./components/SemesterTabs";
 import { AcademicCourseTable } from "./components/AcademicCourseTable";
-import { useAppVersion } from "@/shared/hooks/useAppVersion";
 import {
   computeCategoryRadarData,
   type CategoryAxisData,
@@ -30,7 +29,6 @@ interface AcademicDashboardProps {
 export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
   className = "",
 }) => {
-  const appVersion = useAppVersion();
   const {
     overview,
     selectedSemesterId,
@@ -183,11 +181,8 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
               <GraduationCap className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-zinc-100 flex items-center gap-2">
+              <h2 className="text-lg font-bold text-zinc-100">
                 UIT Academic Radar
-                <span className="text-xs font-mono px-2 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700/50">
-                  {appVersion}
-                </span>
               </h2>
               <p className="text-xs text-zinc-500">
                 Hệ thống theo dõi lộ trình học tập, phân tích năng lực và dự báo tốt nghiệp

@@ -28,12 +28,61 @@ let toastIdCounter = 0;
 import { AcademicDashboard } from "./features/academic";
 import { VaultDashboard } from "./features/vault";
 import { CommandPaletteModal } from "./features/command-palette";
+import { GenesisModal } from "./features/onboarding";
 import { Code2, GraduationCap, FolderGit2 } from "lucide-react";
-import { useAppVersion } from "@/shared/hooks/useAppVersion";
+import { APP_VERSION, APP_SUBTITLE } from "./constants/app";
+import {
+  getUserProfile,
+  saveUserProfile,
+  type UserProfileDto,
+} from "./lib/tauri-client";
+
+type ProfileState =
+  | { status: "loading" }
+  | { status: "needs-onboarding" }
+  | { status: "ready"; profile: UserProfileDto };
 
 export default function App() {
-  const appVersion = useAppVersion();
+  const [profileState, setProfileState] = useState<ProfileState>({ status: "loading" });
   const [activeTab, setActiveTab] = useState<"cp" | "academic" | "vault">("academic");
+
+  // Load User Profile on mount
+  useEffect(() => {
+    let isMounted = true;
+    getUserProfile()
+      .then((profile) => {
+        if (!isMounted) return;
+        if (!profile.is_initialized) {
+          setProfileState({ status: "needs-onboarding" });
+        } else {
+          setProfileState({ status: "ready", profile });
+        }
+      })
+      .catch((err) => {
+        console.error("Failed to load user profile:", err);
+        if (isMounted) {
+          setProfileState({
+            status: "ready",
+            profile: { nickname: "Diark", major: "CS", is_initialized: false },
+          });
+        }
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const handleGenesisComplete = async (nickname: string, major: string) => {
+    try {
+      await saveUserProfile(nickname, major);
+      setProfileState({
+        status: "ready",
+        profile: { nickname, major, is_initialized: true },
+      });
+    } catch (err) {
+      console.error("Failed to save user profile in genesis:", err);
+    }
+  };
 
   // ============================================================
   // SINGLE SOURCE OF TRUTH: mọi state hiển thị dồn về đây, các
@@ -142,76 +191,91 @@ export default function App() {
     first_ac_count: number;
   }>("cf://sync-event", handleLegacySync);
 
+  if (profileState.status === "loading") {
+    return null;
+  }
+
+  if (profileState.status === "needs-onboarding") {
+    return <GenesisModal onComplete={handleGenesisComplete} />;
+  }
+
+  const { profile } = profileState;
+
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100 p-6">
-      <header className="mb-6">
-        <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div className="flex items-center gap-6 flex-wrap">
-            <div>
-              <h1 className="text-xl font-bold text-zinc-100 flex items-center gap-2">
-                JARVIS Personal OS
-                <span className="text-xs font-mono px-2 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700/50">
-                  {appVersion}
-                </span>
-              </h1>
-              <p className="text-sm text-zinc-500">Diark Core Dashboard</p>
-            </div>
+    <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col">
+      <header className="flex items-center justify-between border-b border-slate-800 bg-slate-950 px-6 py-4">
+        <div>
+          <h1 className="text-xl font-black tracking-wider text-white">
+            {profile.nickname.toUpperCase()} <span className="text-cyan-400">// OS</span>
+          </h1>
+          <p className="text-xs font-mono text-slate-400">{APP_SUBTITLE}</p>
+        </div>
 
-            {/* Navigation Tabs */}
-            <nav className="flex items-center bg-zinc-900 border border-zinc-800 rounded-lg p-1 text-xs">
-              <button
-                onClick={() => setActiveTab("academic")}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium transition-colors ${
-                  activeTab === "academic"
-                    ? "bg-violet-600 text-white shadow-sm"
-                    : "text-zinc-400 hover:text-zinc-200"
-                }`}
-              >
-                <GraduationCap className="w-3.5 h-3.5" />
-                <span>Academic Radar</span>
-              </button>
-              <button
-                onClick={() => setActiveTab("cp")}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium transition-colors ${
-                  activeTab === "cp"
-                    ? "bg-violet-600 text-white shadow-sm"
-                    : "text-zinc-400 hover:text-zinc-200"
-                }`}
-              >
-                <Code2 className="w-3.5 h-3.5" />
-                <span>Codeforces &amp; ICPC</span>
-              </button>
-              <button
-                onClick={() => setActiveTab("vault")}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium transition-colors ${
-                  activeTab === "vault"
-                    ? "bg-violet-600 text-white shadow-sm"
-                    : "text-zinc-400 hover:text-zinc-200"
-                }`}
-              >
-                <FolderGit2 className="w-3.5 h-3.5" />
-                <span>Native Vault</span>
-              </button>
-            </nav>
-          </div>
+        <div className="flex items-center gap-4">
+          {/* Navigation Tabs */}
+          <nav className="flex items-center bg-zinc-900 border border-zinc-800 rounded-lg p-1 text-xs">
+            <button
+              onClick={() => setActiveTab("academic")}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium transition-colors cursor-pointer ${
+                activeTab === "academic"
+                  ? "bg-violet-600 text-white shadow-sm"
+                  : "text-zinc-400 hover:text-zinc-200"
+              }`}
+            >
+              <GraduationCap className="w-3.5 h-3.5" />
+              <span>Academic Radar</span>
+            </button>
+            <button
+              onClick={() => setActiveTab("cp")}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium transition-colors cursor-pointer ${
+                activeTab === "cp"
+                  ? "bg-violet-600 text-white shadow-sm"
+                  : "text-zinc-400 hover:text-zinc-200"
+              }`}
+            >
+              <Code2 className="w-3.5 h-3.5" />
+              <span>Codeforces &amp; ICPC</span>
+            </button>
+            <button
+              onClick={() => setActiveTab("vault")}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium transition-colors cursor-pointer ${
+                activeTab === "vault"
+                  ? "bg-violet-600 text-white shadow-sm"
+                  : "text-zinc-400 hover:text-zinc-200"
+              }`}
+            >
+              <FolderGit2 className="w-3.5 h-3.5" />
+              <span>Native Vault</span>
+            </button>
+          </nav>
 
-          {activeTab === "cp" && (
-            <div className="w-full sm:w-80">
-              <CfSettingsPanel onSyncComplete={handleSyncComplete} />
-            </div>
-          )}
+          <span className="rounded border border-slate-700 bg-slate-900 px-2 py-0.5 font-mono text-xs text-cyan-400">
+            {APP_VERSION}
+          </span>
         </div>
       </header>
 
-      {activeTab === "academic" ? (
-        <AcademicDashboard />
-      ) : activeTab === "vault" ? (
-        <VaultDashboard />
-      ) : (
-        <>
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            {/* --- Stats card hôm nay --- */}
-            <div className="rounded-xl bg-zinc-900 border border-zinc-800 p-4">
+      <main className="flex-1 p-6">
+        {activeTab === "academic" ? (
+          <AcademicDashboard />
+        ) : activeTab === "vault" ? (
+          <VaultDashboard />
+        ) : (
+          <>
+            {/* Top row settings & active indicator in CP tab */}
+            <div className="mb-4">
+              <CfSettingsPanel
+                onSyncComplete={handleSyncComplete}
+                userProfile={profile}
+                onProfileUpdated={(updated) =>
+                  setProfileState({ status: "ready", profile: updated })
+                }
+              />
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+              {/* --- Stats card hôm nay --- */}
+              <div className="rounded-xl bg-zinc-900 border border-zinc-800 p-4">
               <h3 className="text-sm font-medium text-zinc-400 mb-3">Hôm nay</h3>
               {stats ? (
                 <div className="grid grid-cols-2 gap-3">
@@ -288,8 +352,9 @@ export default function App() {
           </div>
         )}
       </div>
-      </>
-      )}
+          </>
+        )}
+      </main>
 
       <PostMortemModal
         isOpen={isModalOpen}

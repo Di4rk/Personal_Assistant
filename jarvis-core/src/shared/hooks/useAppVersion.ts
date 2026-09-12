@@ -1,8 +1,9 @@
 import { useState, useEffect } from "react";
 import { getVersion } from "@tauri-apps/api/app";
+import { APP_VERSION } from "../../constants/app";
 
 export function useAppVersion(): string {
-  const [version, setVersion] = useState<string>("v0.3.3");
+  const [version, setVersion] = useState<string>(APP_VERSION);
 
   useEffect(() => {
     let isMounted = true;
