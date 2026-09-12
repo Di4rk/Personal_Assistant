@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 use urlencoding::decode;
@@ -15,6 +15,13 @@ const TRANSCRIPT_URL: &str = "https://portal.uit.edu.vn/sinh-vien/bang-diem";
 const CALLBACK_SCHEME: &str = "diark-sso://callback";
 const CALLBACK_FAIL_SCHEME: &str = "diark-sso://failed";
 
+const WECODE_LOGIN_URL: &str = "https://khmt.uit.edu.vn/wecode25/it00x/login";
+#[allow(dead_code)]
+const WECODE_ASSIGNMENTS_URL: &str = "https://khmt.uit.edu.vn/wecode25/it00x/assignments";
+const WECODE_LOGIN_MARKER: &str = "/wecode25/it00x/login";
+const WECODE_ASSIGNMENTS_MARKER: &str = "/wecode25/it00x/assignments";
+const MAX_LOGIN_REDIRECT_ATTEMPTS: u8 = 2;
+
 #[derive(Deserialize, Debug)]
 struct PortalIngestionPayload {
     profile: crate::commands::academic::StudentProfilePayload,
@@ -22,34 +29,75 @@ struct PortalIngestionPayload {
     drl: serde_json::Value,
 }
 
-const PORTAL_PROFILE_HARVEST_SCRIPT: &str = r#"
+const RESILIENT_PORTAL_HARVEST_SCRIPT: &str = r#"
 (async () => {
-  try {
-    const getTextByLabel = (label) => {
-      const nodes = Array.from(document.querySelectorAll('div, span, td'));
-      const target = nodes.find(n => n.textContent?.trim().startsWith(label));
-      if (!target) return '';
-      const valNode = target.nextElementSibling || target.parentElement?.querySelector('.font-medium, .font-semibold');
-      return valNode?.textContent?.trim() || '';
-    };
-    const profile = {
-      student_id: getTextByLabel('Mã sinh viên') || document.querySelector('.font-mono')?.textContent?.trim() || '',
-      full_name: getTextByLabel('Họ và tên') || document.querySelector('h2.font-heading')?.textContent?.trim() || '',
-      faculty: getTextByLabel('Khoa') || '',
-      major_code: getTextByLabel('Ngành') || '',
-      specialization: getTextByLabel('Chuyên ngành') || '',
-      student_class: getTextByLabel('Lớp sinh hoạt') || '',
-      curriculum_code: getTextByLabel('CTĐT cụ thể') || '',
-      cohort: getTextByLabel('Khóa') || '',
-    };
-    if (!profile.student_id) {
-      window.location.href = 'diark-sso://failed#reason=profile_dom_empty';
+  const TIMEOUT_MS = 8000;
+
+  const findLabelNode = (label) => {
+    const nodes = Array.from(document.querySelectorAll('div, span, td, p'));
+    return nodes.find((n) => n.textContent?.trim().startsWith(label));
+  };
+
+  const getValueForLabel = (label) => {
+    const target = findLabelNode(label);
+    if (!target) return '';
+    const valNode =
+      target.nextElementSibling ||
+      target.parentElement?.querySelector('.font-medium, .font-semibold');
+    return valNode?.textContent?.trim() || '';
+  };
+
+  const buildPayload = () => ({
+    student_id: getValueForLabel('Mã sinh viên'),
+    full_name: getValueForLabel('Họ và tên'),
+    faculty: getValueForLabel('Khoa'),
+    major_code: getValueForLabel('Ngành'),
+    specialization: getValueForLabel('Chuyên ngành'),
+    student_class: getValueForLabel('Lớp sinh hoạt'),
+    curriculum_code: getValueForLabel('CTĐT cụ thể'),
+    cohort: getValueForLabel('Khóa'),
+  });
+
+  const sendResult = (payload) => {
+    window.location.href =
+      'diark-sso://callback#target=portal_profile&data=' +
+      encodeURIComponent(JSON.stringify(payload));
+  };
+
+  const sendFailure = (reason) => {
+    window.location.href = 'diark-sso://failed#reason=' + reason;
+  };
+
+  if (findLabelNode('Mã sinh viên')) {
+    const payload = buildPayload();
+    if (payload.student_id) {
+      sendResult(payload);
       return;
     }
-    window.location.href = 'diark-sso://callback#target=portal_profile&data=' + encodeURIComponent(JSON.stringify(profile));
-  } catch (err) {
-    window.location.href = 'diark-sso://failed#reason=portal_dom_parse_error';
   }
+
+  let settled = false;
+  const observer = new MutationObserver(() => {
+    if (settled) return;
+    if (findLabelNode('Mã sinh viên')) {
+      const payload = buildPayload();
+      if (payload.student_id) {
+        settled = true;
+        observer.disconnect();
+        clearTimeout(timeoutHandle);
+        sendResult(payload);
+      }
+    }
+  });
+
+  observer.observe(document.body, { childList: true, subtree: true });
+
+  const timeoutHandle = setTimeout(() => {
+    if (settled) return;
+    settled = true;
+    observer.disconnect();
+    sendFailure('profile_dom_timeout');
+  }, TIMEOUT_MS);
 })();
 "#;
 
@@ -141,6 +189,49 @@ const WECODE_SUBMISSION_HARVEST_SCRIPT: &str = r#"
     window.location.href = 'diark-sso://callback#target=wecode_submissions&data=' + encodeURIComponent(JSON.stringify(submissions));
   } catch (err) {
     window.location.href = 'diark-sso://failed#reason=wecode_sub_parse_error';
+  }
+})();
+"#;
+
+const WECODE_ASSIGNMENTS_HARVEST_SCRIPT: &str = r#"
+(() => {
+  try {
+    const rows = Array.from(document.querySelectorAll('#DataTables_Table_0 tbody tr, table tbody tr'));
+    const assignments = rows.map(tr => {
+      const idStr = tr.getAttribute('data-id') || tr.querySelector('td:nth-child(1)')?.textContent?.trim() || '0';
+      const className = tr.querySelector('td:nth-child(2)')?.textContent?.trim() || '';
+      const titleEl = tr.querySelector('td:nth-child(3) a');
+      const title = titleEl?.textContent?.trim() || '';
+      const statsText = tr.querySelector('td:nth-child(4)')?.textContent?.trim() || '';
+      const startTime = tr.querySelector('td:nth-child(5)')?.textContent?.trim() || '';
+      const finishTime = tr.querySelector('td:nth-child(6)')?.textContent?.trim() || '';
+
+      let totalSubmits = 0;
+      let totalProblems = 0;
+      const subMatch = statsText.match(/(\d+)\s*sub/i);
+      if (subMatch) totalSubmits = parseInt(subMatch[1], 10);
+      const probMatch = statsText.match(/(\d+)\s*prob/i);
+      if (probMatch) totalProblems = parseInt(probMatch[1], 10);
+
+      const isFinished = statsText.toLowerCase().includes('finished');
+
+      return {
+        id: parseInt(idStr, 10),
+        class_name: className,
+        title: title,
+        author: null,
+        total_problems: totalProblems,
+        total_submits: totalSubmits,
+        status_text: statsText,
+        start_time: startTime,
+        finish_time: finishTime,
+        is_finished: isFinished
+      };
+    }).filter(a => a.id > 0);
+
+    window.location.href = 'diark-sso://callback#target=wecode_assignments&data=' + encodeURIComponent(JSON.stringify(assignments));
+  } catch (err) {
+    window.location.href = 'diark-sso://failed#reason=wecode_assignments_parse_error';
   }
 })();
 "#;
@@ -246,7 +337,7 @@ pub async fn launch_portal_sso_sync(app: AppHandle) -> Result<(), String> {
             let current_stage = stage_for_nav.load(Ordering::SeqCst);
             if current_stage == STAGE_AWAITING_PROFILE && url_str.contains(PROFILE_PAGE_MARKER) {
                 if let Some(win) = app_for_nav.get_webview_window("uit-sso-login") {
-                    let _ = win.eval(PORTAL_PROFILE_HARVEST_SCRIPT);
+                    let _ = win.eval(RESILIENT_PORTAL_HARVEST_SCRIPT);
                 }
             } else if current_stage == STAGE_AWAITING_TRANSCRIPT && url_str.contains(TRANSCRIPT_PAGE_MARKER) {
                 if let Some(win) = app_for_nav.get_webview_window("uit-sso-login") {
@@ -272,11 +363,16 @@ pub async fn launch_wecode_sso_sync(app: AppHandle) -> Result<(), String> {
     }
 
     let auth_url = WebviewUrl::External(
-        "https://khmt.uit.edu.vn/wecode25/it00x/submissions"
+        WECODE_LOGIN_URL
             .parse()
             .map_err(|e| format!("Invalid Wecode URL: {e}"))?,
     );
 
+    let redirect_attempts = Arc::new(AtomicU8::new(0));
+    let already_navigated_to_assignments = Arc::new(AtomicBool::new(false));
+
+    let redirect_attempts_for_nav = redirect_attempts.clone();
+    let already_nav_for_nav = already_navigated_to_assignments.clone();
     let app_for_nav = app.clone();
 
     let window = WebviewWindowBuilder::new(&app, "wecode-sso-login", auth_url)
@@ -304,7 +400,31 @@ pub async fn launch_wecode_sso_sync(app: AppHandle) -> Result<(), String> {
                 return false;
             }
 
-            if url_str.contains("submissions") || url_str.contains("assignments") {
+            // Redirect-loop guard for login page
+            if url_str.contains(WECODE_LOGIN_MARKER) {
+                let attempts = redirect_attempts_for_nav.fetch_add(1, Ordering::SeqCst);
+                if attempts >= MAX_LOGIN_REDIRECT_ATTEMPTS {
+                    let _ = app_for_nav.emit_to(
+                        "main",
+                        "wecode-sync-failed",
+                        "Quá số lần chuyển hướng đăng nhập (phát hiện vòng lặp)".to_string(),
+                    );
+                    close_wecode_window(&app_for_nav);
+                    return false;
+                }
+            }
+
+            // On assignments page: trigger harvest
+            if url_str.contains(WECODE_ASSIGNMENTS_MARKER) {
+                if !already_nav_for_nav.swap(true, Ordering::SeqCst) {
+                    if let Some(win) = app_for_nav.get_webview_window("wecode-sso-login") {
+                        let _ = win.eval(WECODE_ASSIGNMENTS_HARVEST_SCRIPT);
+                    }
+                }
+            }
+
+            // Support submissions page harvest
+            if url_str.contains("submissions") {
                 if let Some(win) = app_for_nav.get_webview_window("wecode-sso-login") {
                     let _ = win.eval(WECODE_SUBMISSION_HARVEST_SCRIPT);
                 }
@@ -358,7 +478,45 @@ fn handle_sync_payload(app: &AppHandle, raw_payload: String) {
             return;
         }
 
-        // 2. Portal Profile only
+        // 2. Wecode assignments
+        if raw_payload.starts_with("target=wecode_assignments&data=") {
+            let encoded_or_json = &raw_payload["target=wecode_assignments&data=".len()..];
+            let json_str = if encoded_or_json.starts_with('%') {
+                decode(encoded_or_json).unwrap_or(std::borrow::Cow::Borrowed(encoded_or_json)).into_owned()
+            } else {
+                encoded_or_json.to_string()
+            };
+
+            #[derive(serde::Deserialize, Debug)]
+            struct AssignmentItem {
+                id: i64,
+                title: String,
+            }
+
+            let assignments: Vec<AssignmentItem> = match serde_json::from_str(&json_str) {
+                Ok(a) => a,
+                Err(e) => {
+                    let _ = app.emit_to("main", "wecode-sync-failed", format!("parse_error: {e}"));
+                    return;
+                }
+            };
+
+            let state = app.state::<SharedDb>();
+            if let Ok(conn) = state.lock() {
+                for a in &assignments {
+                    let _ = conn.execute(
+                        "INSERT INTO wecode_assignments (id, name) VALUES (?1, ?2)
+                         ON CONFLICT(id) DO UPDATE SET name = excluded.name",
+                        rusqlite::params![a.id, a.title],
+                    );
+                }
+            }
+
+            let _ = app.emit_to("main", "wecode-assignments-synced", ());
+            return;
+        }
+
+        // 3. Portal Profile only
         if raw_payload.starts_with("target=portal_profile&data=") {
             let encoded_or_json = &raw_payload["target=portal_profile&data=".len()..];
             let json_str = if encoded_or_json.starts_with('%') {
@@ -385,7 +543,7 @@ fn handle_sync_payload(app: &AppHandle, raw_payload: String) {
             return;
         }
 
-        // 3. Portal Transcript only
+        // 4. Portal Transcript only
         if raw_payload.starts_with("target=portal_transcript&data=") {
             let encoded_or_json = &raw_payload["target=portal_transcript&data=".len()..];
             let json_str = if encoded_or_json.starts_with('%') {
@@ -423,7 +581,7 @@ fn handle_sync_payload(app: &AppHandle, raw_payload: String) {
             return;
         }
 
-        // 4. Combined payload fallback
+        // 5. Combined payload fallback
         let payload: PortalIngestionPayload = match serde_json::from_str(&raw_payload) {
             Ok(p) => p,
             Err(e) => {
@@ -624,5 +782,32 @@ mod tests {
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].submission_id, 999123);
         assert_eq!(list[0].score, 100);
+    }
+
+    #[test]
+    fn test_wecode_assignments_callback_decoding() {
+        let raw_assignments = json!([
+            {
+                "id": 101,
+                "class_name": "IT001.N11",
+                "title": "Thực hành tuần 1 - Cấu trúc dữ liệu",
+                "author": null,
+                "total_problems": 5,
+                "total_submits": 12,
+                "status_text": "Finished - 5/5 prob",
+                "start_time": "2026-09-01 08:00:00",
+                "finish_time": "2026-09-07 23:59:59",
+                "is_finished": true
+            }
+        ]);
+        let json_str = serde_json::to_string(&raw_assignments).unwrap();
+        let encoded_data = urlencoding::encode(&json_str);
+        let fragment = format!("target=wecode_assignments&data={encoded_data}");
+        let callback_url = format!("diark-sso://callback#{fragment}");
+
+        assert!(callback_url.starts_with(CALLBACK_SCHEME));
+        let extracted_fragment = callback_url.split('#').nth(1).unwrap();
+        let decoded = decode(extracted_fragment).unwrap();
+        assert!(decoded.starts_with("target=wecode_assignments&data="));
     }
 }
