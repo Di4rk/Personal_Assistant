@@ -29,6 +29,7 @@ import { AcademicDashboard } from "./features/academic";
 import { VaultDashboard } from "./features/vault";
 import { CommandPaletteModal } from "./features/command-palette";
 import { GenesisModal } from "./features/onboarding";
+import { DevControlDock } from "./components/DevControlDock";
 import { Code2, GraduationCap, FolderGit2 } from "lucide-react";
 import { APP_VERSION, APP_SUBTITLE } from "./constants/app";
 import {
@@ -45,6 +46,10 @@ type ProfileState =
 export default function App() {
   const [profileState, setProfileState] = useState<ProfileState>({ status: "loading" });
   const [activeTab, setActiveTab] = useState<"cp" | "academic" | "vault">("academic");
+
+  const handleResetIdentity = () => {
+    setProfileState({ status: "needs-onboarding" });
+  };
 
   // Load User Profile on mount
   useEffect(() => {
@@ -270,6 +275,7 @@ export default function App() {
                 onProfileUpdated={(updated) =>
                   setProfileState({ status: "ready", profile: updated })
                 }
+                onResetIdentity={handleResetIdentity}
               />
             </div>
 
@@ -379,6 +385,8 @@ export default function App() {
           </div>
         ))}
       </div>
+
+      <DevControlDock onResetIdentity={handleResetIdentity} />
     </div>
   );
 }

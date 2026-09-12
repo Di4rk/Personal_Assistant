@@ -372,3 +372,7 @@ export async function saveUserProfile(nickname: string, major: string): Promise<
   return invoke<void>("save_user_profile", { nickname, major });
 }
 
+export async function resetIdentityState(): Promise<void> {
+  return invoke<void>("reset_identity_state");
+}
+

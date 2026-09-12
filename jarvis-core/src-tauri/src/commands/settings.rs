@@ -61,6 +61,16 @@ pub fn update_user_profile(
     Ok(())
 }
 
+pub fn execute_reset_identity(conn: &mut rusqlite::Connection) -> Result<(), rusqlite::Error> {
+    let tx = conn.transaction()?;
+    tx.execute(
+        "DELETE FROM settings WHERE key IN ('system_initialized', 'user_nickname', 'user_major')",
+        [],
+    )?;
+    tx.commit()?;
+    Ok(())
+}
+
 #[tauri::command]
 pub fn get_user_profile(db: State<SharedDb>) -> Result<UserProfileDto, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
@@ -82,7 +92,30 @@ pub fn save_user_profile(
     let mut conn = db.lock().map_err(|e| e.to_string())?;
     update_user_profile(&mut conn, trimmed_nick, major.trim()).map_err(|e| e.to_string())?;
 
-    let _ = window.set_title(&format!("{trimmed_nick} // OS"));
+    #[cfg(debug_assertions)]
+    let env_prefix = "[DEV] ";
+    #[cfg(not(debug_assertions))]
+    let env_prefix = "";
+
+    let _ = window.set_title(&format!("{env_prefix}{trimmed_nick} // OS"));
+
+    Ok(())
+}
+
+#[tauri::command]
+pub fn reset_identity_state(
+    db: State<SharedDb>,
+    window: WebviewWindow,
+) -> Result<(), String> {
+    let mut conn = db.lock().map_err(|e| e.to_string())?;
+    execute_reset_identity(&mut conn).map_err(|e| e.to_string())?;
+
+    #[cfg(debug_assertions)]
+    let default_title = "[DEV] // OS";
+    #[cfg(not(debug_assertions))]
+    let default_title = "// OS";
+
+    let _ = window.set_title(default_title);
 
     Ok(())
 }
@@ -116,5 +149,40 @@ mod tests {
         assert_eq!(updated_profile.nickname, "Nexus");
         assert_eq!(updated_profile.major, "AI");
         assert!(updated_profile.is_initialized);
+    }
+
+    #[test]
+    fn test_reset_identity_state_clears_only_identity_keys() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );"
+        ).unwrap();
+
+        // 1. Ghi dữ liệu định danh và một key cấu hình khác
+        update_user_profile(&mut conn, "Diark", "CS").unwrap();
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('vault_path', 'D:/Vault')",
+            [],
+        ).unwrap();
+
+        // 2. Chạy logic reset identity
+        execute_reset_identity(&mut conn).unwrap();
+
+        // 3. Xác nhận các key định danh bị xóa, query profile trả về fallback is_initialized: false
+        let reset_profile = query_user_profile(&conn).unwrap();
+        assert_eq!(reset_profile.nickname, "Diark");
+        assert_eq!(reset_profile.major, "CS");
+        assert!(!reset_profile.is_initialized);
+
+        // 4. Xác nhận key khác (vault_path) vẫn còn nguyên vẹn
+        let vault_path: String = conn.query_row(
+            "SELECT value FROM settings WHERE key = 'vault_path'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(vault_path, "D:/Vault");
     }
 }
