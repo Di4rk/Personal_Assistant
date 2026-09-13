@@ -10,16 +10,34 @@
         return new Promise(resolve => setTimeout(resolve, ms));
     }
 
-    async function waitForElement(selector, timeout = 7000) {
+    // Auth Gatekeeper: Nếu đang ở màn hình đăng nhập CAS / SSO, tuyệt đối ngủ và không can thiệp
+    function isAuthGateScreen() {
+        const host = (window.location.hostname || "").toLowerCase();
+        const path = (window.location.pathname || "").toLowerCase();
+        return host.includes("dangnhap") || host.includes("cas") || path.includes("/login") || path.includes("/cas");
+    }
+
+    async function waitForElement(selector, timeout = 8000) {
         const start = Date.now();
         while (Date.now() - start < timeout) {
             const el = document.querySelector(selector);
-            // Kiểm tra kỹ cả element và subtree xem còn skeleton pulse hay không
             const hasPulse = el && (el.classList.contains("animate-pulse") || el.querySelector('.animate-pulse'));
             if (el && !hasPulse) return el;
             await sleep(150);
         }
         return null;
+    }
+
+    async function triggerSyntheticClick(el) {
+        if (!el) return;
+        el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+        await sleep(350);
+        const start = Date.now();
+        while (Date.now() - start < 7000) {
+            const pulses = document.querySelectorAll('.animate-pulse');
+            if (pulses.length === 0) break;
+            await sleep(150);
+        }
     }
 
     // --- BƯỚC 1: CÀO HỒ SƠ HỌC VỤ ---
@@ -38,10 +56,14 @@
             return "";
         };
 
-        // Chờ người dùng đăng nhập nếu đang ở màn hình login (chờ tối đa 120s)
         let studentId = "";
-        for (let attempt = 0; attempt < 120; attempt++) {
-            // Chuyển sang tab Học vụ nếu có
+        for (let attempt = 0; attempt < 90; attempt++) {
+            if (isAuthGateScreen()) {
+                console.log("[Diark Harvester] User is at CAS/SSO login screen. Idling...");
+                await sleep(1500);
+                continue;
+            }
+
             const tabs = Array.from(document.querySelectorAll('button, a'));
             const hocVuTab = tabs.find(t => t.textContent.trim() === 'Học vụ');
             if (hocVuTab) {
@@ -71,7 +93,7 @@
 
         // Guard chống student_id rỗng sau khi chờ
         if (!studentId || studentId.length < 5) {
-            window.location.href = "diark-sso://failed#reason=INVALID_STUDENT_ID";
+            console.warn("[Diark Harvester] Cannot find student ID after waiting.");
             return;
         }
 
@@ -88,7 +110,7 @@
         buffer.profile = profileData;
         sessionStorage.setItem(HARVEST_STORAGE_KEY, JSON.stringify(buffer));
 
-        // Điều hướng thuần túy (Không có markdown artifact)
+        // Điều hướng thuần túy sang DRL
         window.location.href = "https://portal.uit.edu.vn/sinh-vien/diem-ren-luyen";
     }
 
@@ -140,6 +162,7 @@
         buffer.drl_records = drlList;
         sessionStorage.setItem(HARVEST_STORAGE_KEY, JSON.stringify(buffer));
 
+        // Điều hướng thuần túy sang Bảng điểm
         window.location.href = "https://portal.uit.edu.vn/sinh-vien/bang-diem";
     }
 
@@ -152,10 +175,9 @@
         const tabSummary = tabs.find(t => t.textContent.includes('Tổng kết') || t.textContent.includes('theo kỳ')) || tabs[0];
         const tabDetail = tabs.find(t => t.textContent.includes('Chi tiết') || t.textContent.includes('môn học')) || tabs[1];
 
-        // Slot 1: Tổng kết theo kỳ
+        // Slot 1: Tổng kết theo kỳ (Synthetic Click)
         if (tabSummary) {
-            tabSummary.click();
-            await sleep(500);
+            await triggerSyntheticClick(tabSummary);
             await waitForElement('table tbody tr');
         }
 
@@ -174,10 +196,9 @@
             }
         });
 
-        // Slot 2: Chi tiết môn học
+        // Slot 2: Chi tiết môn học (Synthetic Click & Wait for Skeleton pulse clearing)
         if (tabDetail) {
-            tabDetail.click();
-            await sleep(600);
+            await triggerSyntheticClick(tabDetail);
             await waitForElement('table');
         }
 
@@ -211,6 +232,25 @@
             }
             const semesterName = prevHeader ? prevHeader.textContent.trim() : "Unknown";
 
+            // Phân tích header table để xác định vị trí các cột điểm thành phần: QT, TH, GK, CK, HP/10
+            const thList = Array.from(tbl.querySelectorAll('thead th, tr:first-child th')).map(th => th.textContent.trim().toLowerCase());
+            let qtCol = -1, thCol = -1, gkCol = -1, ckCol = -1, hpCol = -1;
+            thList.forEach((h, idx) => {
+                if (h.includes('quá trình') || h === 'qt' || h.includes('qt')) qtCol = idx;
+                else if (h.includes('thực hành') || h === 'th' || h.includes('th')) thCol = idx;
+                else if (h.includes('giữa kỳ') || h === 'gk' || h.includes('gk')) gkCol = idx;
+                else if (h.includes('cuối kỳ') || h === 'ck' || h.includes('ck')) ckCol = idx;
+                else if (h.includes('điểm hp') || h.includes('tổng kết') || h.includes('hệ 10') || h === 'hp') hpCol = idx;
+            });
+
+            const parseCellFloat = (cells, colIdx) => {
+                if (colIdx >= 0 && colIdx < cells.length) {
+                    const val = parseFloat(cells[colIdx]?.textContent?.trim().replace(',', '.') || '');
+                    if (!isNaN(val) && val >= 0.0 && val <= 10.0) return val;
+                }
+                return null;
+            };
+
             tbl.querySelectorAll('tbody tr').forEach(r => {
                 const cells = r.querySelectorAll('td');
                 if (cells.length >= 4) {
@@ -229,19 +269,29 @@
                                 break;
                             }
                         }
+
                         let score10 = 0.0;
-                        for (let s = cells.length - 1; s > codeIdx + 1; s--) {
-                            const parsed = parseFloat(cells[s]?.textContent.trim().replace(',', '.') || '0');
-                            if (!isNaN(parsed) && parsed >= 0.0 && parsed <= 10.0 && /^\d+(\.\d+)?$/.test(cells[s]?.textContent.trim().replace(',', '.') || '')) {
-                                score10 = parsed;
-                                break;
+                        if (hpCol >= 0) {
+                            score10 = parseCellFloat(cells, hpCol) || 0.0;
+                        } else {
+                            for (let s = cells.length - 1; s > codeIdx + 1; s--) {
+                                const parsed = parseFloat(cells[s]?.textContent.trim().replace(',', '.') || '0');
+                                if (!isNaN(parsed) && parsed >= 0.0 && parsed <= 10.0 && /^\d+(\.\d+)?$/.test(cells[s]?.textContent.trim().replace(',', '.') || '')) {
+                                    score10 = parsed;
+                                    break;
+                                }
                             }
                         }
+
                         courses.push({
                             course_code: code,
                             course_name: name,
                             semester: semesterName,
                             credits: cred,
+                            score_qt: parseCellFloat(cells, qtCol >= 0 ? qtCol : 4),
+                            score_th: parseCellFloat(cells, thCol >= 0 ? thCol : 5),
+                            score_gk: parseCellFloat(cells, gkCol >= 0 ? gkCol : 6),
+                            score_ck: parseCellFloat(cells, ckCol >= 0 ? ckCol : 7),
                             score_10: score10,
                             is_passed: score10 >= 5.0 ? 1 : 0
                         });
@@ -256,6 +306,10 @@
                                 course_name: name,
                                 semester: semesterName,
                                 credits: cred,
+                                score_qt: parseCellFloat(cells, 3),
+                                score_th: parseCellFloat(cells, 4),
+                                score_gk: parseCellFloat(cells, 5),
+                                score_ck: parseCellFloat(cells, 6),
                                 score_10: rawScore,
                                 is_passed: rawScore >= 5.0 ? 1 : 0
                             });
@@ -273,18 +327,20 @@
         };
         buffer.courses = courses;
 
-        dispatchHarvestedData(buffer);
+        await dispatchHarvestedData(buffer);
     }
 
-    // --- BƯỚC 4: PHÂN ĐOÀN VÀ SỬ DỤNG HASH FRAGMENT SCHEMA ---
-    function dispatchHarvestedData(fullPayload) {
-        console.log("[Diark Harvester] Dispatching payload via Hash Fragment...");
+    // --- BƯỚC 4: TUYỆT ĐỐI KHÔNG DÙNG IFRAME - DÙNG SEQUENTIAL TOP-LEVEL NAVIGATION QUEUE ---
+    async function dispatchHarvestedData(fullPayload) {
+        console.log("[Diark Harvester] Dispatching payload via Sequential Top-Level Navigation Queue...");
         sessionStorage.removeItem(HARVEST_STORAGE_KEY);
 
         const courses = fullPayload.courses || [];
         const totalBatches = Math.ceil(courses.length / BATCH_SIZE) || 1;
 
-        // Bắn Meta trước qua hash fragment
+        const queue = [];
+
+        // 1. Meta batch
         const metaPayload = {
             profile: fullPayload.profile,
             summary: fullPayload.summary,
@@ -292,29 +348,32 @@
             drl_records: fullPayload.drl_records,
             total_course_batches: totalBatches
         };
+        queue.push(`diark-sso://partial#target=portal_meta&data=${encodeURIComponent(JSON.stringify(metaPayload))}`);
 
-        const iframeMeta = document.createElement('iframe');
-        iframeMeta.style.display = 'none';
-        iframeMeta.src = `diark-sso://partial#target=portal_meta&data=${encodeURIComponent(JSON.stringify(metaPayload))}`;
-        document.body.appendChild(iframeMeta);
-
-        // Bắn các batch khóa học qua hash fragment
+        // 2. Chunks khóa học (cách nhau an toàn)
         for (let i = 0; i < totalBatches; i++) {
             const chunk = courses.slice(i * BATCH_SIZE, (i + 1) * BATCH_SIZE);
-            const iframeChunk = document.createElement('iframe');
-            iframeChunk.style.display = 'none';
-            iframeChunk.src = `diark-sso://partial#target=portal_courses&batch_idx=${i}&data=${encodeURIComponent(JSON.stringify(chunk))}`;
-            document.body.appendChild(iframeChunk);
+            queue.push(`diark-sso://partial#target=portal_courses&batch_idx=${i}&data=${encodeURIComponent(JSON.stringify(chunk))}`);
         }
 
-        // Tín hiệu Commit cuối cùng khớp chuẩn hash fragment
-        setTimeout(() => {
-            window.location.href = `diark-sso://callback#target=portal&action=commit&total_courses=${courses.length}`;
-        }, 600);
+        // 3. Commit callback cuối cùng
+        queue.push(`diark-sso://callback#target=portal&action=commit&total_courses=${courses.length}`);
+
+        // Tuần tự bắn từng URL trên top-level window.location.href (Rust trả về false để giữ nguyên trang)
+        for (let i = 0; i < queue.length; i++) {
+            console.log(`[Diark Harvester] Emitting navigation step ${i + 1}/${queue.length}`);
+            window.location.href = queue[i];
+            await sleep(90); // 80ms - 100ms safe interval
+        }
     }
 
-    const path = window.location.pathname;
+    const path = (window.location.pathname || "").toLowerCase();
     const startHarvester = async () => {
+        if (isAuthGateScreen()) {
+            console.log("[Diark Harvester] SSO Login screen detected. Harvester stands by.");
+            return;
+        }
+
         await sleep(600);
         if (path.includes('/sinh-vien/ho-so') || path === '/' || path === '/sinh-vien') {
             await scrapeProfile();

@@ -1,6 +1,6 @@
 use serde::Deserialize;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 use tokio_util::sync::CancellationToken;
@@ -74,6 +74,8 @@ fn spawn_watchdog(app: AppHandle, window_label: String, token: CancellationToken
 }
 
 pub const INJECTED_PORTAL_SCRIPT: &str = include_str!("../../../injected_portal_script.js");
+pub const PORTAL_HARVESTER_SCRIPT: &str = include_str!("../../../scripts/portal_harvester.js");
+pub const WECODE_HARVESTER_SCRIPT: &str = include_str!("../../../scripts/wecode_harvester.js");
 
 pub const UNIVERSAL_GUARDIAN_SCRIPT: &str = r#"
 (() => {
@@ -863,7 +865,6 @@ const WECODE_LOGIN_URL: &str = "https://khmt.uit.edu.vn/wecode25/it00x/login";
 #[allow(dead_code)]
 const WECODE_ASSIGNMENTS_URL: &str = "https://khmt.uit.edu.vn/wecode25/it00x/assignments";
 const WECODE_LOGIN_MARKER: &str = "/wecode25/it00x/login";
-const WECODE_ASSIGNMENTS_MARKER: &str = "/wecode25/it00x/assignments";
 const MAX_LOGIN_REDIRECT_ATTEMPTS: u8 = 2;
 
 #[allow(dead_code)]
@@ -873,133 +874,6 @@ struct PortalIngestionPayload {
     transcript: serde_json::Value,
     drl: serde_json::Value,
 }
-
-const WECODE_SUBMISSION_HARVEST_SCRIPT: &str = r#"
-(() => {
-  try {
-    const rows = Array.from(document.querySelectorAll('table tbody tr[data-id]'));
-    const submissions = rows.map(tr => {
-      const subId = parseInt(tr.getAttribute('data-id') || '0', 10);
-      const assignId = parseInt(tr.getAttribute('data-a') || '0', 10);
-      const probId = parseInt(tr.getAttribute('data-p') || '0', 10);
-
-      const isFinal = tr.querySelector('.set_final')?.classList.contains('bi-check-circle') || false;
-      const problemName = tr.querySelector('td:nth-child(3) a')?.textContent?.trim() || '';
-      const timeText = tr.querySelector('td:nth-child(4) .small')?.textContent?.trim() || '';
-      const verdict = tr.querySelector('td.js-verdict div')?.textContent?.trim() || '';
-      const execTime = parseFloat(tr.querySelector('td.js-time')?.textContent?.trim() || '0');
-      const memKib = parseInt(tr.querySelector('td.js-mem')?.textContent?.trim() || '0', 10);
-      const score = parseInt(tr.querySelector('td.js-score span')?.textContent?.trim() || '0', 10);
-      const lang = tr.querySelector('td div[data-type="code"]')?.textContent?.trim() || 'C++';
-
-      return {
-        submission_id: subId,
-        assignment_id: assignId,
-        problem_id: probId,
-        problem_name: problemName,
-        submit_time_str: timeText,
-        verdict: verdict,
-        score: score,
-        execution_time: execTime,
-        memory_kib: memKib,
-        language: lang,
-        is_final: isFinal
-      };
-    });
-
-    window.location.href = 'diark-sso://callback#target=wecode_submissions&data=' + encodeURIComponent(JSON.stringify(submissions));
-  } catch (err) {
-    window.location.href = 'diark-sso://failed#reason=wecode_sub_parse_error';
-  }
-})();
-"#;
-
-const WECODE_ASSIGNMENTS_HARVEST_SCRIPT: &str = r#"
-(() => {
-  try {
-    let attempts = 0;
-    const maxAttempts = 40;
-    let emptyRetries = 0;
-    const maxEmptyRetries = 10;
-
-    const parseRows = (rows) => {
-      return rows.map(tr => {
-        const idStr = tr.getAttribute('data-id') || tr.querySelector('td:nth-child(1)')?.textContent?.trim() || '0';
-        const className = tr.querySelector('td:nth-child(2)')?.textContent?.trim() || '';
-        const titleEl = tr.querySelector('td:nth-child(3) a') || tr.querySelector('td:nth-child(3)');
-        const title = titleEl?.textContent?.trim() || '';
-        const statsText = tr.querySelector('td:nth-child(4)')?.textContent?.trim() || '';
-        const startTime = tr.querySelector('td:nth-child(5)')?.textContent?.trim() || '';
-        const finishTime = tr.querySelector('td:nth-child(6)')?.textContent?.trim() || '';
-
-        let totalSubmits = 0, totalProblems = 0;
-        const subMatch = statsText.match(/(\d+)\s*sub/i);
-        if (subMatch) totalSubmits = parseInt(subMatch[1], 10);
-        const probMatch = statsText.match(/(\d+)\s*prob/i);
-        if (probMatch) totalProblems = parseInt(probMatch[1], 10);
-
-        return {
-          id: parseInt(idStr, 10),
-          class_name: className,
-          title: title,
-          author: null,
-          total_problems: totalProblems,
-          total_submits: totalSubmits,
-          status_text: statsText,
-          start_time: startTime,
-          finish_time: finishTime,
-          is_finished: statsText.toLowerCase().includes('finished')
-        };
-      }).filter(a => a.id > 0);
-    };
-
-    const check = () => {
-      attempts++;
-      const isSpinning = document.querySelector('.loading-spinner, .ant-spin, [aria-busy="true"], .spinner-border, .spinner');
-      if (isSpinning && attempts < maxAttempts) {
-        setTimeout(check, 250);
-        return;
-      }
-
-      const rows = Array.from(document.querySelectorAll('#DataTables_Table_0 tbody tr, table tbody tr'));
-      const realRows = rows.filter(r => !r.classList.contains('dataTables_empty') && !r.querySelector('.dataTables_empty') && r.querySelectorAll('td').length > 1);
-
-      if (realRows.length > 0) {
-        const assignments = parseRows(realRows);
-        const result = { status: 'has_data', rows: assignments };
-        window.location.href = 'diark-sso://callback#target=wecode&data=' + encodeURIComponent(JSON.stringify(result));
-        return;
-      }
-
-      const hasEmptyMarker = document.querySelector('.empty-state, .ant-empty, .no-data, .dataTables_empty');
-      if (hasEmptyMarker) {
-        const result = { status: 'empty_confirmed', rows: [] };
-        window.location.href = 'diark-sso://callback#target=wecode&data=' + encodeURIComponent(JSON.stringify(result));
-        return;
-      }
-
-      const table = document.querySelector('#DataTables_Table_0, table');
-      if (table && emptyRetries < maxEmptyRetries) {
-        emptyRetries++;
-        setTimeout(check, 300);
-        return;
-      }
-
-      if (attempts < maxAttempts) {
-        setTimeout(check, 250);
-        return;
-      }
-
-      const result = { status: 'empty_unconfirmed', rows: [] };
-      window.location.href = 'diark-sso://callback#target=wecode&data=' + encodeURIComponent(JSON.stringify(result));
-    };
-
-    check();
-  } catch (err) {
-    window.location.href = 'diark-sso://failed#reason=wecode_assignments_parse_error';
-  }
-})();
-"#;
 
 pub fn parse_callback_fragment(fragment: &str) -> Result<(String, String), String> {
     let decoded = decode(fragment)
@@ -1073,6 +947,11 @@ pub fn get_portal_harvester_registry_static() -> crate::services::portal_harvest
     REGISTRY.get_or_init(crate::services::portal_harvester::PortalHarvesterRegistry::new).clone()
 }
 
+pub fn get_wecode_harvester_registry_static() -> crate::services::wecode_harvester::WecodeHarvesterRegistry {
+    static REGISTRY: std::sync::OnceLock<crate::services::wecode_harvester::WecodeHarvesterRegistry> = std::sync::OnceLock::new();
+    REGISTRY.get_or_init(crate::services::wecode_harvester::WecodeHarvesterRegistry::new).clone()
+}
+
 pub fn handle_partial_checkpoint_sync(
     registry: &PartialStateRegistry,
     window_label: &str,
@@ -1107,6 +986,15 @@ pub fn handle_partial_checkpoint_sync(
             let chunk_len = chunk.len();
             let _ = harvester_reg.handle_course_batch(window_label, batch_idx, chunk);
             println!("[SSO Checkpoint] Portal course batch {batch_idx} ({chunk_len} courses) received for window: {window_label}");
+        }
+    } else if target == "wecode_submissions" {
+        let batch_idx: usize = extract_query_param(fragment, "batch_idx").parse().unwrap_or(0);
+        let total_batches: usize = extract_query_param(fragment, "total_batches").parse().unwrap_or(0);
+        if let Ok(chunk) = serde_json::from_value::<Vec<crate::commands::wecode::WecodeSubmissionDto>>(parsed_data.clone()) {
+            let wecode_reg = get_wecode_harvester_registry_static();
+            let chunk_len = chunk.len();
+            let _ = wecode_reg.handle_batch(window_label, batch_idx, total_batches, chunk);
+            println!("[SSO Checkpoint] Wecode submission batch {batch_idx} ({chunk_len} subs) received for window: {window_label}");
         }
     }
 
@@ -1200,6 +1088,10 @@ pub fn cleanup_window_session(
     }
     let harvester_reg = get_portal_harvester_registry_static();
     if let Ok(mut sessions) = harvester_reg.sessions.lock() {
+        sessions.remove(window_label);
+    }
+    let wecode_reg = get_wecode_harvester_registry_static();
+    if let Ok(mut sessions) = wecode_reg.sessions.lock() {
         sessions.remove(window_label);
     }
     watchdog_registry.cancel(window_label);
@@ -1318,7 +1210,7 @@ pub async fn launch_portal_sso_sync(app: AppHandle) -> Result<(), String> {
         .inner_size(860.0, 720.0)
         .resizable(true)
         .always_on_top(true)
-        .initialization_script(INJECTED_PORTAL_SCRIPT)
+        .initialization_script(PORTAL_HARVESTER_SCRIPT)
         .on_navigation(move |url| {
             let url_str = url.as_str();
 
@@ -1435,45 +1327,59 @@ pub async fn launch_wecode_sso_sync(app: AppHandle) -> Result<(), String> {
     spawn_watchdog(app.clone(), "wecode-sso-login".to_string(), token);
 
     let redirect_attempts = Arc::new(AtomicU8::new(0));
-    let already_navigated_to_assignments = Arc::new(AtomicBool::new(false));
-
     let redirect_attempts_for_nav = redirect_attempts.clone();
-    let already_nav_for_nav = already_navigated_to_assignments.clone();
     let app_for_nav = app.clone();
+
+    let partial_state_registry = if let Some(reg) = app.try_state::<PartialStateRegistry>() {
+        reg.inner().clone()
+    } else {
+        PartialStateRegistry::default()
+    };
+    let partial_for_nav = partial_state_registry.clone();
 
     let window = WebviewWindowBuilder::new(&app, "wecode-sso-login", auth_url)
         .title("Đồng bộ Wecode Submissions")
         .inner_size(900.0, 750.0)
         .resizable(true)
         .always_on_top(true)
-        .initialization_script(UNIVERSAL_GUARDIAN_SCRIPT)
+        .initialization_script(WECODE_HARVESTER_SCRIPT)
         .on_navigation(move |url| {
             let url_str = url.as_str();
 
-            // Pass-through các trang trung gian cần scrape, tuyệt đối không close
-            if url_str.contains("/assignment") || url_str.contains("/home") {
-                // Return true to allow page load and scraping
+            // 1. Intercept Partial Submissions Checkpoint (TUYỆT ĐỐI KHÔNG GHI DIRECT TRÁNH RỜI RẠC)
+            if url_str.starts_with("diark-sso://partial") {
+                let partial_fragment = url.fragment().or_else(|| url_str.strip_prefix("diark-sso://partial#"));
+                if let Some(fragment) = partial_fragment {
+                    let _ = handle_partial_checkpoint_sync(&partial_for_nav, "wecode-sso-login", fragment);
+                }
+                return false; // Chặn navigation, giữ nguyên DOM & context cho các batch tiếp theo trong queue
             }
 
-            // Intercept Callback Success
+            // 2. Intercept Callback (Atomic Commit)
             if url_str.starts_with(CALLBACK_SCHEME) {
                 let fragment_opt = url.fragment().or_else(|| url_str.strip_prefix("diark-sso://callback#"));
                 if let Some(fragment) = fragment_opt {
-                    match parse_callback_fragment(fragment) {
-                        Ok((target, data_str)) => {
-                            // Parse ĐỒNG BỘ ngay tại đây trước khi đóng window
-                            let parse_res = handle_callback_payload_sync(&app_for_nav, &target, &data_str);
-                            match parse_res {
-                                Ok(val) => {
-                                    let _ = app_for_nav.emit("sso-callback-success", val);
-                                }
-                                Err(err) => {
-                                    let _ = app_for_nav.emit("sso-callback-error", err);
-                                }
+                    let target = extract_query_param(fragment, "target");
+                    if target == "wecode" {
+                        let wecode_reg = get_wecode_harvester_registry_static();
+                        let db_state = app_for_nav.state::<SharedDb>();
+                        let db_arc = db_state.inner().clone();
+                        match wecode_reg.commit_session("wecode-sso-login", db_arc) {
+                            Ok(count) => {
+                                println!("[SSO Final] Wecode Harvester committed {count} submissions successfully!");
+                                let _ = app_for_nav.emit("wecode-submissions-synced", ());
+                                let _ = app_for_nav.emit("sso-callback-success", "wecode");
+                            }
+                            Err(err) => {
+                                eprintln!("[SSO Final] ERROR in Wecode Harvester commit: {err}");
+                                let _ = app_for_nav.emit("sso-callback-error", err.to_string());
+                                let _ = app_for_nav.emit_to("main", "wecode-sync-failed", err.to_string());
                             }
                         }
-                        Err(err) => {
-                            let _ = app_for_nav.emit("sso-callback-error", err);
+                    } else {
+                        // Legacy callback handling
+                        if let Ok((t, data_str)) = parse_callback_fragment(fragment) {
+                            let _ = handle_callback_payload_sync(&app_for_nav, &t, &data_str);
                         }
                     }
                 }
@@ -1481,7 +1387,7 @@ pub async fn launch_wecode_sso_sync(app: AppHandle) -> Result<(), String> {
                 return false;
             }
 
-            // Intercept Callback Failed
+            // 3. Intercept Callback Failed
             if url_str.starts_with(CALLBACK_FAIL_SCHEME) {
                 let reason = extract_query_param(url_str, "reason");
                 let _ = app_for_nav.emit("sso-callback-failed", &reason);
@@ -1490,7 +1396,12 @@ pub async fn launch_wecode_sso_sync(app: AppHandle) -> Result<(), String> {
                 return false;
             }
 
-            // Redirect-loop guard for login page
+            // 4. Chặn rò rỉ bất kỳ diark-sso scheme nào
+            if url_str.starts_with("diark-sso://") {
+                return false;
+            }
+
+            // 5. Redirect-loop guard cho trang login
             if url_str.contains(WECODE_LOGIN_MARKER) {
                 let attempts = redirect_attempts_for_nav.fetch_add(1, Ordering::SeqCst);
                 if attempts >= MAX_LOGIN_REDIRECT_ATTEMPTS {
@@ -1502,22 +1413,6 @@ pub async fn launch_wecode_sso_sync(app: AppHandle) -> Result<(), String> {
                     );
                     close_wecode_window(&app_for_nav);
                     return false;
-                }
-            }
-
-            // On assignments page: trigger harvest
-            if url_str.contains(WECODE_ASSIGNMENTS_MARKER) || url_str.contains("/assignment") {
-                if !already_nav_for_nav.swap(true, Ordering::SeqCst) {
-                    if let Some(win) = app_for_nav.get_webview_window("wecode-sso-login") {
-                        let _ = win.eval(WECODE_ASSIGNMENTS_HARVEST_SCRIPT);
-                    }
-                }
-            }
-
-            // Support submissions page harvest
-            if url_str.contains("submissions") {
-                if let Some(win) = app_for_nav.get_webview_window("wecode-sso-login") {
-                    let _ = win.eval(WECODE_SUBMISSION_HARVEST_SCRIPT);
                 }
             }
 
@@ -1534,6 +1429,10 @@ pub async fn launch_wecode_sso_sync(app: AppHandle) -> Result<(), String> {
 fn close_wecode_window(app: &AppHandle) {
     if let Some(watchdog) = app.try_state::<WatchdogRegistry>() {
         watchdog.cancel("wecode-sso-login");
+    }
+    let wecode_reg = get_wecode_harvester_registry_static();
+    if let Ok(mut sessions) = wecode_reg.sessions.lock() {
+        sessions.remove("wecode-sso-login");
     }
     if let Some(window) = app.get_webview_window("wecode-sso-login") {
         let _ = window.destroy();

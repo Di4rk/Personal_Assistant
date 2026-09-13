@@ -44,6 +44,14 @@ pub mod models {
         #[serde(default)]
         pub credits: i64,
         #[serde(default)]
+        pub score_qt: Option<f64>,
+        #[serde(default)]
+        pub score_th: Option<f64>,
+        #[serde(default)]
+        pub score_gk: Option<f64>,
+        #[serde(default)]
+        pub score_ck: Option<f64>,
+        #[serde(default)]
         pub score_10: f64,
         #[serde(default)]
         pub is_passed: i64,
@@ -341,11 +349,16 @@ impl PortalIngestionEngine {
             tx.execute(
                 "INSERT INTO academic_courses (
                     id, semester_id, course_code, course_name, credits,
+                    process_point, practice_point, midterm_score, final_point,
                     course_point, final_score, summary_score_10, is_passed, is_gpa_calculated, updated_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6, ?6, ?7, 1, ?8)
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10, ?10, ?11, 1, ?12)
                 ON CONFLICT(semester_id, course_code) DO UPDATE SET
                     course_name = excluded.course_name,
                     credits = excluded.credits,
+                    process_point = excluded.process_point,
+                    practice_point = excluded.practice_point,
+                    midterm_score = excluded.midterm_score,
+                    final_point = excluded.final_point,
                     course_point = excluded.course_point,
                     final_score = excluded.final_score,
                     summary_score_10 = excluded.summary_score_10,
@@ -357,6 +370,10 @@ impl PortalIngestionEngine {
                     c.course_code.trim(),
                     c.course_name.trim(),
                     c.credits,
+                    c.score_qt,
+                    c.score_th,
+                    c.score_gk,
+                    c.score_ck,
                     c.score_10,
                     c.is_passed,
                     now,
@@ -414,6 +431,10 @@ mod tests {
                 course_code TEXT NOT NULL,
                 course_name TEXT NOT NULL,
                 credits INTEGER NOT NULL,
+                process_point REAL,
+                practice_point REAL,
+                midterm_score REAL,
+                final_point REAL,
                 course_point REAL NOT NULL DEFAULT 0.0,
                 final_score REAL,
                 summary_score_10 REAL,
@@ -506,6 +527,10 @@ mod tests {
                 course_name: "Nhap mon lap trinh".to_string(),
                 semester: "HK1 2024-2025".to_string(),
                 credits: 4,
+                score_qt: Some(8.0),
+                score_th: Some(9.0),
+                score_gk: Some(8.5),
+                score_ck: Some(9.5),
                 score_10: 9.0,
                 is_passed: 1,
             },
@@ -514,6 +539,10 @@ mod tests {
                 course_name: "Giai tich".to_string(),
                 semester: "HK1 2024-2025".to_string(),
                 credits: 4,
+                score_qt: Some(7.5),
+                score_th: None,
+                score_gk: Some(8.0),
+                score_ck: Some(9.0),
                 score_10: 8.5,
                 is_passed: 1,
             }
@@ -554,6 +583,17 @@ mod tests {
             |r| r.get(0),
         ).unwrap();
         assert_eq!(course_count, 2);
+
+        let (qt, th, gk, ck, score10): (Option<f64>, Option<f64>, Option<f64>, Option<f64>, f64) = conn.query_row(
+            "SELECT process_point, practice_point, midterm_score, final_point, course_point FROM academic_courses WHERE course_code = 'IT001'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+        ).unwrap();
+        assert_eq!(qt, Some(8.0));
+        assert_eq!(th, Some(9.0));
+        assert_eq!(gk, Some(8.5));
+        assert_eq!(ck, Some(9.5));
+        assert_eq!(score10, 9.0);
 
         let drl_score: i64 = conn.query_row(
             "SELECT score FROM academic_drl WHERE semester = 'HK1 2024-2025'",
