@@ -331,10 +331,15 @@ impl PortalIngestionEngine {
             if c.course_code.trim().is_empty() {
                 continue;
             }
-            let sem_id = if c.semester.trim().is_empty() {
-                "2025-2026.1"
+            let (sem_id, acad_year, term) = if let Some(parsed) = crate::services::uit_portal::parse_semester_header(&c.semester) {
+                parsed
             } else {
-                c.semester.trim()
+                let s = if c.semester.trim().is_empty() {
+                    "2025_2026_HK1".to_string()
+                } else {
+                    c.semester.trim().replace(' ', "_")
+                };
+                (s, "2025-2026".to_string(), 1)
             };
 
             // Đảm bảo semester tồn tại cho foreign key
@@ -342,16 +347,17 @@ impl PortalIngestionEngine {
                 "INSERT INTO academic_semesters (id, academic_year, semester_term, is_completed, created_at, updated_at)
                  VALUES (?1, ?2, ?3, 1, ?4, ?4)
                  ON CONFLICT(id) DO UPDATE SET updated_at = excluded.updated_at",
-                params![sem_id, "2025-2026", 1, now],
+                params![sem_id, acad_year, term, now],
             );
 
+            let is_gpa = if crate::services::uit_portal::is_course_gpa_calculated(&c.course_code) { 1 } else { 0 };
             let course_id = format!("{sem_id}_{}", c.course_code.trim());
             tx.execute(
                 "INSERT INTO academic_courses (
                     id, semester_id, course_code, course_name, credits,
                     process_point, practice_point, midterm_score, final_point,
                     course_point, final_score, summary_score_10, is_passed, is_gpa_calculated, updated_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10, ?10, ?11, 1, ?12)
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10, ?10, ?11, ?12, ?13)
                 ON CONFLICT(semester_id, course_code) DO UPDATE SET
                     course_name = excluded.course_name,
                     credits = excluded.credits,
@@ -363,6 +369,7 @@ impl PortalIngestionEngine {
                     final_score = excluded.final_score,
                     summary_score_10 = excluded.summary_score_10,
                     is_passed = excluded.is_passed,
+                    is_gpa_calculated = excluded.is_gpa_calculated,
                     updated_at = excluded.updated_at",
                 params![
                     course_id,
@@ -376,6 +383,7 @@ impl PortalIngestionEngine {
                     c.score_ck,
                     c.score_10,
                     c.is_passed,
+                    is_gpa,
                     now,
                 ],
             ).map_err(|e| format!("Failed to upsert academic_courses: {}", e))?;
@@ -578,7 +586,7 @@ mod tests {
         assert_eq!(setting_name, "Nguyen Van Test");
 
         let course_count: i64 = conn.query_row(
-            "SELECT count(*) FROM academic_courses WHERE semester_id = 'HK1 2024-2025'",
+            "SELECT count(*) FROM academic_courses WHERE semester_id = '2024_2025_HK1'",
             [],
             |r| r.get(0),
         ).unwrap();

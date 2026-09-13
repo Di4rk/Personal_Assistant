@@ -108,6 +108,34 @@ pub fn parse_semester_header(header: &str) -> Option<(String, String, i64)> {
         }
     }
 
+    // Pattern 3: "Học kỳ X Năm học YYYY-ZZZZ", "Học kỳ hè Năm học YYYY-ZZZZ"
+    let lower = raw.to_lowercase();
+    if lower.contains("học kỳ") || lower.contains("hk") {
+        let term: i64 = if lower.contains("học kỳ 1") || lower.contains("hk1") || lower.contains("hk 1") {
+            1
+        } else if lower.contains("học kỳ 2") || lower.contains("hk2") || lower.contains("hk 2") {
+            2
+        } else if lower.contains("hè") || lower.contains("he") || lower.contains("học kỳ 3") || lower.contains("hk3") || lower.contains("hk 3") {
+            3
+        } else {
+            1
+        };
+
+        // Tìm chuỗi YYYY-ZZZZ
+        let re_chars: String = raw.chars().map(|c| if c.is_ascii_digit() || c == '-' { c } else { ' ' }).collect();
+        let tokens: Vec<&str> = re_chars.split_whitespace().collect();
+        for t in tokens {
+            let yr_parts: Vec<&str> = t.split('-').collect();
+            if yr_parts.len() == 2 && yr_parts[0].len() == 4 && yr_parts[1].len() == 4 {
+                let start_year = yr_parts[0];
+                let end_year = yr_parts[1];
+                let semester_id = format!("{start_year}_{end_year}_HK{term}");
+                let academic_year = format!("{start_year}-{end_year}");
+                return Some((semester_id, academic_year, term));
+            }
+        }
+    }
+
     None
 }
 
