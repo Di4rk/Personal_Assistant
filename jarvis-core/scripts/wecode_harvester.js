@@ -10,25 +10,54 @@
         return new Promise(resolve => setTimeout(resolve, ms));
     }
 
-    function isAuthGateScreen() {
-        const path = (window.location.pathname || "").toLowerCase();
-        // Nếu ở màn hình login hoặc chưa có thẻ profile người dùng
-        if (path.includes('/login') || path.includes('/cas')) return true;
-        const profileEl = document.querySelector('#profile_link, a[href*="/users/"]');
-        return !profileEl;
+    // --- AUTH GATEKEEPER ---
+    // Chờ #profile_link xuất hiện và trích xuất wecode_user_id số từ liên kết /users/
+    async function waitForAuthGatekeeper(timeout = 180000) {
+        console.log("[Diark Wecode Harvester] Auth Gatekeeper: Waiting for #profile_link...");
+        const start = Date.now();
+        while (Date.now() - start < timeout) {
+            const profileEl = document.querySelector('#profile_link, a[href*="/users/"]');
+            if (profileEl) {
+                const href = profileEl.getAttribute('href') || '';
+                const match = href.match(/\/users\/(\d+)/);
+                if (match && match[1]) {
+                    console.log(`[Diark Wecode Harvester] Auth Gatekeeper PASSED: Found #profile_link with numeric user_id: ${match[1]}`);
+                    return match[1];
+                }
+            }
+            await sleep(500);
+        }
+        console.warn("[Diark Wecode Harvester] Auth Gatekeeper timed out waiting for #profile_link.");
+        return null;
     }
 
     function extractBasePrefix() {
+        const profileEl = document.querySelector('#profile_link, a[href*="/users/"]');
+        if (profileEl) {
+            const href = profileEl.getAttribute('href') || '';
+            const idx = href.indexOf('/users/');
+            if (idx !== -1) {
+                try {
+                    const url = new URL(href, window.location.origin);
+                    return url.pathname.substring(0, url.pathname.indexOf('/users/'));
+                } catch (_) {
+                    return href.substring(0, idx);
+                }
+            }
+        }
         const path = window.location.pathname || "";
         const parts = path.split('/').filter(Boolean);
         // e.g. /wecode25/it00x/... -> /wecode25/it00x
         if (parts.length >= 2 && parts[0].includes('wecode')) {
             return `/${parts[0]}/${parts[1]}`;
         }
+        if (parts.length >= 1 && parts[0].includes('wecode')) {
+            return `/${parts[0]}`;
+        }
         return "";
     }
 
-    async function waitForElement(selector, timeout = 8000) {
+    async function waitForElement(selector, timeout = 10000) {
         const start = Date.now();
         while (Date.now() - start < timeout) {
             const el = document.querySelector(selector);
@@ -39,17 +68,18 @@
         return null;
     }
 
-    // --- BƯỚC 1: XÁC THỰC DANH TÍNH & CÀO DANH SÁCH BÀI TẬP ---
+    // --- BƯỚC 1: XÁC THỰC DANH TÍNH & CÀO DANH SÁCH BÀI TẬP (/assignments) ---
     async function scrapeAssignments() {
-        console.log("[Diark Wecode Harvester] Scraping Assignments...");
+        console.log("[Diark Wecode Harvester] Scraping Assignments at /assignments...");
 
         const profileEl = document.querySelector('#profile_link, a[href*="/users/"]');
         const href = profileEl ? (profileEl.getAttribute('href') || '') : '';
         const match = href.match(/\/users\/(\d+)/);
+        // Trích xuất ID số nội bộ (ví dụ: 2429), KHÔNG dùng MSSV hiển thị
         const wecodeUserId = match ? match[1] : '';
 
         if (!wecodeUserId) {
-            console.warn("[Diark Wecode Harvester] Could not extract wecode_user_id from #profile_link.");
+            console.warn("[Diark Wecode Harvester] Could not extract numeric wecode_user_id from #profile_link.");
             return;
         }
 
@@ -61,11 +91,13 @@
 
         const assignmentIds = [];
         realRows.forEach(tr => {
-            const idStr = tr.getAttribute('data-id') || 
-                          tr.querySelector('td:nth-child(1)')?.textContent?.trim() || 
-                          tr.querySelector('a[href*="/assignment/"]')?.getAttribute('href')?.match(/\/assignment\/(\d+)/)?.[1] || 
-                          '0';
-            const parsed = parseInt(idStr, 10);
+            const idAttr = tr.getAttribute('data-id');
+            const linkMatch = tr.querySelector('a[href*="/assignment/"]')?.getAttribute('href')?.match(/\/assignment\/(\d+)/) ||
+                              tr.querySelector('a[href*="/assignments/"]')?.getAttribute('href')?.match(/\/assignments\/(\d+)/);
+            const idFromLink = linkMatch ? linkMatch[1] : null;
+            const firstCell = tr.querySelector('td:nth-child(1)')?.textContent?.trim();
+
+            const parsed = parseInt(idAttr || idFromLink || firstCell || '0', 10);
             if (!isNaN(parsed) && parsed > 0 && !assignmentIds.includes(parsed)) {
                 assignmentIds.push(parsed);
             }
@@ -95,7 +127,7 @@
         window.location.href = `${basePrefix}/submissions/assignment/${firstAssignId}/user/${wecodeUserId}/problem/all/view/all`;
     }
 
-    // --- BƯỚC 2: CÀO SUBMISSIONS TỪNG ASSIGNMENT ---
+    // --- BƯỚC 2: CÀO SUBMISSIONS TỪNG ASSIGNMENT (/submissions/view/all) ---
     async function scrapeSubmissions() {
         console.log("[Diark Wecode Harvester] Scraping Submissions Page...");
 
@@ -118,6 +150,7 @@
 
         rows.forEach(tr => {
             if (tr.classList.contains('dataTables_empty') || tr.querySelector('.dataTables_empty')) return;
+
             const cells = tr.querySelectorAll('td');
             if (cells.length < 5) return;
 
@@ -133,9 +166,9 @@
             const timeText = tr.querySelector('td:nth-child(4) .small, td:nth-child(4)')?.textContent?.trim() || cells[3]?.textContent?.trim() || '';
             const verdict = tr.querySelector('td.js-verdict div, td.js-verdict')?.textContent?.trim() || 
                             tr.querySelector('span[class*="verdict"]')?.textContent?.trim() || cells[4]?.textContent?.trim() || '';
-            const execTime = parseFloat(tr.querySelector('td.js-time')?.textContent?.trim() || '0');
-            const memKib = parseInt(tr.querySelector('td.js-mem')?.textContent?.trim() || '0', 10);
-            const score = parseInt(tr.querySelector('td.js-score span, td.js-score')?.textContent?.trim() || '0', 10);
+            const execTime = parseFloat(tr.querySelector('td.js-time')?.textContent?.trim() || '0') || 0.0;
+            const memKib = parseInt(tr.querySelector('td.js-mem')?.textContent?.trim() || '0', 10) || 0;
+            const score = parseInt(tr.querySelector('td.js-score span, td.js-score')?.textContent?.trim() || '0', 10) || 0;
             const lang = tr.querySelector('td div[data-type="code"], td:nth-child(9)')?.textContent?.trim() || 'C++';
 
             submissions.push({
@@ -178,9 +211,9 @@
         }
     }
 
-    // --- BƯỚC 3: SEQUENTIAL TOP-LEVEL NAVIGATION QUEUE (NO IFRAMES) ---
+    // --- BƯỚC 3: SEQUENTIAL TOP-LEVEL NAVIGATION QUEUE (TUYỆT ĐỐI KHÔNG DÙNG IFRAME) ---
     async function dispatchWecodeData(submissions) {
-        console.log(`[Diark Wecode Harvester] Dispatching ${submissions.length} submissions via Sequential Top-Level Navigation Queue...`);
+        console.log(`[Diark Wecode Harvester] Dispatching ${submissions.length} submissions via Top-Level Navigation Queue (no iframe)...`);
         sessionStorage.removeItem(WECODE_STORAGE_KEY);
 
         const totalBatches = Math.ceil(submissions.length / BATCH_SIZE) || 1;
@@ -197,28 +230,30 @@
         for (let i = 0; i < queue.length; i++) {
             console.log(`[Diark Wecode Harvester] Emitting navigation step ${i + 1}/${queue.length}`);
             window.location.href = queue[i];
-            await sleep(90); // 80ms - 100ms safe interval
+            await sleep(100);
         }
     }
 
-    const path = (window.location.pathname || "").toLowerCase();
+    // --- KHỞI TẠO VÀ ĐIỀU PHỐI HARVESTER ---
     const startHarvester = async () => {
-        if (isAuthGateScreen()) {
-            console.log("[Diark Wecode Harvester] User is at login screen or unauthenticated. Harvester stands by.");
+        const userId = await waitForAuthGatekeeper();
+        if (!userId) {
+            console.warn("[Diark Wecode Harvester] User is unauthenticated or timeout waiting for #profile_link.");
             return;
         }
 
-        await sleep(500);
+        await sleep(300);
+        const path = (window.location.pathname || "").toLowerCase();
+        const basePrefix = extractBasePrefix();
+
         if (path.includes('/submissions/')) {
             await scrapeSubmissions();
-        } else if (path.includes('/assignments') || path.includes('/home') || path.endsWith('/it00x')) {
+        } else if (path.includes('/assignments')) {
             await scrapeAssignments();
         } else {
-            // Fallback điều hướng về assignments để lấy danh sách
-            const basePrefix = extractBasePrefix();
-            if (basePrefix) {
-                window.location.href = `${basePrefix}/assignments`;
-            }
+            // Đã đăng nhập nhưng đang ở route khác (ví dụ /login, /home), điều hướng về danh mục bài tập
+            console.log(`[Diark Wecode Harvester] Navigating to ${basePrefix}/assignments...`);
+            window.location.href = `${basePrefix}/assignments`;
         }
     };
 

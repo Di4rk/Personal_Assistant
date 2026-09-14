@@ -865,7 +865,7 @@ const WECODE_LOGIN_URL: &str = "https://khmt.uit.edu.vn/wecode25/it00x/login";
 #[allow(dead_code)]
 const WECODE_ASSIGNMENTS_URL: &str = "https://khmt.uit.edu.vn/wecode25/it00x/assignments";
 const WECODE_LOGIN_MARKER: &str = "/wecode25/it00x/login";
-const MAX_LOGIN_REDIRECT_ATTEMPTS: u8 = 2;
+const MAX_LOGIN_REDIRECT_ATTEMPTS: u8 = 10;
 
 #[allow(dead_code)]
 #[derive(Deserialize, Debug)]
@@ -974,27 +974,42 @@ pub fn handle_partial_checkpoint_sync(
 
     // Support Portal Harvester v2.1 (Chunked Scheme Protocol)
     if target == "portal_meta" {
-        if let Ok(meta) = serde_json::from_value::<crate::services::portal_harvester::PortalMetaPayload>(parsed_data.clone()) {
-            let harvester_reg = get_portal_harvester_registry_static();
-            let _ = harvester_reg.handle_meta(window_label, meta);
-            println!("[SSO Checkpoint] Portal meta received for window: {window_label}");
+        match serde_json::from_value::<crate::services::portal_harvester::PortalMetaPayload>(parsed_data.clone()) {
+            Ok(meta) => {
+                let harvester_reg = get_portal_harvester_registry_static();
+                let _ = harvester_reg.handle_meta(window_label, meta);
+                println!("[SSO Checkpoint] Portal meta received for window: {window_label}");
+            }
+            Err(e) => {
+                eprintln!("[SSO Checkpoint] Failed to parse portal meta payload: {e}");
+            }
         }
     } else if target == "portal_courses" {
         let batch_idx: usize = extract_query_param(fragment, "batch_idx").parse().unwrap_or(0);
-        if let Ok(chunk) = serde_json::from_value::<Vec<crate::services::portal_harvester::AcademicCourseItem>>(parsed_data.clone()) {
-            let harvester_reg = get_portal_harvester_registry_static();
-            let chunk_len = chunk.len();
-            let _ = harvester_reg.handle_course_batch(window_label, batch_idx, chunk);
-            println!("[SSO Checkpoint] Portal course batch {batch_idx} ({chunk_len} courses) received for window: {window_label}");
+        match serde_json::from_value::<Vec<crate::services::portal_harvester::AcademicCourseItem>>(parsed_data.clone()) {
+            Ok(chunk) => {
+                let harvester_reg = get_portal_harvester_registry_static();
+                let chunk_len = chunk.len();
+                let _ = harvester_reg.handle_course_batch(window_label, batch_idx, chunk);
+                println!("[SSO Checkpoint] Portal course batch {batch_idx} ({chunk_len} courses) received for window: {window_label}");
+            }
+            Err(e) => {
+                eprintln!("[SSO Checkpoint] Failed to parse portal courses batch {batch_idx}: {e}");
+            }
         }
     } else if target == "wecode_submissions" {
         let batch_idx: usize = extract_query_param(fragment, "batch_idx").parse().unwrap_or(0);
         let total_batches: usize = extract_query_param(fragment, "total_batches").parse().unwrap_or(0);
-        if let Ok(chunk) = serde_json::from_value::<Vec<crate::commands::wecode::WecodeSubmissionDto>>(parsed_data.clone()) {
-            let wecode_reg = get_wecode_harvester_registry_static();
-            let chunk_len = chunk.len();
-            let _ = wecode_reg.handle_batch(window_label, batch_idx, total_batches, chunk);
-            println!("[SSO Checkpoint] Wecode submission batch {batch_idx} ({chunk_len} subs) received for window: {window_label}");
+        match serde_json::from_value::<Vec<crate::commands::wecode::WecodeSubmissionDto>>(parsed_data.clone()) {
+            Ok(chunk) => {
+                let wecode_reg = get_wecode_harvester_registry_static();
+                let chunk_len = chunk.len();
+                let _ = wecode_reg.handle_batch(window_label, batch_idx, total_batches, chunk);
+                println!("[SSO Checkpoint] Wecode submission batch {batch_idx} ({chunk_len} subs) received for window: {window_label}");
+            }
+            Err(e) => {
+                eprintln!("[SSO Checkpoint] Failed to parse wecode submissions batch {batch_idx}: {e}");
+            }
         }
     }
 
@@ -1433,6 +1448,11 @@ fn close_wecode_window(app: &AppHandle) {
     let wecode_reg = get_wecode_harvester_registry_static();
     if let Ok(mut sessions) = wecode_reg.sessions.lock() {
         sessions.remove("wecode-sso-login");
+    }
+    if let Some(reg) = app.try_state::<PartialStateRegistry>() {
+        if let Ok(mut states) = reg.states.lock() {
+            states.remove("wecode-sso-login");
+        }
     }
     if let Some(window) = app.get_webview_window("wecode-sso-login") {
         let _ = window.destroy();

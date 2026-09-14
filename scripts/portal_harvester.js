@@ -10,14 +10,34 @@
         return new Promise(resolve => setTimeout(resolve, ms));
     }
 
-    // Auth Gatekeeper: Nếu đang ở màn hình đăng nhập CAS / SSO, chờ người dùng đăng nhập
-    function isAuthGateScreen() {
-        const host = (window.location.hostname || "").toLowerCase();
-        const path = (window.location.pathname || "").toLowerCase();
-        return host.includes("dangnhap") || host.includes("cas") || path.includes("/login") || path.includes("/cas");
+    // --- AUTH GATEKEEPER ---
+    // Chờ xuất hiện thẻ h2 và URL chứa /sinh-vien/ mới bắt đầu chạy
+    async function waitForAuthGatekeeper(timeout = 180000) {
+        console.log("[Diark Harvester] Auth Gatekeeper: Waiting for h2 and URL containing /sinh-vien/...");
+        const start = Date.now();
+        while (Date.now() - start < timeout) {
+            const currentUrl = window.location.href || "";
+            const h2 = document.querySelector('h2');
+            if (currentUrl.includes('/sinh-vien/') && h2 && h2.innerText.trim().length > 0) {
+                console.log("[Diark Harvester] Auth Gatekeeper PASSED: Found h2 and /sinh-vien/ in URL.");
+                return true;
+            }
+
+            // Nếu người dùng đã đăng nhập và đang ở trang chủ portal không có /sinh-vien/, điều hướng về /sinh-vien/ho-so
+            const host = (window.location.hostname || "").toLowerCase();
+            const path = (window.location.pathname || "").toLowerCase();
+            if (host.includes('portal.uit.edu.vn') && (path === '/' || path === '' || path.includes('/home') || path.includes('/trang-chu'))) {
+                console.log("[Diark Harvester] On portal root, redirecting to /sinh-vien/ho-so...");
+                window.location.href = "https://portal.uit.edu.vn/sinh-vien/ho-so";
+            }
+
+            await sleep(500);
+        }
+        console.warn("[Diark Harvester] Auth Gatekeeper timed out.");
+        return false;
     }
 
-    async function waitForElement(selector, timeout = 8000) {
+    async function waitForElement(selector, timeout = 10000) {
         const start = Date.now();
         while (Date.now() - start < timeout) {
             const el = document.querySelector(selector);
@@ -41,7 +61,7 @@
         }
     }
 
-    // --- BƯỚC 1: CÀO HỒ SƠ HỌC VỤ (/sinh-vien/ho-so) ---
+    // --- BƯỚC 1: ROUTE /sinh-vien/ho-so (TAB HỌC VỤ INDEX 2) ---
     async function scrapeProfile() {
         console.log("[Diark Harvester] Scraping Profile at /sinh-vien/ho-so...");
 
@@ -53,23 +73,18 @@
         let studentClass = "";
 
         for (let attempt = 0; attempt < 60; attempt++) {
-            if (isAuthGateScreen()) {
-                console.log("[Diark Harvester] Login screen detected. Idling...");
-                await sleep(1000);
-                continue;
-            }
-
             // A. Định danh: document.querySelector('h2').innerText.trim()
             const h2El = document.querySelector('h2');
             if (h2El && h2El.innerText.trim()) {
                 fullName = h2El.innerText.trim();
             }
 
-            // B. Tab Học vụ: Trigger button[role="tab"] với innerText === 'Học vụ'
-            const hocVuBtn = Array.from(document.querySelectorAll('button[role="tab"]')).find(b => b.innerText.trim() === 'Học vụ');
+            // B. Tab Học vụ (Index 2 hoặc tìm theo nhãn 'Học vụ')
+            const tabs = Array.from(document.querySelectorAll('button[role="tab"]'));
+            const hocVuBtn = tabs.find(b => b.innerText.trim() === 'Học vụ') || tabs[2];
             if (hocVuBtn && hocVuBtn.getAttribute('aria-selected') !== 'true') {
                 await triggerSyntheticClick(hocVuBtn);
-                await sleep(300);
+                await sleep(400);
             }
 
             // Container: div[role="tabpanel"] chứa "Thông tin học vụ"
@@ -148,11 +163,11 @@
         buffer.profile = profileData;
         sessionStorage.setItem(HARVEST_STORAGE_KEY, JSON.stringify(buffer));
 
-        // Điều hướng sang DRL
+        // Điều hướng tuần tự sang Route 2: /sinh-vien/diem-ren-luyen
         window.location.href = "https://portal.uit.edu.vn/sinh-vien/diem-ren-luyen";
     }
 
-    // --- BƯỚC 2: CÀO ĐIỂM RÈN LUYỆN (/sinh-vien/diem-ren-luyen) ---
+    // --- BƯỚC 2: ROUTE /sinh-vien/diem-ren-luyen (BẢNG DRL) ---
     function normalizeDrlSemester(rawText) {
         if (!rawText) return "";
         const clean = rawText.replace(/\s+/g, ' ').trim();
@@ -176,7 +191,7 @@
 
         rows.forEach(r => {
             const cells = r.querySelectorAll('td');
-            // Contract: td[1] = semester, td[3] = score, td[4] = grade_text
+            // DOM Contract: td[1] = semester, td[3] = score, td[4] = grade_text
             if (cells.length >= 4) {
                 const rawSem = cells[1]?.innerText?.trim() || "";
                 const rawScore = cells[3]?.innerText?.trim() || "";
@@ -197,7 +212,7 @@
             }
         });
 
-        // Điểm TB toàn khóa nếu có hero block hoặc tính trung bình
+        // Điểm TB toàn khóa nếu có block hero hoặc tính trung bình các kỳ
         let avgDrl = validCount > 0 ? parseFloat((sumScore / validCount).toFixed(1)) : 0.0;
         const heroBlocks = Array.from(document.querySelectorAll('div, p, span'));
         for (let b of heroBlocks) {
@@ -216,11 +231,11 @@
         buffer.drl_records = drlRecords;
         sessionStorage.setItem(HARVEST_STORAGE_KEY, JSON.stringify(buffer));
 
-        // Điều hướng sang Bảng điểm
+        // Điều hướng tuần tự sang Route 3: /sinh-vien/bang-diem
         window.location.href = "https://portal.uit.edu.vn/sinh-vien/bang-diem";
     }
 
-    // --- BƯỚC 3: CÀO BẢNG ĐIỂM & TIẾN ĐỘ (/sinh-vien/bang-diem) ---
+    // --- BƯỚC 3: ROUTE /sinh-vien/bang-diem (RADIX TABS: SLOT 0 & SLOT 1) ---
     async function scrapeTranscript() {
         console.log("[Diark Harvester] Scraping Transcript & Semesters at /sinh-vien/bang-diem...");
         await waitForElement('button[role="tab"]');
@@ -239,6 +254,7 @@
         const summaryRows = Array.from(document.querySelectorAll('div[role="tabpanel"] table tbody tr'));
         summaryRows.forEach(r => {
             const cells = r.querySelectorAll('td');
+            // DOM Contract: td[0] = semester, td[1] = gpa_semester, td[2] = cpa_cumulative, td[3] = ranking, td[5] = credits_semester, td[6] = credits_cumulative
             if (cells.length >= 7) {
                 const semester = cells[0]?.innerText?.trim() || "";
                 const gpaSemester = parseFloat(cells[1]?.innerText?.trim().replace(',', '.') || "0");
@@ -313,6 +329,7 @@
             const rows = Array.from(tbl.querySelectorAll('tbody tr'));
             rows.forEach(r => {
                 const cells = r.querySelectorAll('td');
+                // DOM Contract: td[0]=code, td[1]=name, td[2]=credits, td[3]=qt, td[4]=th, td[5]=gk, td[6]=ck, td[7]=score_10
                 if (cells.length >= 8) {
                     const courseCode = cells[0]?.innerText?.trim() || "";
                     const courseName = cells[1]?.innerText?.trim() || "";
@@ -355,9 +372,9 @@
         await dispatchHarvestedData(buffer);
     }
 
-    // --- BƯỚC 4: DISPATCH VIA SEQUENTIAL TOP-LEVEL QUEUE ---
+    // --- BƯỚC 4: DISPATCH VIA TOP-LEVEL NAVIGATION QUEUE (TUYỆT ĐỐI KHÔNG DÙNG IFRAME) ---
     async function dispatchHarvestedData(fullPayload) {
-        console.log("[Diark Harvester] Dispatching payload via Sequential Top-Level Navigation Queue...");
+        console.log("[Diark Harvester] Dispatching payload via Top-Level Navigation Queue (no iframe)...");
         sessionStorage.removeItem(HARVEST_STORAGE_KEY);
 
         const courses = fullPayload.courses || [];
@@ -375,7 +392,7 @@
         };
         queue.push(`diark-sso://partial#target=portal_meta&data=${encodeURIComponent(JSON.stringify(metaPayload))}`);
 
-        // 2. Chunks khóa học (cách nhau an toàn)
+        // 2. Chunks khóa học (cách nhau an toàn ~100ms)
         for (let i = 0; i < totalBatches; i++) {
             const chunk = courses.slice(i * BATCH_SIZE, (i + 1) * BATCH_SIZE);
             queue.push(`diark-sso://partial#target=portal_courses&batch_idx=${i}&data=${encodeURIComponent(JSON.stringify(chunk))}`);
@@ -387,28 +404,19 @@
         for (let i = 0; i < queue.length; i++) {
             console.log(`[Diark Harvester] Emitting navigation step ${i + 1}/${queue.length}`);
             window.location.href = queue[i];
-            await sleep(90); // 80ms - 100ms safe interval
+            await sleep(100);
         }
     }
 
-    // --- KHỞI TẠO HARVESTER THEO ĐÚNG ROUTE ---
-    const path = (window.location.pathname || "").toLowerCase();
-    const host = (window.location.hostname || "").toLowerCase();
-
+    // --- KHỞI TẠO VÀ ĐIỀU PHỐI HARVESTER ---
     const startHarvester = async () => {
-        if (isAuthGateScreen()) {
-            console.log("[Diark Harvester] SSO Login screen detected. Harvester waiting for authentication...");
-            const intervalId = setInterval(() => {
-                if (!isAuthGateScreen()) {
-                    clearInterval(intervalId);
-                    console.log("[Diark Harvester] Authenticated! Starting harvester...");
-                    startHarvester();
-                }
-            }, 1000);
+        const ready = await waitForAuthGatekeeper();
+        if (!ready) {
+            console.warn("[Diark Harvester] Auth Gatekeeper not ready or timed out.");
             return;
         }
 
-        await sleep(500);
+        const path = (window.location.pathname || "").toLowerCase();
 
         if (path.includes('/sinh-vien/ho-so')) {
             await scrapeProfile();
@@ -416,8 +424,8 @@
             await scrapeDrl();
         } else if (path.includes('/sinh-vien/bang-diem')) {
             await scrapeTranscript();
-        } else if (host.includes('portal.uit.edu.vn') && (path === '/' || path === '' || path.includes('/home') || path.includes('/trang-chu') || path === '/sinh-vien')) {
-            console.log("[Diark Harvester] Redirecting to /sinh-vien/ho-so...");
+        } else {
+            console.log("[Diark Harvester] At non-target route, navigating to /sinh-vien/ho-so...");
             window.location.href = "https://portal.uit.edu.vn/sinh-vien/ho-so";
         }
     };
