@@ -45,7 +45,7 @@ impl GradeScale {
             GradeScale::BPlus
         } else if score >= 7.0 {
             GradeScale::B
-        } else if score >= 6.5 {
+        } else if score >= 6.0 {
             GradeScale::CPlus
         } else if score >= 5.5 {
             GradeScale::C
@@ -417,6 +417,55 @@ pub fn self_heal_academic_data(conn: &Connection) -> SqlResult<()> {
             );
         }
     }
+
+    // 7. Tự động tính toán và cập nhật summary_score_4, grade_4, grade_char theo quy chế ĐHQG-HCM
+    let _ = conn.execute(
+        "UPDATE academic_courses
+         SET 
+            summary_score_4 = CASE
+                WHEN summary_score_10 >= 9.0 THEN 4.0
+                WHEN summary_score_10 >= 8.5 THEN 3.7
+                WHEN summary_score_10 >= 8.0 THEN 3.5
+                WHEN summary_score_10 >= 7.0 THEN 3.0
+                WHEN summary_score_10 >= 6.0 THEN 2.5
+                WHEN summary_score_10 >= 5.5 THEN 2.0
+                WHEN summary_score_10 >= 5.0 THEN 1.5
+                WHEN summary_score_10 >= 4.0 THEN 1.0
+                ELSE 0.0
+            END,
+            grade_4 = CASE
+                WHEN summary_score_10 >= 9.0 THEN 4.0
+                WHEN summary_score_10 >= 8.5 THEN 3.7
+                WHEN summary_score_10 >= 8.0 THEN 3.5
+                WHEN summary_score_10 >= 7.0 THEN 3.0
+                WHEN summary_score_10 >= 6.0 THEN 2.5
+                WHEN summary_score_10 >= 5.5 THEN 2.0
+                WHEN summary_score_10 >= 5.0 THEN 1.5
+                WHEN summary_score_10 >= 4.0 THEN 1.0
+                ELSE 0.0
+            END,
+            grade_char = CASE
+                WHEN summary_score_10 >= 9.0 THEN 'A+'
+                WHEN summary_score_10 >= 8.5 THEN 'A'
+                WHEN summary_score_10 >= 8.0 THEN 'B+'
+                WHEN summary_score_10 >= 7.0 THEN 'B'
+                WHEN summary_score_10 >= 6.0 THEN 'C+'
+                WHEN summary_score_10 >= 5.5 THEN 'C'
+                WHEN summary_score_10 >= 5.0 THEN 'D+'
+                WHEN summary_score_10 >= 4.0 THEN 'D'
+                ELSE 'F'
+            END
+         WHERE summary_score_10 IS NOT NULL AND (summary_score_4 IS NULL OR grade_char IS NULL OR grade_char = '' OR grade_char = '—');",
+        [],
+    );
+
+    // 8. Chuẩn hóa category cho các môn Cơ sở ngành của UIT
+    let _ = conn.execute(
+        "UPDATE academic_courses
+         SET category = 'co_so_nganh'
+         WHERE course_code IN ('IT001', 'IT002', 'IT003', 'IT012', 'CS005', 'MA004', 'MA005');",
+        [],
+    );
 
     Ok(())
 }
@@ -1089,8 +1138,8 @@ mod tests {
             (7.99, GradeScale::B, 3.0),
             (7.0, GradeScale::B, 3.0),
             (6.99, GradeScale::CPlus, 2.5),
-            (6.5, GradeScale::CPlus, 2.5),
-            (6.49, GradeScale::C, 2.0),
+            (6.0, GradeScale::CPlus, 2.5),
+            (5.99, GradeScale::C, 2.0),
             (5.5, GradeScale::C, 2.0),
             (5.49, GradeScale::DPlus, 1.5),
             (5.0, GradeScale::DPlus, 1.5),

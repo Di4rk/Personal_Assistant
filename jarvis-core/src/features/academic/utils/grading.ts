@@ -23,3 +23,34 @@ export function getGpaClassification(gpa10: number): string {
   if (gpa10 >= 4.0) return 'Yếu';
   return 'Kém';
 }
+
+export interface GradeMetrics {
+  score4: number;
+  gradeChar: string;
+  isPassed: boolean;
+  classification: string;
+}
+
+/**
+ * Pure Domain Function tính toán Hệ 4 và Điểm chữ chuẩn Quy chế Đào tạo ĐHQG-HCM.
+ * Dùng làm Compute-on-Render fallback khi DB mang giá trị NULL hoặc chưa đồng bộ.
+ */
+export function computeGradeMetrics(score10: number | null | undefined, isGpaCalculated = true): GradeMetrics {
+  if (score10 === null || score10 === undefined || isNaN(score10)) {
+    return { score4: 0, gradeChar: '—', isPassed: false, classification: 'Chưa có điểm' };
+  }
+
+  const s = Math.min(Math.max(score10, 0), 10);
+
+  if (s >= 9.0) return { score4: 4.0, gradeChar: 'A+', isPassed: true, classification: 'Xuất sắc' };
+  if (s >= 8.5) return { score4: 3.7, gradeChar: 'A', isPassed: true, classification: 'Giỏi' };
+  if (s >= 8.0) return { score4: 3.5, gradeChar: 'B+', isPassed: true, classification: 'Khá giỏi' };
+  if (s >= 7.0) return { score4: 3.0, gradeChar: 'B', isPassed: true, classification: 'Khá' };
+  if (s >= 6.0) return { score4: 2.5, gradeChar: 'C+', isPassed: true, classification: 'Trung bình khá' };
+  if (s >= 5.5) return { score4: 2.0, gradeChar: 'C', isPassed: true, classification: 'Trung bình' };
+  if (s >= 5.0) return { score4: 1.5, gradeChar: 'D+', isPassed: true, classification: 'Trung bình yếu' };
+  if (s >= 4.0) return { score4: 1.0, gradeChar: 'D', isPassed: true, classification: 'Yếu' };
+  
+  return { score4: 0.0, gradeChar: 'F', isPassed: !isGpaCalculated ? s >= 4.0 : false, classification: 'Kém' };
+}
+

@@ -273,3 +273,46 @@ Phân giải theo thứ tự ưu tiên 5 tầng bảo đảm tính đúng đắn
 | `toggle_plugin` | `plugins.rs` | Bật/tắt trạng thái phân hệ, kích hoạt recalculate Life Matrix. |
 | `get_system_storage_stats` | `settings.rs` | Trả về dung lượng DB, file WAL và tổng số bản ghi. |
 | `save_setting` | `settings.rs` | Lưu cặp Key-Value vào bảng `settings`. |
+
+---
+
+## 6. ACADEMIC RADAR & GPA SIMULATOR SPECIFICATION (v1.2.0 EXTENSION)
+
+### A. Derived Grade Scale Computation (Quy chế Đào tạo ĐHQG-HCM)
+- **Bản chất**: API Portal UIT `/api/sinh-vien/bang-diem` chỉ lưu trữ điểm thô thang 10 (`diem_tk`). Điểm Hệ 4 và Điểm Chữ là dữ liệu phái sinh (Derived Data).
+- **Nguyên tắc xử lý**: Thực thi Pure Domain Function hai lớp:
+  - **Compute-on-Ingest (Rust)**: Tính toán và lưu vào `academic_courses` (`summary_score_4`, `grade_4`, `grade_char`, `category`). Tự động migrate và backfill qua `self_heal_academic_data`.
+  - **Compute-on-Render (React / TypeScript)**: Hàm `computeGradeMetrics(score10, isGpaCalculated)` tính toán fallback trực tiếp khi hiển thị, bảo đảm không bao giờ bị khuyết (`-`).
+- **Thang điểm quy đổi chuẩn ĐHQG-HCM**:
+  - $TK \ge 9.0 \implies \text{A+} \ (4.0)$
+  - $8.5 \le TK < 9.0 \implies \text{A} \ (3.7)$
+  - $8.0 \le TK < 8.5 \implies \text{B+} \ (3.5)$
+  - $7.0 \le TK < 8.0 \implies \text{B} \ (3.0)$
+  - $6.0 \le TK < 7.0 \implies \text{C+} \ (2.5)$
+  - $5.5 \le TK < 6.0 \implies \text{C} \ (2.0)$
+  - $5.0 \le TK < 5.5 \implies \text{D+} \ (1.5)$
+  - $4.0 \le TK < 5.0 \implies \text{D} \ (1.0)$
+  - $TK < 4.0 \implies \text{F} \ (0.0)$ (Không đạt)
+
+### B. Student Identity Mini Card & P0 Privacy Masking
+- **Định dạng Tên Tiếng Việt**: Chuẩn hóa đảo ngược thứ tự tên phương Tây (`Gia Phạm Hoàng` $\rightarrow$ `Phạm Hoàng Gia`) qua `formatVietnameseName`.
+- **Cấu trúc Mini Card 2 tầng**:
+  - Tầng 1: Họ tên in đậm (`text-base font-semibold`) + Badge trạng thái đào tạo (`Đang học - Học kỳ X`).
+  - Tầng 2: Metadata súc tích (`MSSV • Lớp • Hệ: Chuẩn • Khóa YYYY`), loại bỏ hiển thị trùng lặp tên khoa/ngành cạnh mã lớp.
+- **P0 Presentation-Only Privacy Masking**:
+  - Khi bật Demo Mode: Họ tên hiển thị viết tắt (`P. H. G.`), MSSV làm mờ 4 số cuối (`2552****`).
+  - Tuyệt đối chỉ tính toán khi render (`Compute-on-Render`), không ghi đè dữ liệu che mờ ngược vào SQLite.
+
+### C. Dual-Mode GPA Simulator Engine
+- Thay thế hoàn toàn cơ chế nhập thủ công xung đột bằng 2 chế độ độc lập:
+  - **Mode A (Time-driven / Số kỳ dự kiến)**: Lựa chọn mốc hoàn thành tốt nghiệp (4, 5, 6, 7 học kỳ). Tự động phân bổ số tín chỉ trung bình mỗi kỳ còn lại.
+  - **Mode B (Pace-driven / Tải trọng tín chỉ mỗi kỳ)**: Điều chỉnh tải trọng học tập (12 – 26 TC/kỳ) qua slider mượt mà. Tự động tính số học kỳ cần thiết.
+- **Công thức Toán học & Chuẩn hóa Phát biểu**:
+  $$cGPA_{\text{cần}} = \frac{cGPA_{\text{mục tiêu}} \times TC_{\text{tổng}} - cGPA_{\text{hiện tại}} \times TC_{\text{đã tích lũy}}}{TC_{\text{còn lại}}}$$
+  - Diễn giải hiển thị: *"Cần duy trì cGPA trung bình tối thiểu X trên tổng số Y tín chỉ còn lại (trung bình Z TC/kỳ) để đạt mục tiêu..."*. Khử hoàn toàn lỗi thuật ngữ "điểm/môn".
+
+### D. Knowledge Block Tagging, Radar Chart Baseline & Viewport Budget
+- **Phân loại Khối Kiến thức Chính xác**: Ưu tiên phân loại theo tiền tố mã học phần thực tế của UIT (`IT001`, `IT002`, `IT003`, `IT012`, `CS005`, `MA004`, `MA005` hiển thị chính xác là `CS ngành`, không bị gán nhầm thành `Đ.cương`).
+- **Academic Radar Chart Target Baseline**: Bổ sung đa giác tham chiếu mục tiêu chuẩn (Target Baseline 8.5/10.0 nét đứt) ngăn biểu đồ bị co cụm thành một đường đơn điệu; hiển thị nhãn `(Chưa tích lũy)` đối với các khối chưa có điểm.
+- **Viewport Budget & Scrollable Course Table**: Đặt `max-h-[380px] overflow-y-auto` kèm thanh cuộn mỏng chuyên biệt và `sticky thead`, giữ trọn vẹn bố cục Dashboard không bị tràn vỡ khung nhìn.
+

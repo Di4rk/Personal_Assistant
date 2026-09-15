@@ -592,6 +592,12 @@ impl PortalIngestionEngine {
             [],
         ).map_err(|e| format!("Failed to ensure academic_drl table: {e}"))?;
 
+        // Đảm bảo các cột phái sinh và phân loại của academic_courses luôn tồn tại
+        let _ = tx.execute("ALTER TABLE academic_courses ADD COLUMN summary_score_4 REAL", []);
+        let _ = tx.execute("ALTER TABLE academic_courses ADD COLUMN grade_4 REAL", []);
+        let _ = tx.execute("ALTER TABLE academic_courses ADD COLUMN grade_char TEXT", []);
+        let _ = tx.execute("ALTER TABLE academic_courses ADD COLUMN category TEXT DEFAULT 'dai_cuong'", []);
+
         // 2. Phân giải mã ngành động thông qua Curriculum Resolver 4-tier
         let combined_hint = format!("{} {} {}", profile.specialization, profile.student_class, profile.faculty);
         let resolved_major = crate::modules::academic::curriculum_resolver::resolve_curriculum(
@@ -726,13 +732,29 @@ impl PortalIngestionEngine {
             );
 
             let is_gpa = if crate::services::uit_portal::is_course_gpa_calculated(&c.course_code) { 1 } else { 0 };
+            let scale = crate::db::academic::GradeScale::from_score_10(c.score_10);
+            let (summary_score_4, grade_char) = (Some(scale.to_scale_4()), Some(scale.as_char().to_string()));
+
+            let code_norm = c.course_code.trim().to_uppercase();
+            let category = if ["IT001", "IT002", "IT003", "IT012", "CS005", "MA004", "MA005"].contains(&code_norm.as_str()) {
+                "co_so_nganh"
+            } else if code_norm.starts_with("PE") || code_norm.starts_with("ME") {
+                "auxiliary"
+            } else if code_norm.starts_with("MA") || code_norm.starts_with("PH") || code_norm.starts_with("SS") || code_norm.starts_with("ENG") {
+                "dai_cuong"
+            } else {
+                "chuyen_nganh"
+            };
+
             let course_id = format!("{sem_id}_{}", c.course_code.trim());
             tx.execute(
                 "INSERT INTO academic_courses (
                     id, semester_id, course_code, course_name, credits,
                     process_point, practice_point, midterm_score, final_point,
-                    course_point, final_score, summary_score_10, is_passed, is_gpa_calculated, updated_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10, ?10, ?11, ?12, ?13)
+                    course_point, final_score, summary_score_10,
+                    summary_score_4, grade_4, grade_char, category,
+                    is_passed, is_gpa_calculated, updated_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10, ?10, ?11, ?11, ?12, ?13, ?14, ?15, ?16)
                 ON CONFLICT(semester_id, course_code) DO UPDATE SET
                     course_name = excluded.course_name,
                     credits = excluded.credits,
@@ -743,6 +765,10 @@ impl PortalIngestionEngine {
                     course_point = excluded.course_point,
                     final_score = excluded.final_score,
                     summary_score_10 = excluded.summary_score_10,
+                    summary_score_4 = excluded.summary_score_4,
+                    grade_4 = excluded.grade_4,
+                    grade_char = excluded.grade_char,
+                    category = excluded.category,
                     is_passed = excluded.is_passed,
                     is_gpa_calculated = excluded.is_gpa_calculated,
                     updated_at = excluded.updated_at",
@@ -757,6 +783,9 @@ impl PortalIngestionEngine {
                     c.score_gk,
                     c.score_ck,
                     c.score_10,
+                    summary_score_4,
+                    grade_char,
+                    category,
                     c.is_passed,
                     is_gpa,
                     now,
@@ -1001,6 +1030,10 @@ mod tests {
                 course_point REAL NOT NULL DEFAULT 0.0,
                 final_score REAL,
                 summary_score_10 REAL,
+                summary_score_4 REAL,
+                grade_4 REAL,
+                grade_char TEXT,
+                category TEXT NOT NULL DEFAULT 'dai_cuong',
                 is_passed INTEGER NOT NULL DEFAULT 0,
                 is_gpa_calculated INTEGER NOT NULL DEFAULT 1,
                 created_at INTEGER NOT NULL DEFAULT 0,

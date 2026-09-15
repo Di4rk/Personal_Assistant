@@ -6,7 +6,11 @@ import type {
   AcademicOverviewDto,
 } from "../types";
 import { classifyCourseCategory } from "../utils/forecastEngine";
-import { calculateCompositeRewardRank, getGpaClassification } from "../utils/grading";
+import {
+  calculateCompositeRewardRank,
+  getGpaClassification,
+  computeGradeMetrics,
+} from "../utils/grading";
 
 export interface AcademicCourseTableProps {
   courses: AcademicCourseRecord[];
@@ -114,9 +118,9 @@ export const AcademicCourseTable: React.FC<AcademicCourseTableProps> = ({
           Học kỳ này chưa có môn học nào hoặc chưa được chọn.
         </div>
       ) : (
-        <div className="overflow-x-auto -mx-4 px-4">
+        <div className="overflow-x-auto -mx-4 px-4 max-h-[380px] overflow-y-auto scrollbar-thin scrollbar-thumb-zinc-700 scrollbar-track-zinc-900/50">
           <table className="w-full text-left text-xs text-zinc-300">
-            <thead className="bg-zinc-950/60 text-zinc-400 uppercase tracking-wider text-[10px] font-semibold border-b border-zinc-800">
+            <thead className="sticky top-0 z-10 bg-zinc-950 text-zinc-400 uppercase tracking-wider text-[10px] font-semibold border-b border-zinc-800 shadow-sm">
               <tr>
                 <th className="py-2.5 px-3">Mã MH</th>
                 <th className="py-2.5 px-3">Tên Môn Học</th>
@@ -134,20 +138,37 @@ export const AcademicCourseTable: React.FC<AcademicCourseTableProps> = ({
             </thead>
             <tbody className="divide-y divide-zinc-800/60 font-sans">
               {courses.map((course) => {
+                // Ưu tiên phân loại chuẩn mã môn UIT (IT001-IT012, CS005 là Cơ sở ngành), sau đó đối soát course.category
+                const codeClassified = classifyCourseCategory(course.courseCode);
                 const category =
-                  course.category === "co_so_nganh"
+                  codeClassified === "foundational"
                     ? "foundational"
-                    : course.category === "dai_cuong"
-                    ? "general"
-                    : classifyCourseCategory(course.courseCode);
+                    : course.category === "co_so_nganh"
+                    ? "foundational"
+                    : course.category === "specialized"
+                    ? "specialized"
+                    : codeClassified;
 
                 const finalPt = course.finalPoint ?? course.finalScore;
                 const tk10 = course.coursePoint ?? course.summaryScore10;
-                const he4 = course.grade4 ?? course.summaryScore4;
+                
+                // Fallback tính toán Hệ 4 và Điểm Chữ theo chuẩn ĐHQG-HCM nếu DB chưa nạp
+                const computed =
+                  tk10 !== null && tk10 !== undefined && !isNaN(tk10)
+                    ? computeGradeMetrics(tk10, course.isGpaCalculated ?? true)
+                    : null;
+
+                const he4 = course.grade4 ?? course.summaryScore4 ?? computed?.score4;
+                const gradeChar =
+                  course.gradeChar && course.gradeChar !== "—"
+                    ? course.gradeChar
+                    : computed?.gradeChar ?? "—";
+
                 const isPassed =
                   course.resultStatus === "Đạt" ||
                   course.resultStatus === "passed" ||
-                  course.isPassed;
+                  course.isPassed ||
+                  (computed ? computed.isPassed : false);
 
                 return (
                   <tr
@@ -203,7 +224,7 @@ export const AcademicCourseTable: React.FC<AcademicCourseTableProps> = ({
                       {formatScore(he4)}
                     </td>
                     <td className="py-2.5 px-2 text-center font-mono font-semibold text-zinc-300">
-                      {course.gradeChar ?? "—"}
+                      {gradeChar}
                     </td>
                     <td className="py-2.5 px-3 text-center whitespace-nowrap">
                       {isPassed ? (
@@ -228,3 +249,4 @@ export const AcademicCourseTable: React.FC<AcademicCourseTableProps> = ({
     </div>
   );
 };
+

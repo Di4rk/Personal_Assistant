@@ -2,10 +2,12 @@ import React, { useMemo, useState } from "react";
 import {
   AlertTriangle,
   Award,
+  Calendar,
   CheckCircle2,
   GraduationCap,
   Sliders,
   Sparkles,
+  Zap,
 } from "lucide-react";
 
 interface GpaSimulatorCardProps {
@@ -18,11 +20,14 @@ interface GpaSimulatorCardProps {
   className?: string;
 }
 
+type SimulatorMode = "time" | "pace";
+
 /**
- * Redesigned Graduation Forecast & GPA Simulator (Sprint v1.0 Production Repair)
+ * Redesigned Graduation Forecast & GPA Simulator (Dual-Mode SSOT Architecture)
  *
- * Tính toán động lộ trình tốt nghiệp dựa trên chuẩn CTĐT UIT (mặc định 126 TC hoặc phân giải động).
- * Hỗ trợ chọn nhanh số kỳ tốt nghiệp (3.5 năm / 4 năm / 4.5 năm) hoặc tự nhập số tín chỉ/kỳ.
+ * Chế độ A (Time-driven): Chọn số kỳ tốt nghiệp mục tiêu -> Tự suy ra số tín chỉ/kỳ.
+ * Chế độ B (Pace-driven): Chọn số tín chỉ/kỳ -> Tự suy ra số kỳ và highlight badge tương ứng.
+ * Chuẩn hóa ngữ nghĩa: Tính toán theo cGPA trung bình của các tín chỉ còn lại, loại bỏ khái niệm "điểm/môn".
  */
 export const GpaSimulatorCard: React.FC<GpaSimulatorCardProps> = ({
   currentEarnedCredits,
@@ -35,20 +40,41 @@ export const GpaSimulatorCard: React.FC<GpaSimulatorCardProps> = ({
   const TOTAL_DEGREE_CREDITS = totalDegreeCredits;
   const remainingCredits = Math.max(0, TOTAL_DEGREE_CREDITS - currentEarnedCredits);
 
+  // Chế độ mô phỏng
+  const [mode, setMode] = useState<SimulatorMode>("time");
   const [targetGpa10, setTargetGpa10] = useState<number>(8.5); // Default: Giỏi (8.5)
-  const [creditsPerTermInput, setCreditsPerTermInput] = useState<number>(21);
 
-  // Tính số kỳ động tương ứng với lộ trình 3.5 năm (7 kỳ), 4 năm (8 kỳ), 4.5 năm (9 kỳ)
+  // State Chế độ A: Theo lộ trình thời gian (số kỳ còn lại)
   const completedTerms = Math.max(1, completedTermsCount);
-  const earlyTerms = Math.max(1, 7 - completedTerms);
-  const standardTerms = Math.max(1, 8 - completedTerms);
-  const extendedTerms = Math.max(1, 9 - completedTerms);
+  const [selectedTerms, setSelectedTerms] = useState<number>(5);
 
-  // Số kỳ tính toán từ số TC dự kiến mỗi kỳ
-  const effectiveCreditsPerTerm = Math.max(1, creditsPerTermInput);
-  const calculatedTerms = Math.ceil(remainingCredits / effectiveCreditsPerTerm);
+  // State Chế độ B: Theo tải trọng tín chỉ mỗi kỳ
+  const [creditsPerTerm, setCreditsPerTerm] = useState<number>(21);
 
-  // Tính điểm trung bình mỗi kỳ còn lại cần đạt
+  // Tính số kỳ và số tín chỉ/kỳ hiệu dụng dựa theo mode đang chọn
+  const { effectiveTerms, effectiveCreditsPerTerm } = useMemo(() => {
+    if (remainingCredits <= 0) {
+      return { effectiveTerms: 0, effectiveCreditsPerTerm: 0 };
+    }
+
+    if (mode === "time") {
+      const terms = Math.max(1, selectedTerms);
+      const pace = Math.ceil(remainingCredits / terms);
+      return { effectiveTerms: terms, effectiveCreditsPerTerm: pace };
+    } else {
+      const pace = Math.max(1, creditsPerTerm);
+      const terms = Math.ceil(remainingCredits / pace);
+      return { effectiveTerms: terms, effectiveCreditsPerTerm: pace };
+    }
+  }, [mode, selectedTerms, creditsPerTerm, remainingCredits]);
+
+  // Dự báo năm tốt nghiệp (1 năm = 2 học kỳ chính)
+  const estimatedGraduationYears = useMemo(() => {
+    const totalTerms = completedTerms + effectiveTerms;
+    return (totalTerms / 2).toFixed(1);
+  }, [completedTerms, effectiveTerms]);
+
+  // Tính cGPA trung bình cần đạt trên tổng số tín chỉ còn lại
   const targetTotalPoints = targetGpa10 * TOTAL_DEGREE_CREDITS;
   const requiredRemainingPoints = targetTotalPoints - currentTotalWeighted10;
   const requiredAverageGpa10 =
@@ -58,7 +84,7 @@ export const GpaSimulatorCard: React.FC<GpaSimulatorCardProps> = ({
 
   const isAchievable = requiredAverageGpa10 <= 10.0 && requiredAverageGpa10 >= 0;
 
-  // Xác định chuẩn danh hiệu tốt nghiệp theo quy chế ĐHQG-HCM
+  // Danh hiệu tốt nghiệp theo chuẩn ĐHQG-HCM
   const degreeRank = useMemo(() => {
     if (targetGpa10 >= 9.0)
       return { label: "Xuất sắc", color: "text-amber-400 border-amber-500/30 bg-amber-950/40" };
@@ -69,11 +95,13 @@ export const GpaSimulatorCard: React.FC<GpaSimulatorCardProps> = ({
     return { label: "Trung bình", color: "text-zinc-400 border-zinc-700 bg-zinc-800" };
   }, [targetGpa10]);
 
-  const handleSelectPill = (termsCount: number) => {
-    if (remainingCredits <= 0) return;
-    const tcNeeded = Math.ceil(remainingCredits / termsCount);
-    setCreditsPerTermInput(tcNeeded);
-  };
+  // Danh sách các mốc lộ trình thời gian có thể chọn
+  const timePresets = [
+    { terms: 4, label: "4 kỳ nữa", note: "3.0 năm (Siêu tốc)" },
+    { terms: 5, label: "5 kỳ nữa", note: "3.5 năm (Vượt tiến độ)" },
+    { terms: 6, label: "6 kỳ nữa", note: "4.0 năm (Chuẩn CTĐT)" },
+    { terms: 7, label: "7 kỳ nữa", note: "4.5 năm (Thong thả)" },
+  ];
 
   return (
     <div
@@ -90,7 +118,7 @@ export const GpaSimulatorCard: React.FC<GpaSimulatorCardProps> = ({
               Dự Báo Tốt Nghiệp &amp; GPA Simulator
             </h3>
             <p className="text-xs text-zinc-500">
-              Mô phỏng lộ trình cGPA và phân bổ chỉ tiêu học kỳ UIT
+              Mô phỏng cGPA mục tiêu và phân bổ lộ trình tín chỉ UIT
             </p>
           </div>
         </div>
@@ -118,7 +146,7 @@ export const GpaSimulatorCard: React.FC<GpaSimulatorCardProps> = ({
         </span>
       </div>
 
-      {/* Main Slider & Target Section */}
+      {/* Slider Mục tiêu cGPA Tốt Nghiệp */}
       <div className="space-y-4">
         <div>
           <div className="flex items-center justify-between mb-1.5">
@@ -155,71 +183,117 @@ export const GpaSimulatorCard: React.FC<GpaSimulatorCardProps> = ({
           </div>
         </div>
 
-        {/* Dynamic Remaining Terms Pills */}
-        <div>
-          <div className="text-xs font-medium text-zinc-400 mb-2 flex items-center justify-between">
-            <span>Lộ trình tốt nghiệp dự kiến:</span>
-            <span className="text-[11px] text-zinc-500 font-mono">
-              Đã học: {completedTerms} kỳ
+        {/* Mode Selector Tabs (Mutually Exclusive Dual-Controller) */}
+        <div className="pt-1">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-medium text-zinc-300 flex items-center gap-1.5">
+              Phương thức mô phỏng:
             </span>
+            <div className="flex rounded-lg bg-zinc-950 p-0.5 border border-zinc-800">
+              <button
+                type="button"
+                onClick={() => setMode("time")}
+                className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-medium transition-all cursor-pointer ${
+                  mode === "time"
+                    ? "bg-violet-600 text-white shadow-sm"
+                    : "text-zinc-400 hover:text-zinc-200"
+                }`}
+              >
+                <Calendar className="w-3 h-3" />
+                Lộ trình thời gian
+              </button>
+              <button
+                type="button"
+                onClick={() => setMode("pace")}
+                className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-medium transition-all cursor-pointer ${
+                  mode === "pace"
+                    ? "bg-violet-600 text-white shadow-sm"
+                    : "text-zinc-400 hover:text-zinc-200"
+                }`}
+              >
+                <Zap className="w-3 h-3" />
+                Tải trọng tín chỉ
+              </button>
+            </div>
           </div>
-          <div className="grid grid-cols-3 gap-2">
-            <button
-              type="button"
-              onClick={() => handleSelectPill(earlyTerms)}
-              className={`py-1.5 px-2 rounded-lg text-xs font-medium border transition-colors cursor-pointer text-center ${
-                calculatedTerms === earlyTerms
-                  ? "bg-violet-600/20 text-violet-300 border-violet-500/50 shadow-sm"
-                  : "bg-zinc-950/60 text-zinc-400 border-zinc-800 hover:border-zinc-700 hover:text-zinc-200"
-              }`}
-            >
-              <div className="font-bold">{earlyTerms} kỳ nữa</div>
-              <div className="text-[10px] text-zinc-500 font-normal">Vượt (3.5 năm)</div>
-            </button>
 
-            <button
-              type="button"
-              onClick={() => handleSelectPill(standardTerms)}
-              className={`py-1.5 px-2 rounded-lg text-xs font-medium border transition-colors cursor-pointer text-center ${
-                calculatedTerms === standardTerms
-                  ? "bg-emerald-600/20 text-emerald-300 border-emerald-500/50 shadow-sm"
-                  : "bg-zinc-950/60 text-zinc-400 border-zinc-800 hover:border-zinc-700 hover:text-zinc-200"
-              }`}
-            >
-              <div className="font-bold">{standardTerms} kỳ nữa</div>
-              <div className="text-[10px] text-zinc-500 font-normal">Chuẩn (4 năm)</div>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleSelectPill(extendedTerms)}
-              className={`py-1.5 px-2 rounded-lg text-xs font-medium border transition-colors cursor-pointer text-center ${
-                calculatedTerms === extendedTerms
-                  ? "bg-amber-600/20 text-amber-300 border-amber-500/50 shadow-sm"
-                  : "bg-zinc-950/60 text-zinc-400 border-zinc-800 hover:border-zinc-700 hover:text-zinc-200"
-              }`}
-            >
-              <div className="font-bold">{extendedTerms} kỳ nữa</div>
-              <div className="text-[10px] text-zinc-500 font-normal">Kéo dài (4.5 năm)</div>
-            </button>
-          </div>
+          {/* CHẾ ĐỘ A: THEO LỘ TRÌNH THỜI GIAN */}
+          {mode === "time" ? (
+            <div className="space-y-2">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                {timePresets.map((preset) => (
+                  <button
+                    key={preset.terms}
+                    type="button"
+                    onClick={() => setSelectedTerms(preset.terms)}
+                    className={`py-2 px-2 rounded-lg text-xs font-medium border transition-all cursor-pointer text-center ${
+                      selectedTerms === preset.terms
+                        ? "bg-violet-950/60 text-violet-300 border-violet-500 shadow-sm ring-1 ring-violet-500/40"
+                        : "bg-zinc-950/60 text-zinc-400 border-zinc-800 hover:border-zinc-700 hover:text-zinc-200"
+                    }`}
+                  >
+                    <div className="font-bold text-sm">{preset.label}</div>
+                    <div className="text-[10px] text-zinc-500 mt-0.5">{preset.note}</div>
+                  </button>
+                ))}
+              </div>
+              <p className="text-[11px] text-zinc-500 italic text-right font-mono">
+                Cần hoàn thành trung bình ~{effectiveCreditsPerTerm} TC/kỳ
+              </p>
+            </div>
+          ) : (
+            /* CHẾ ĐỘ B: THEO TẢI TRỌNG TÍN CHỈ */
+            <div className="space-y-2.5 rounded-lg bg-zinc-950/60 border border-zinc-800 p-3">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-zinc-400">Số tín chỉ dự kiến học mỗi kỳ:</span>
+                <span className="font-mono font-bold text-emerald-400 text-sm">
+                  {creditsPerTerm} TC/kỳ
+                </span>
+              </div>
+              <input
+                type="range"
+                min={12}
+                max={26}
+                step={1}
+                value={creditsPerTerm}
+                onChange={(e) => setCreditsPerTerm(parseInt(e.target.value, 10))}
+                className="w-full h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-emerald-500 focus:outline-none"
+              />
+              <div className="flex items-center justify-between text-[11px] text-zinc-400 font-mono">
+                <span>12 TC (Nhẹ nhàng)</span>
+                <span className="text-emerald-400 font-semibold">
+                  {effectiveTerms} kỳ nữa • Tốt nghiệp ~{estimatedGraduationYears} năm
+                </span>
+                <span>26 TC (Tối đa)</span>
+              </div>
+            </div>
+          )}
         </div>
 
-        {/* Real-time Badge / Alert */}
+        {/* Real-time Result Alert Card - Chuẩn hóa ngữ nghĩa toán học */}
         {isAchievable ? (
           <div className="rounded-lg bg-emerald-950/30 border border-emerald-800/40 p-3.5 text-xs text-emerald-300">
             <div className="flex items-start gap-2.5">
               <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
               <div className="leading-relaxed">
-                Cần duy trì tối thiểu{" "}
+                Cần duy trì{" "}
+                <span className="font-semibold text-emerald-200">cGPA trung bình tối thiểu</span>{" "}
                 <span className="font-mono font-bold text-emerald-400 text-sm">
                   {requiredAverageGpa10.toFixed(2)}
                 </span>{" "}
-                điểm/môn trong{" "}
-                <span className="font-mono font-bold text-emerald-400 text-sm">
-                  {calculatedTerms}
+                trên tổng số{" "}
+                <span className="font-mono font-bold text-zinc-100">
+                  {remainingCredits}
                 </span>{" "}
-                học kỳ tới để tốt nghiệp loại{" "}
+                tín chỉ còn lại (trung bình{" "}
+                <span className="font-mono font-bold text-emerald-300">
+                  {effectiveCreditsPerTerm} TC/kỳ
+                </span>{" "}
+                trong{" "}
+                <span className="font-mono font-bold text-zinc-100">
+                  {effectiveTerms} học kỳ tới
+                </span>
+                ) để tốt nghiệp loại{" "}
                 <span className="font-semibold text-emerald-200">{degreeRank.label}</span>.
               </div>
             </div>
@@ -231,11 +305,11 @@ export const GpaSimulatorCard: React.FC<GpaSimulatorCardProps> = ({
               <div className="leading-relaxed">
                 <p className="font-semibold text-rose-200">Mục tiêu cGPA bất khả thi!</p>
                 <p className="mt-0.5 text-rose-400/90">
-                  Cần đạt trung bình{" "}
+                  Cần đạt cGPA trung bình{" "}
                   <span className="font-mono font-bold text-rose-300 text-sm">
                     {requiredAverageGpa10.toFixed(2)} / 10.0
                   </span>{" "}
-                  ở các tín chỉ còn lại (vượt trần điểm tối đa 10.0). Hãy hạ bớt chỉ tiêu.
+                  ở các tín chỉ còn lại (vượt trần tối đa 10.0). Vui lòng hạ chỉ tiêu hoặc kéo dài lộ trình.
                 </p>
               </div>
             </div>
@@ -252,49 +326,32 @@ export const GpaSimulatorCard: React.FC<GpaSimulatorCardProps> = ({
           </div>
 
           <div className="rounded-lg bg-zinc-950/50 border border-zinc-800/80 p-2.5">
-            <div className="text-[11px] text-zinc-500">TC đã tích lũy</div>
-            <div className="text-base font-bold text-emerald-400 font-mono mt-0.5">
-              {currentEarnedCredits} <span className="text-[10px] text-zinc-500 font-normal">TC</span>
-            </div>
-          </div>
-
-          <div className="rounded-lg bg-zinc-950/50 border border-zinc-800/80 p-2.5">
-            <div className="text-[11px] text-zinc-500">TC còn lại</div>
+            <div className="text-[11px] text-zinc-500">Mục tiêu cGPA</div>
             <div className="text-base font-bold text-violet-400 font-mono mt-0.5">
-              {remainingCredits} <span className="text-[10px] text-zinc-500 font-normal">TC</span>
+              {targetGpa10.toFixed(2)}
             </div>
           </div>
 
           <div className="rounded-lg bg-zinc-950/50 border border-zinc-800/80 p-2.5">
-            <div className="text-[11px] text-zinc-500">Số kỳ suy ra</div>
-            <div className="text-base font-bold text-zinc-200 font-mono mt-0.5">
-              {calculatedTerms} <span className="text-[10px] text-zinc-500 font-normal">kỳ</span>
+            <div className="text-[11px] text-zinc-500">cGPA cần đạt (còn lại)</div>
+            <div
+              className={`text-base font-bold font-mono mt-0.5 ${
+                isAchievable ? "text-emerald-400" : "text-rose-400"
+              }`}
+            >
+              {requiredAverageGpa10.toFixed(2)}
             </div>
           </div>
-        </div>
-      </div>
 
-      {/* Custom Credits Per Term Input */}
-      <div className="mt-4 pt-3 border-t border-zinc-800/80 flex items-center justify-between gap-3 text-xs text-zinc-400">
-        <label htmlFor="custom-tc-input" className="flex items-center gap-1.5 cursor-pointer">
-          <span>Số tín chỉ dự kiến học mỗi kỳ:</span>
-        </label>
-        <div className="flex items-center gap-1.5">
-          <input
-            id="custom-tc-input"
-            type="number"
-            min={10}
-            max={35}
-            value={creditsPerTermInput}
-            onChange={(e) => {
-              const val = parseInt(e.target.value, 10);
-              setCreditsPerTermInput(isNaN(val) ? 20 : val);
-            }}
-            className="w-16 bg-zinc-950 border border-zinc-700 text-zinc-200 rounded px-2 py-1 font-mono text-xs text-center focus:outline-none focus:border-violet-500"
-          />
-          <span className="text-zinc-500 text-[11px]">TC/kỳ</span>
+          <div className="rounded-lg bg-zinc-950/50 border border-zinc-800/80 p-2.5">
+            <div className="text-[11px] text-zinc-500">Tải trọng dự kiến</div>
+            <div className="text-base font-bold text-cyan-400 font-mono mt-0.5">
+              ~{effectiveCreditsPerTerm} <span className="text-xs text-zinc-500 font-normal">TC/kỳ</span>
+            </div>
+          </div>
         </div>
       </div>
     </div>
   );
 };
+

@@ -54,12 +54,16 @@ export const AcademicRadarChart: React.FC<AcademicRadarChartProps> = ({
 
   const valuePolygonString = valuePoints.map((p) => `${p.x},${p.y}`).join(" ");
 
+  // Đa giác chuẩn CTĐT tham chiếu (Target Baseline: 8.5) giữ phom dáng Radar cân xứng
+  const baselinePoints = axisAngles.map((angle) => getCoordinates(angle, (8.5 / maxScore) * radius));
+  const baselinePolygonString = baselinePoints.map((p) => `${p.x},${p.y}`).join(" ");
+
   // Vị trí label bên ngoài các đỉnh
   const labelOffsets = [
-    { textAnchor: "middle", dy: -12, dx: 0 },   // Top
-    { textAnchor: "start", dy: 4, dx: 12 },     // Right
-    { textAnchor: "middle", dy: 20, dx: 0 },    // Bottom
-    { textAnchor: "end", dy: 4, dx: -12 },      // Left
+    { textAnchor: "middle", dy: -14, dx: 0 },   // Top
+    { textAnchor: "start", dy: 4, dx: 14 },     // Right
+    { textAnchor: "middle", dy: 24, dx: 0 },    // Bottom
+    { textAnchor: "end", dy: 4, dx: -14 },      // Left
   ];
 
   const activeItem = hoveredIndex !== null ? data[hoveredIndex] : null;
@@ -136,6 +140,18 @@ export const AcademicRadarChart: React.FC<AcademicRadarChartProps> = ({
           );
         })}
 
+        {/* 2.5 Đa giác chuẩn CTĐT tham chiếu (Target Baseline Polygon) */}
+        <polygon
+          points={baselinePolygonString}
+          fill="#8b5cf6"
+          fillOpacity="0.04"
+          stroke="#7c3aed"
+          strokeOpacity="0.35"
+          strokeWidth="1.2"
+          strokeDasharray="4 4"
+          className="pointer-events-none"
+        />
+
         {/* 3. Đa giác giá trị (Value Polygon) */}
         {data.length >= 3 && (
           <polygon
@@ -155,6 +171,7 @@ export const AcademicRadarChart: React.FC<AcademicRadarChartProps> = ({
           const outerPoint = getCoordinates(angle, radius);
           const offset = labelOffsets[idx % labelOffsets.length];
           const isHovered = hoveredIndex === idx;
+          const hasScore = item.averageScore10 > 0;
 
           return (
             <g key={`axis-node-${item.category}`}>
@@ -173,9 +190,9 @@ export const AcademicRadarChart: React.FC<AcademicRadarChartProps> = ({
               <circle
                 cx={point.x}
                 cy={point.y}
-                r={isHovered ? 6 : 4}
-                fill={isHovered ? "#ffffff" : "#c4b5fd"}
-                stroke="#7c3aed" /* violet-600 */
+                r={isHovered ? 6 : hasScore ? 4 : 3}
+                fill={isHovered ? "#ffffff" : hasScore ? "#c4b5fd" : "#52525b"}
+                stroke={hasScore ? "#7c3aed" : "#3f3f46"}
                 strokeWidth={isHovered ? 2.5 : 1.5}
                 className="transition-all duration-200 pointer-events-none"
               />
@@ -185,7 +202,7 @@ export const AcademicRadarChart: React.FC<AcademicRadarChartProps> = ({
                 x={outerPoint.x + offset.dx}
                 y={outerPoint.y + offset.dy}
                 textAnchor={offset.textAnchor as "middle" | "start" | "end"}
-                fill={isHovered ? "#e4e4e7" : "#a1a1aa"} /* zinc-200 / zinc-400 */
+                fill={isHovered ? "#e4e4e7" : hasScore ? "#d4d4d8" : "#71717a"}
                 fontSize={isHovered ? "12" : "11"}
                 fontWeight={isHovered ? "600" : "500"}
                 className="transition-all duration-150 cursor-pointer"
@@ -197,10 +214,10 @@ export const AcademicRadarChart: React.FC<AcademicRadarChartProps> = ({
                   x={outerPoint.x + offset.dx}
                   dy={offset.dy < 0 ? "-1.2em" : "1.2em"}
                   fontSize="10"
-                  fill={item.averageScore10 >= 8.0 ? "#34d399" : item.averageScore10 >= 5.0 ? "#a78bfa" : "#f87171"}
-                  fontWeight="600"
+                  fill={hasScore ? (item.averageScore10 >= 8.0 ? "#34d399" : item.averageScore10 >= 5.0 ? "#a78bfa" : "#f87171") : "#71717a"}
+                  fontWeight={hasScore ? "600" : "normal"}
                 >
-                  {item.averageScore10 > 0 ? `${item.averageScore10.toFixed(2)}` : "—"}
+                  {hasScore ? item.averageScore10.toFixed(2) : "(Chưa tích lũy)"}
                 </tspan>
               </text>
             </g>
