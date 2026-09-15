@@ -15,6 +15,11 @@ dist-ssr
 # Vendor & tooling
 tools/vendor/
 src-tauri/target/
+src-tauri/target*/
+src-tauri/target_*/
+target/
+target*/
+target_*/
 
 # Editor directories and files
 .vscode/*

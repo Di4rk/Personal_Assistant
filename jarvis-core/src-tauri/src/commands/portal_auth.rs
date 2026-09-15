@@ -1196,7 +1196,7 @@ pub async fn launch_portal_sso_sync(app: AppHandle) -> Result<(), String> {
     }
 
     let auth_url = WebviewUrl::External(
-        "https://portal.uit.edu.vn/sinh-vien/ho-so"
+        "https://portal.uit.edu.vn/sinh-vien/bang-diem"
             .parse()
             .map_err(|e| format!("Invalid auth URL: {e}"))?,
     );
@@ -1222,7 +1222,7 @@ pub async fn launch_portal_sso_sync(app: AppHandle) -> Result<(), String> {
 
     let window = WebviewWindowBuilder::new(&app, &window_label, auth_url)
         .title("Đăng nhập Cổng Thông Tin UIT")
-        .inner_size(860.0, 720.0)
+        .inner_size(960.0, 720.0)
         .resizable(true)
         .always_on_top(true)
         .initialization_script(PORTAL_HARVESTER_SCRIPT)
@@ -1236,19 +1236,26 @@ pub async fn launch_portal_sso_sync(app: AppHandle) -> Result<(), String> {
                     match parse_callback_fragment(fragment) {
                         Ok((target, data_str)) => {
                             if target == "portal" {
-                                let harvester_reg = get_portal_harvester_registry_static();
-                                let db_state = app_handle.state::<SharedDb>();
-                                let db_arc = db_state.inner().clone();
-                                match harvester_reg.commit_session(&window_label, db_arc) {
-                                    Ok(total_courses) => {
-                                        println!("[SSO Final] Portal Harvester committed {total_courses} courses successfully!");
-                                        let _ = app_handle.emit("academic-data-synced", ());
-                                        let _ = app_handle.emit("sso-callback-success", "portal");
-                                    }
-                                    Err(err) => {
-                                        eprintln!("[SSO Final] ERROR in Portal Harvester commit: {err}");
-                                        let _ = app_handle.emit("sso-callback-error", err.to_string());
-                                        let _ = app_handle.emit_to("main", "portal-sync-failed", err.to_string());
+                                let status = extract_query_param(fragment, "status");
+                                if status == "success" {
+                                    println!("[SSO Final] Portal auto-sync completed via background API engine!");
+                                    let _ = app_handle.emit("academic-data-synced", ());
+                                    let _ = app_handle.emit("sso-callback-success", "portal");
+                                } else {
+                                    let harvester_reg = get_portal_harvester_registry_static();
+                                    let db_state = app_handle.state::<SharedDb>();
+                                    let db_arc = db_state.inner().clone();
+                                    match harvester_reg.commit_session(&window_label, db_arc) {
+                                        Ok(total_courses) => {
+                                            println!("[SSO Final] Portal Harvester committed {total_courses} courses successfully!");
+                                            let _ = app_handle.emit("academic-data-synced", ());
+                                            let _ = app_handle.emit("sso-callback-success", "portal");
+                                        }
+                                        Err(err) => {
+                                            eprintln!("[SSO Final] ERROR in Portal Harvester commit: {err}");
+                                            let _ = app_handle.emit("sso-callback-error", err.to_string());
+                                            let _ = app_handle.emit_to("main", "portal-sync-failed", err.to_string());
+                                        }
                                     }
                                 }
                             } else {

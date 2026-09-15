@@ -12,14 +12,15 @@ import {
   Code2,
 } from "lucide-react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { getWecodeSubmissions, launchWecodeSsoSync } from "../../lib/tauri-client";
+import { getWecodeSubmissions } from "../../lib/tauri-client";
 import { WecodeSubmissionsList } from "./components/WecodeSubmissionsList";
+import { SyncWecodeModal } from "./components/SyncWecodeModal";
 import type { WecodeSubmission } from "../../types/wecode";
 
 export const WecodeDashboard: React.FC = () => {
   const [submissions, setSubmissions] = useState<WecodeSubmission[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  const [isSyncModalOpen, setIsSyncModalOpen] = useState<boolean>(false);
   const [selectedAssignment, setSelectedAssignment] = useState<number | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [partialErrors, setPartialErrors] = useState<string[]>([]);
@@ -47,13 +48,11 @@ export const WecodeDashboard: React.FC = () => {
 
     const setupListeners = async () => {
       unlistenSync = await listen("wecode-submissions-synced", () => {
-        setIsSyncing(false);
         setSyncError(null);
         void fetchSubmissions(selectedAssignment);
       });
 
       unlistenFail = await listen<string>("wecode-sync-failed", (event) => {
-        setIsSyncing(false);
         setSyncError(event.payload);
       });
 
@@ -71,16 +70,8 @@ export const WecodeDashboard: React.FC = () => {
     };
   }, [fetchSubmissions, selectedAssignment]);
 
-  const handleTriggerSync = async () => {
-    setIsSyncing(true);
-    setSyncError(null);
-    setPartialErrors([]);
-    try {
-      await launchWecodeSsoSync();
-    } catch (err) {
-      setIsSyncing(false);
-      setSyncError(typeof err === "string" ? err : "Không thể khởi chạy cửa sổ đồng bộ");
-    }
+  const handleTriggerSync = () => {
+    setIsSyncModalOpen(true);
   };
 
   // Distinct assignment IDs for filter
@@ -146,11 +137,10 @@ export const WecodeDashboard: React.FC = () => {
 
             <button
               onClick={handleTriggerSync}
-              disabled={isSyncing}
-              className="px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white font-mono text-xs font-semibold flex items-center gap-2 shadow-sm transition-all disabled:opacity-50"
+              className="px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white font-mono text-xs font-semibold flex items-center gap-2 shadow-sm transition-all"
             >
               <ExternalLink className="w-3.5 h-3.5" />
-              <span>{isSyncing ? "Đang đồng bộ..." : "Đồng bộ Wecode"}</span>
+              <span>Đồng bộ Wecode</span>
             </button>
           </div>
         </div>
@@ -285,6 +275,12 @@ export const WecodeDashboard: React.FC = () => {
           isLoading={isLoading}
         />
       </div>
+
+      <SyncWecodeModal
+        isOpen={isSyncModalOpen}
+        onClose={() => setIsSyncModalOpen(false)}
+        onSyncSuccess={() => void fetchSubmissions(selectedAssignment)}
+      />
     </div>
   );
 };

@@ -1,7 +1,25 @@
 import React, { useCallback, useState } from "react";
-import { submitPortalTranscript, syncPortalUitData } from "../../../lib/tauri-client";
+import {
+  submitPortalTranscript,
+  ingestPortalSyncPayloadJson,
+  launchPortalSsoSync,
+} from "../../../lib/tauri-client";
 import { useTauriEvent } from "../../../hooks/useTauriEvent";
-import type { AcademicOverviewDto, PortalSyncStatus, RawPortalSemester } from "../types";
+import { PORTAL_BROWSER_SYNC_SCRIPT } from "../utils/browserSyncScripts";
+import type { AcademicOverviewDto, RawPortalSemester } from "../types";
+import {
+  Check,
+  Copy,
+  ExternalLink,
+  Terminal,
+  AlertCircle,
+  GraduationCap,
+  CheckCircle2,
+  Sparkles,
+  ChevronDown,
+  ChevronUp,
+  Loader2,
+} from "lucide-react";
 
 export interface SyncPortalModalProps {
   isOpen: boolean;
@@ -14,18 +32,24 @@ export const SyncPortalModal: React.FC<SyncPortalModalProps> = ({
   onClose,
   onSyncSuccess,
 }) => {
-  const [status, setStatus] = useState<PortalSyncStatus>("idle");
+  const [copied, setCopied] = useState<boolean>(false);
+  const [isListening, setIsListening] = useState<boolean>(false);
+  const [status, setStatus] = useState<"idle" | "listening" | "ingesting" | "completed" | "error">("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [syncedCoursesCount, setSyncedCoursesCount] = useState<number | null>(null);
   const [resultOverview, setResultOverview] = useState<AcademicOverviewDto | null>(null);
-  const [showManualInput, setShowManualInput] = useState<boolean>(false);
+  const [showManualSection, setShowManualSection] = useState<boolean>(false);
+  const [showManualJsonInput, setShowManualJsonInput] = useState<boolean>(false);
   const [manualJson, setManualJson] = useState<string>("");
 
-  // Lắng nghe sự kiện sync-complete từ Tauri backend khi SSO Webview hoàn thành
   const handleSyncComplete = useCallback(
-    (overview: AcademicOverviewDto) => {
-      setResultOverview(overview);
+    (overview?: AcademicOverviewDto) => {
+      if (overview) {
+        setResultOverview(overview);
+      }
       setStatus("completed");
-      if (onSyncSuccess) {
+      setIsListening(false);
+      if (onSyncSuccess && overview) {
         onSyncSuccess(overview);
       }
     },
@@ -33,25 +57,45 @@ export const SyncPortalModal: React.FC<SyncPortalModalProps> = ({
   );
 
   useTauriEvent<AcademicOverviewDto>("academic://sync-complete", handleSyncComplete);
+  useTauriEvent("academic-data-synced", () => {
+    setStatus("completed");
+    setIsListening(false);
+  });
+  useTauriEvent<string>("portal-sync-failed", (reason) => {
+    setErrorMessage(`Đồng bộ thất bại: ${reason}`);
+    setStatus("error");
+    setIsListening(false);
+  });
 
-  const handleStartSso = async () => {
-    setStatus("awaiting_sso");
+  const handleLaunchAutoSync = async () => {
     setErrorMessage(null);
-
+    setStatus("listening");
+    setIsListening(true);
     try {
-      const overview = await syncPortalUitData();
-      // Nếu backend sync xong ngay hoặc trả về overview
-      setResultOverview(overview);
+      await launchPortalSsoSync();
     } catch (err) {
-      const msg = typeof err === "string" ? err : err instanceof Error ? err.message : "Lỗi khi mở popup SSO UIT";
+      const msg = typeof err === "string" ? err : "Không thể khởi chạy cửa sổ đăng nhập UIT.";
       setErrorMessage(msg);
       setStatus("error");
+      setIsListening(false);
+    }
+  };
+
+  const handleCopyScript = async () => {
+    try {
+      await navigator.clipboard.writeText(PORTAL_BROWSER_SYNC_SCRIPT);
+      setCopied(true);
+      setIsListening(true);
+      setStatus("listening");
+      setTimeout(() => setCopied(false), 3000);
+    } catch {
+      setErrorMessage("Không thể sao chép vào clipboard. Vui lòng thử lại.");
     }
   };
 
   const handleManualSubmit = async () => {
     if (!manualJson.trim()) {
-      setErrorMessage("Vui lòng dán payload JSON bảng điểm.");
+      setErrorMessage("Vui lòng dán payload JSON.");
       return;
     }
 
@@ -59,12 +103,18 @@ export const SyncPortalModal: React.FC<SyncPortalModalProps> = ({
     setErrorMessage(null);
 
     try {
-      const parsed: RawPortalSemester[] = JSON.parse(manualJson);
-      const overview = await submitPortalTranscript(parsed);
-      setResultOverview(overview);
-      setStatus("completed");
-      if (onSyncSuccess) {
-        onSyncSuccess(overview);
+      if (manualJson.trim().startsWith("{")) {
+        const count = await ingestPortalSyncPayloadJson(manualJson);
+        setSyncedCoursesCount(count);
+        setStatus("completed");
+      } else {
+        const parsed: RawPortalSemester[] = JSON.parse(manualJson);
+        const overview = await submitPortalTranscript(parsed);
+        setResultOverview(overview);
+        setStatus("completed");
+        if (onSyncSuccess) {
+          onSyncSuccess(overview);
+        }
       }
     } catch (err) {
       const msg =
@@ -72,7 +122,7 @@ export const SyncPortalModal: React.FC<SyncPortalModalProps> = ({
           ? err
           : err instanceof Error
           ? err.message
-          : "JSON không đúng định dạng học kỳ UIT.";
+          : "JSON không đúng định dạng dữ liệu Portal.";
       setErrorMessage(msg);
       setStatus("error");
     }
@@ -80,195 +130,251 @@ export const SyncPortalModal: React.FC<SyncPortalModalProps> = ({
 
   const handleReset = () => {
     setStatus("idle");
+    setIsListening(false);
     setErrorMessage(null);
+    setSyncedCoursesCount(null);
     setResultOverview(null);
   };
 
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-      <div className="relative w-full max-w-lg rounded-lg border border-zinc-800 bg-zinc-900 text-zinc-100 shadow-2xl p-6">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 font-mono">
+      <div className="relative w-full max-w-lg rounded-xl border border-zinc-800 bg-zinc-900 text-zinc-100 shadow-2xl p-6">
         {/* Header */}
         <div className="flex items-center justify-between pb-4 border-b border-zinc-800">
-          <div>
-            <h3 className="text-base font-semibold text-zinc-100">
-              Đồng bộ Cổng thông tin UIT
-            </h3>
-            <p className="text-xs text-zinc-400 mt-0.5">
-              Hỗ trợ SSO trực tiếp &amp; phân giải bảng điểm Next.js portal.uit.edu.vn
-            </p>
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 rounded-lg bg-sky-950/60 border border-sky-800/50 text-sky-400">
+              <GraduationCap className="w-4 h-4" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-zinc-100">
+                Đồng bộ Cổng thông tin UIT
+              </h3>
+              <p className="text-[11px] text-zinc-400 mt-0.5">
+                Tự động 100% — Chỉ cần đăng nhập, hệ thống tự kéo toàn bộ dữ liệu
+              </p>
+            </div>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="text-zinc-400 hover:text-zinc-200 transition-colors p-1 rounded hover:bg-zinc-800 text-sm"
+            className="text-zinc-400 hover:text-zinc-200 transition-colors p-1.5 rounded-lg hover:bg-zinc-800 text-xs"
           >
             ✕
           </button>
         </div>
 
         {/* Content Body */}
-        <div className="py-5 space-y-4">
-          {/* Status Indicator */}
-          {status === "idle" && (
-            <div className="space-y-4">
-              <div className="rounded-md border border-zinc-800 bg-zinc-950/60 p-4 text-xs text-zinc-300 space-y-2">
-                <div className="font-medium text-zinc-200">Quy trình tự động hoá:</div>
-                <ul className="list-disc list-inside space-y-1 text-zinc-400">
-                  <li>Mở cửa sổ Webview SSO đăng nhập tài khoản sinh viên UIT.</li>
-                  <li>Tự động nhận diện session và nạp bảng điểm học kỳ.</li>
-                  <li>Tự động phân loại môn GDTC (PE) và GDQP (ME) khỏi tính GPA.</li>
-                  <li>Tính toán tự động thang điểm hệ 4 và cập nhật tổng chỉ số cGPA.</li>
-                </ul>
-              </div>
-
-              {!showManualInput ? (
-                <div className="flex flex-col space-y-2">
-                  <button
-                    type="button"
-                    onClick={handleStartSso}
-                    className="w-full py-2.5 px-4 rounded-md bg-zinc-100 text-zinc-900 font-medium text-sm hover:bg-white transition-colors flex items-center justify-center space-x-2"
-                  >
-                    <span>Mở Popup SSO UIT</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setShowManualInput(true)}
-                    className="text-xs text-zinc-400 hover:text-zinc-200 underline text-center pt-1"
-                  >
-                    Hoặc nạp qua JSON payload / Fallback Parser
-                  </button>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  <div className="flex justify-between items-center text-xs">
-                    <span className="text-zinc-300 font-medium">Dán JSON bảng điểm:</span>
-                    <button
-                      type="button"
-                      onClick={() => setShowManualInput(false)}
-                      className="text-zinc-400 hover:text-zinc-200 underline"
-                    >
-                      Quay lại SSO
-                    </button>
+        <div className="py-4 space-y-4">
+          {status === "completed" ? (
+            <div className="rounded-lg border border-sky-900/60 bg-sky-950/30 p-5 text-center space-y-3">
+              <CheckCircle2 className="w-10 h-10 text-sky-400 mx-auto" />
+              <h4 className="text-sm font-bold text-sky-300">
+                Đồng bộ Portal UIT thành công!
+              </h4>
+              <p className="text-xs text-zinc-300 leading-relaxed">
+                {syncedCoursesCount !== null
+                  ? `Đã cập nhật ${syncedCoursesCount} môn học, điểm rèn luyện và hồ sơ sinh viên vào SQLite.`
+                  : "Toàn bộ điểm học kỳ, DRL và tín chỉ tích lũy đã được nạp vào Academic Radar."}
+              </p>
+              {resultOverview && (
+                <div className="grid grid-cols-2 gap-2 pt-2 text-xs">
+                  <div className="bg-zinc-950/70 p-2.5 rounded border border-zinc-800">
+                    <span className="text-zinc-500 block text-[10px]">GPA Hệ 10</span>
+                    <span className="text-base font-bold text-zinc-100">
+                      {resultOverview.actualGpa10 !== null ? resultOverview.actualGpa10.toFixed(2) : "–"}
+                    </span>
                   </div>
-                  <textarea
-                    rows={6}
-                    value={manualJson}
-                    onChange={(e) => setManualJson(e.target.value)}
-                    placeholder='[&#10;  {&#10;    "header": "Học kỳ 1/2024-2025",&#10;    "courses": [&#10;      { "courseCode": "IT002", "courseName": "OOP", "credits": 4, "summaryScore10": 9.0 }&#10;    ]&#10;  }&#10;]'
-                    className="w-full rounded-md border border-zinc-800 bg-zinc-950 p-2.5 font-mono text-xs text-zinc-200 placeholder-zinc-600 focus:border-zinc-500 focus:outline-none"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleManualSubmit}
-                    className="w-full py-2 px-4 rounded-md bg-zinc-200 text-zinc-900 font-medium text-xs hover:bg-white transition-colors"
-                  >
-                    Nạp JSON bảng điểm
-                  </button>
+                  <div className="bg-zinc-950/70 p-2.5 rounded border border-zinc-800">
+                    <span className="text-zinc-500 block text-[10px]">Tín chỉ tích lũy</span>
+                    <span className="text-base font-bold text-sky-400">
+                      {resultOverview.passedCredits} / {resultOverview.totalCredits} TC
+                    </span>
+                  </div>
                 </div>
               )}
             </div>
-          )}
+          ) : (
+            <div className="space-y-4 text-xs">
+              {/* PRIMARY METHOD: AUTO-SYNC SSO */}
+              <div className="rounded-lg border border-sky-900/40 bg-sky-950/20 p-4 space-y-3">
+                <div className="flex items-center gap-2 font-semibold text-sky-300">
+                  <Sparkles className="w-4 h-4 text-sky-400" />
+                  <span>Phương thức Tự động (Khuyên dùng):</span>
+                </div>
+                <p className="text-[11px] text-zinc-300 leading-relaxed">
+                  Nhấn nút bên dưới, đăng nhập tài khoản UIT trên cửa sổ xuất hiện.
+                  Diark OS sẽ <b>tự động lấy Bảng điểm, Điểm rèn luyện & Hồ sơ</b>, sau đó tự đóng cửa sổ.
+                </p>
 
-          {status === "awaiting_sso" && (
-            <div className="rounded-md border border-amber-900/50 bg-amber-950/20 p-4 space-y-3 text-center">
-              <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
-                Awaiting SSO
-              </div>
-              <p className="text-xs text-zinc-300 leading-relaxed">
-                Cửa sổ đăng nhập SSO của UIT đã mở. Vui lòng hoàn tất xác thực Microsoft
-                trên popup. Khi cổng tải xong bảng điểm, hệ thống sẽ tự động đồng bộ.
-              </p>
-              <div className="pt-2 flex justify-center space-x-2">
                 <button
                   type="button"
-                  onClick={() => setStatus("ingesting")}
-                  className="text-xs text-zinc-400 hover:text-zinc-200 underline"
+                  onClick={handleLaunchAutoSync}
+                  disabled={isListening}
+                  className={`w-full py-2.5 px-4 rounded-lg font-semibold text-xs transition-all flex items-center justify-center gap-2 shadow-sm cursor-pointer ${
+                    isListening
+                      ? "bg-zinc-800 text-zinc-400 cursor-not-allowed border border-zinc-700"
+                      : "bg-sky-500 hover:bg-sky-400 active:bg-sky-600 text-zinc-950"
+                  }`}
                 >
-                  Đã đăng nhập xong? Bấm để tiếp tục
+                  {isListening ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin text-sky-400" />
+                      <span>Đang chờ bạn đăng nhập trên cửa sổ UIT...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="text-base">🚀</span>
+                      <span>Đăng nhập & Tự động đồng bộ</span>
+                    </>
+                  )}
                 </button>
-              </div>
-            </div>
-          )}
 
-          {status === "ingesting" && (
-            <div className="rounded-md border border-blue-900/50 bg-blue-950/20 p-4 space-y-3 text-center">
-              <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-500/20 text-blue-300 border border-blue-500/30">
-                <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
-                Ingesting
-              </div>
-              <p className="text-xs text-zinc-300">
-                Đang chuẩn hoá danh sách môn học, lọc các môn miễn trừ và cập nhật cGPA...
-              </p>
-            </div>
-          )}
-
-          {status === "completed" && resultOverview && (
-            <div className="rounded-md border border-emerald-900/50 bg-emerald-950/20 p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                  <span>✓</span> Completed
-                </div>
-                <span className="text-xs text-zinc-400 font-mono">
-                  {resultOverview.academicYear} - HK{resultOverview.semesterTerm}
-                </span>
+                {isListening && (
+                  <div className="p-3 rounded-lg bg-zinc-950/90 border border-zinc-800 space-y-1.5 text-[11px]">
+                    <div className="flex items-center gap-2 text-sky-400 font-medium">
+                      <span className="w-2 h-2 rounded-full bg-sky-400 animate-ping shrink-0" />
+                      <span>Cửa sổ UIT đã mở — Hãy đăng nhập tài khoản trường</span>
+                    </div>
+                    <p className="text-zinc-400 text-[10px] pl-4">
+                      Ngay khi đăng nhập xong, hệ thống sẽ tự động bóc tách dữ liệu và đóng cửa sổ.
+                    </p>
+                  </div>
+                )}
               </div>
 
-              <div className="grid grid-cols-2 gap-2 pt-1 text-xs">
-                <div className="bg-zinc-950/60 p-2 rounded border border-zinc-800">
-                  <span className="text-zinc-500 block">GPA Hệ 10</span>
-                  <span className="text-sm font-semibold text-zinc-100">
-                    {resultOverview.actualGpa10 !== null ? resultOverview.actualGpa10.toFixed(2) : "–"}
-                  </span>
-                </div>
-                <div className="bg-zinc-950/60 p-2 rounded border border-zinc-800">
-                  <span className="text-zinc-500 block">GPA Hệ 4</span>
-                  <span className="text-sm font-semibold text-emerald-400">
-                    {resultOverview.actualGpa4 !== null ? resultOverview.actualGpa4.toFixed(2) : "–"}
-                  </span>
-                </div>
-                <div className="bg-zinc-950/60 p-2 rounded border border-zinc-800">
-                  <span className="text-zinc-500 block">Tín chỉ tích lũy</span>
-                  <span className="text-sm font-semibold text-zinc-100">
-                    {resultOverview.passedCredits} / {resultOverview.totalCredits} TC
-                  </span>
-                </div>
-                <div className="bg-zinc-950/60 p-2 rounded border border-zinc-800">
-                  <span className="text-zinc-500 block">Điểm Rèn Luyện</span>
-                  <span className="text-sm font-semibold text-zinc-100">
-                    {resultOverview.actualDrl} Đ
-                  </span>
-                </div>
+              {/* SECONDARY / FALLBACK METHODS */}
+              <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setShowManualSection(!showManualSection)}
+                  className="w-full p-3 flex items-center justify-between text-left text-[11px] font-medium text-zinc-400 hover:text-zinc-200 transition-colors"
+                >
+                  <div className="flex items-center gap-2">
+                    <Terminal className="w-3.5 h-3.5 text-zinc-500" />
+                    <span>Phương thức phụ (Dán script F12 / JSON thủ công)</span>
+                  </div>
+                  {showManualSection ? (
+                    <ChevronUp className="w-3.5 h-3.5 text-zinc-500" />
+                  ) : (
+                    <ChevronDown className="w-3.5 h-3.5 text-zinc-500" />
+                  )}
+                </button>
+
+                {showManualSection && (
+                  <div className="p-3.5 pt-0 space-y-3 border-t border-zinc-800/80">
+                    {!showManualJsonInput ? (
+                      <div className="space-y-3 text-[11px]">
+                        <ol className="list-decimal list-inside space-y-1.5 text-zinc-400 leading-relaxed">
+                          <li>
+                            Mở
+                            <a
+                              href="https://portal.uit.edu.vn/sinh-vien/bang-diem"
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center gap-1 mx-1 text-sky-400 hover:underline"
+                            >
+                              portal.uit.edu.vn/sinh-vien/bang-diem
+                              <ExternalLink className="w-2.5 h-2.5" />
+                            </a>
+                            trên trình duyệt.
+                          </li>
+                          <li>Nhấn F12 → chọn tab Console.</li>
+                          <li>Dán script dưới đây và nhấn Enter:</li>
+                        </ol>
+
+                        <button
+                          type="button"
+                          onClick={handleCopyScript}
+                          className={`w-full py-2 px-3 rounded-lg font-medium text-[11px] transition-all flex items-center justify-center gap-2 border ${
+                            copied
+                              ? "bg-sky-950/80 border-sky-700 text-sky-300"
+                              : "bg-zinc-800 hover:bg-zinc-700 border-zinc-700 text-zinc-200"
+                          }`}
+                        >
+                          {copied ? (
+                            <>
+                              <Check className="w-3.5 h-3.5" />
+                              <span>Đã sao chép script Console</span>
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="w-3.5 h-3.5" />
+                              <span>Sao chép Script Console F12</span>
+                            </>
+                          )}
+                        </button>
+
+                        <div className="text-center pt-1">
+                          <button
+                            type="button"
+                            onClick={() => setShowManualJsonInput(true)}
+                            className="text-[10px] text-zinc-500 hover:text-zinc-300 underline"
+                          >
+                            Hoặc dán JSON thủ công
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-2 text-[11px]">
+                        <div className="flex justify-between items-center">
+                          <span className="text-zinc-300 font-medium">Dán JSON Bảng điểm / DRL:</span>
+                          <button
+                            type="button"
+                            onClick={() => setShowManualJsonInput(false)}
+                            className="text-zinc-400 hover:text-zinc-200 underline text-[10px]"
+                          >
+                            Quay lại script
+                          </button>
+                        </div>
+                        <textarea
+                          rows={5}
+                          value={manualJson}
+                          onChange={(e) => setManualJson(e.target.value)}
+                          placeholder="Dán payload JSON tại đây..."
+                          className="w-full rounded-lg border border-zinc-800 bg-zinc-950 p-2.5 font-mono text-[10px] text-zinc-200 placeholder-zinc-700 focus:border-sky-600 focus:outline-none"
+                        />
+                        <button
+                          type="button"
+                          onClick={handleManualSubmit}
+                          className="w-full py-1.5 px-3 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-semibold text-[11px] transition-colors"
+                        >
+                          Nạp JSON thủ công
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           )}
 
           {errorMessage && (
-            <div className="rounded-md border border-red-900/50 bg-red-950/30 p-3 text-xs text-red-300">
-              {errorMessage}
+            <div className="p-3 rounded-lg bg-rose-950/60 border border-rose-800/60 text-rose-300 text-xs flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+              <div>{errorMessage}</div>
             </div>
           )}
         </div>
 
-        {/* Footer actions */}
+        {/* Footer */}
         <div className="flex items-center justify-end space-x-2 pt-3 border-t border-zinc-800 text-xs">
           {status === "completed" ? (
             <button
               type="button"
               onClick={onClose}
-              className="py-1.5 px-4 rounded bg-zinc-200 text-zinc-900 font-medium hover:bg-white transition-colors"
+              className="py-1.5 px-4 rounded-lg bg-sky-500 hover:bg-sky-400 text-zinc-950 font-semibold transition-colors"
             >
               Hoàn tất
             </button>
           ) : (
             <>
-              {status !== "idle" && (
+              {status === "error" && (
                 <button
                   type="button"
                   onClick={handleReset}
-                  className="py-1.5 px-3 rounded text-zinc-400 hover:text-zinc-200 transition-colors"
+                  className="py-1.5 px-3 rounded-lg text-zinc-400 hover:text-zinc-200 transition-colors"
                 >
                   Thử lại
                 </button>
@@ -276,7 +382,7 @@ export const SyncPortalModal: React.FC<SyncPortalModalProps> = ({
               <button
                 type="button"
                 onClick={onClose}
-                className="py-1.5 px-3 rounded border border-zinc-700 text-zinc-300 hover:bg-zinc-800 transition-colors"
+                className="py-1.5 px-3 rounded-lg border border-zinc-700 text-zinc-300 hover:bg-zinc-800 transition-colors"
               >
                 Đóng
               </button>
@@ -287,3 +393,5 @@ export const SyncPortalModal: React.FC<SyncPortalModalProps> = ({
     </div>
   );
 };
+
+export default SyncPortalModal;

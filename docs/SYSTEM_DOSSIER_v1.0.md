@@ -1,4 +1,4 @@
-# DIARK // OS (JARVIS PERSONAL OS) — MASTER ARCHITECTURAL DOSSIER (v1.0.0 BASELINE)
+# DIARK // OS (JARVIS PERSONAL OS) — MASTER ARCHITECTURAL DOSSIER (v1.1.0 BASELINE)
 
 ## 1. TỔNG QUAN HỆ THỐNG & NHÂN THỨC NGƯỜI DÙNG (PERSONA & HARDWARE)
 - **Chủ sở hữu hệ thống:** Sinh viên CS/IT năm 2 (UIT - ĐHQG-HCM), định hướng Competitive Programming (ICPC), Nghiên cứu AI và An toàn thông tin; Visual Designer thương hiệu Diark.
@@ -64,7 +64,7 @@ CREATE TABLE IF NOT EXISTS curriculum_aliases (
     FOREIGN KEY (major_code) REFERENCES academic_curriculums(major_code)
 );
 
--- Hồ sơ sinh viên trích xuất từ Portal SSO
+-- Hồ sơ sinh viên trích xuất từ Portal SSO (Next.js RSC Flight Stream & Metadata)
 CREATE TABLE IF NOT EXISTS student_profile (
     student_id      TEXT PRIMARY KEY,
     full_name       TEXT NOT NULL,
@@ -77,7 +77,7 @@ CREATE TABLE IF NOT EXISTS student_profile (
     updated_at      INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
 );
 
--- Môn học tích lũy
+-- Môn học tích lũy theo từng học kỳ thực tế (bySemester)
 CREATE TABLE IF NOT EXISTS academic_courses (
     course_code      TEXT NOT NULL,
     semester         TEXT NOT NULL,
@@ -92,7 +92,26 @@ CREATE TABLE IF NOT EXISTS academic_courses (
     PRIMARY KEY (course_code, semester)
 );
 
--- Điểm rèn luyện theo học kỳ
+-- Khung chương trình đào tạo chính thức (bóc tách từ Portal byCtdt.program_scores theo 15 ngành)
+CREATE TABLE IF NOT EXISTS academic_curriculum (
+    course_code      TEXT NOT NULL,
+    semester         INTEGER NOT NULL,
+    course_name      TEXT NOT NULL,
+    credits          INTEGER NOT NULL DEFAULT 0,
+    course_type      TEXT NOT NULL DEFAULT 'Bắt buộc',
+    status           TEXT NOT NULL DEFAULT 'Chưa học',
+    updated_at       INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+    PRIMARY KEY (course_code, semester)
+);
+
+-- Tổng kết chỉ tiêu chương trình đào tạo & SSOT tín chỉ tốt nghiệp
+CREATE TABLE IF NOT EXISTS academic_program_summary (
+    id                   TEXT PRIMARY KEY, -- 'MAIN'
+    total_degree_credits INTEGER NOT NULL,
+    updated_at           INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+);
+
+-- Điểm rèn luyện theo học kỳ (bóc tách từ /api/sinh-vien/diem-ren-luyen)
 CREATE TABLE IF NOT EXISTS academic_drl (
     semester    TEXT PRIMARY KEY,
     score       INTEGER NOT NULL,
@@ -203,23 +222,24 @@ CREATE TABLE IF NOT EXISTS plugin_registry (
                    └───────────────────────────────┘
 ```
 
-### A. In-App Headless SSO Engine (`portal_auth.rs`)
+### A. In-App Autonomous SSO Harvester Engine (`portal_auth.rs` & `portal_harvester.rs`)
 - **Webview Window:** `uit-sso-login` và `wecode-sso-login`.
-- **Pre-injection Script:** Bơm `UNIVERSAL_GUARDIAN_SCRIPT` trước khi render HTML.
-- **Proxy Interception:**
-  - Can thiệp `window.fetch` để bắt trực tiếp payload `/api/sinh-vien/*`.
-  - Fallback: `MutationObserver` chờ đúng landmark `Mã sinh viên` (timeout 8s).
-- **Watchdog Engine:**
-  - `WatchdogRegistry` quản lý `CancellationToken` cho từng window label.
-  - Tự động hủy task sleep ngay lập tức khi nhận callback thành công hoặc thất bại sớm.
-  - Quá 120s không hoàn tất $\rightarrow$ cưỡng chế gọi `window.destroy()`.
+- **Pre-injection Script:** Bơm `UNIVERSAL_GUARDIAN_SCRIPT` (`scripts/portal_harvester.js`) trước khi render DOM.
+- **Autonomous Zero-Touch Pipeline:**
+  - **Auto-Detection:** Kiểm tra URL và Auth Cookie (`token`, `ss_id`); khi người dùng vừa hoàn tất đăng nhập SSO, lập tức kích hoạt bộ ba trình cào chạy song song ngầm không cần bất kỳ thao tác bấm nút nào:
+    1. `/api/sinh-vien/bang-diem`: Trích xuất bảng điểm chi tiết theo kỳ (`bySemester`) và cơ cấu CTĐT (`byCtdt.statistics.total_program_credit`, `byCtdt.program_scores`).
+    2. `/api/sinh-vien/diem-ren-luyen`: Trích xuất điểm rèn luyện tổng kết (`average_training_point`), xếp loại (`average_rank`), và lịch sử DRL từng học kỳ (`training_point_history`).
+    3. `/sinh-vien/ho-so`: Trích xuất luồng Next.js React Server Component (RSC) Flight Data (`self.__next_f.push([1, "..."])`) lấy toàn vẹn hồ sơ sinh viên (MSSV, Họ tên, Khoa, Ngành, Lớp, Phân hệ đào tạo, Niên khóa) vượt qua rào cản DOM ảo.
+  - **Local HTTP Dispatch:** Payload hợp nhất được tự động gửi qua `POST http://127.0.0.1:3030/api/v1/sync/portal` (hoặc fallback qua Tauri Custom Scheme `diark-sso://callback#target=portal&data=...`).
+  - **Self-Closing & Success Pill:** Hiển thị notification pill tinh tế góc màn hình thông báo đồng bộ thành công và tự động đóng Webview (`window.close()` / watchdog termination).
 
-### B. Dynamic Curriculum Resolution (`curriculum_resolver.rs`)
-Phân giải theo thứ tự ưu tiên 4 tầng:
-1. **D-code Trực Tiếp:** Regex tĩnh `D\d{6}` $\rightarrow$ truy vấn `academic_curriculums`.
-2. **Track-Specific Alias:** Token kết hợp `ACRONYM-TRACK` (ví dụ `KHMT-CLC` $\rightarrow$ 130 TC).
-3. **Acronym Trần:** Token viết tắt ngành (ví dụ `KHMT` $\rightarrow$ 126 TC của CQUI).
-4. **Hard Fallback:** Trả về `130 TC` generic với cờ `matched_via = "hard_fallback"`.
+### B. Dynamic 15-Major Curriculum Resolution & SSOT (`curriculum_resolver.rs`)
+Phân giải theo thứ tự ưu tiên 5 tầng bảo đảm tính đúng đắn tuyệt đối cho toàn bộ 15 ngành/hệ đào tạo của UIT:
+1. **Portal API SSOT (Tuyệt đối):** Lấy trực tiếp `byCtdt.statistics.total_program_credit` từ cổng UIT (ví dụ `126 TC` cho KHMT CQUI). Ghi nhận vào `academic_program_summary (id='MAIN')` và `settings (total_degree_credits)` với cờ `matched_via = "portal_api_direct"`. Miễn nhiễm việc bị ghi đè bởi fallback.
+2. **D-code Trực Tiếp:** Regex tĩnh `D\d{6}` $\rightarrow$ truy vấn `academic_curriculums`.
+3. **Track-Specific Alias:** Token kết hợp `ACRONYM-TRACK` (ví dụ `KHMT-CLC` $\rightarrow$ 130 TC).
+4. **Acronym Trần:** Token viết tắt ngành (ví dụ `KHMT` $\rightarrow$ 126 TC của CQUI).
+5. **Hard Fallback:** Trả về `130 TC` generic với cờ `matched_via = "hard_fallback"`.
 
 ### C. Gamification & Deduplication Engine (`wecode.rs`)
 - **Binary First-AC Policy:** Chỉ nạp sự kiện `activity_events` khi `score == 100` hoặc `verdict == "CORRECT ANSWER"`.
@@ -241,6 +261,9 @@ Phân giải theo thứ tự ưu tiên 4 tầng:
 | --- | --- | --- |
 | `launch_portal_sso_sync` | `portal_auth.rs` | Khởi tạo WebView2 đăng nhập Portal với Guardian Script và Watchdog Token. |
 | `launch_wecode_sso_sync` | `portal_auth.rs` | Khởi tạo WebView2 đăng nhập Wecode với State Machine chống redirect loop. |
+| `sync_official_portal_data` | `academic.rs` | Tiếp nhận và ingest toàn diện bảng điểm (bySemester), CTĐT (byCtdt), DRL và hồ sơ sinh viên vào SQLite nguyên tử. |
+| `get_academic_curriculum` | `academic.rs` | Truy vấn danh sách toàn bộ học phần trong khung CTĐT chính thức (môn bắt buộc, tự chọn, trạng thái học tập). |
+| `get_resolved_curriculum` | `academic.rs` | Lấy chỉ tiêu tín chỉ tốt nghiệp chuẩn hóa (ưu tiên SSOT từ Portal API). |
 | `save_student_profile` | `academic.rs` | Ghi đè hồ sơ sinh viên vào SQLite. |
 | `ingest_full_academic_payload` | `academic.rs` | Lưu trữ bảng điểm và DRL nguyên tử (Atomic Transaction). |
 | `get_academic_radar_metrics` | `academic.rs` | Tính toán cGPA hệ 10, cGPA hệ 4, DRL và tín chỉ theo ngành động. |

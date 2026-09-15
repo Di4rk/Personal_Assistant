@@ -75,7 +75,8 @@ pub fn parse_semester_header(header: &str) -> Option<(String, String, i64)> {
             let term_str = parts[2].strip_prefix("HK")?;
             let term: i64 = term_str.parse().ok()?;
             let academic_year = format!("{start}-{end}");
-            return Some((raw.to_string(), academic_year, term));
+            let semester_id = format!("{academic_year}.{term}");
+            return Some((semester_id, academic_year, term));
         }
         let _ = rest;
     }
@@ -102,8 +103,8 @@ pub fn parse_semester_header(header: &str) -> Option<(String, String, i64)> {
                 1
             };
 
-            let semester_id = format!("{start_year}_{end_year}_HK{term}");
             let academic_year = format!("{start_year}-{end_year}");
+            let semester_id = format!("{academic_year}.{term}");
             return Some((semester_id, academic_year, term));
         }
     }
@@ -129,9 +130,20 @@ pub fn parse_semester_header(header: &str) -> Option<(String, String, i64)> {
             if yr_parts.len() == 2 && yr_parts[0].len() == 4 && yr_parts[1].len() == 4 {
                 let start_year = yr_parts[0];
                 let end_year = yr_parts[1];
-                let semester_id = format!("{start_year}_{end_year}_HK{term}");
                 let academic_year = format!("{start_year}-{end_year}");
+                let semester_id = format!("{academic_year}.{term}");
                 return Some((semester_id, academic_year, term));
+            }
+        }
+    }
+
+    // Pattern 4: "YYYY-ZZZZ.T" (already canonical)
+    let dot_parts: Vec<&str> = raw.split('.').collect();
+    if dot_parts.len() == 2 {
+        let yr_parts: Vec<&str> = dot_parts[0].split('-').collect();
+        if yr_parts.len() == 2 && yr_parts[0].len() == 4 && yr_parts[1].len() == 4 {
+            if let Ok(term) = dot_parts[1].parse::<i64>() {
+                return Some((raw.to_string(), dot_parts[0].to_string(), term));
             }
         }
     }
@@ -221,19 +233,19 @@ mod tests {
         let parsed = parse_semester_header("Học kỳ 1/2024-2025");
         assert_eq!(
             parsed,
-            Some(("2024_2025_HK1".to_string(), "2024-2025".to_string(), 1))
+            Some(("2024-2025.1".to_string(), "2024-2025".to_string(), 1))
         );
 
         let parsed2 = parse_semester_header("Học kỳ 2/2023-2024");
         assert_eq!(
             parsed2,
-            Some(("2023_2024_HK2".to_string(), "2023-2024".to_string(), 2))
+            Some(("2023-2024.2".to_string(), "2023-2024".to_string(), 2))
         );
 
         let parsed_summer = parse_semester_header("Học kỳ hè/2023-2024");
         assert_eq!(
             parsed_summer,
-            Some(("2023_2024_HK3".to_string(), "2023-2024".to_string(), 3))
+            Some(("2023-2024.3".to_string(), "2023-2024".to_string(), 3))
         );
     }
 
@@ -242,13 +254,13 @@ mod tests {
         let parsed = parse_semester_header("HK1/2024-2025");
         assert_eq!(
             parsed,
-            Some(("2024_2025_HK1".to_string(), "2024-2025".to_string(), 1))
+            Some(("2024-2025.1".to_string(), "2024-2025".to_string(), 1))
         );
 
         let parsed_direct = parse_semester_header("2024_2025_HK1");
         assert_eq!(
             parsed_direct,
-            Some(("2024_2025_HK1".to_string(), "2024-2025".to_string(), 1))
+            Some(("2024-2025.1".to_string(), "2024-2025".to_string(), 1))
         );
     }
 

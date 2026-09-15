@@ -39,9 +39,14 @@ export const SemesterTabs: React.FC<SemesterTabsProps> = ({
             // Format label: ưu tiên semester_label từ DB hoặc tạo fallback "HK{num} ({year})"
             const parts = m.semesterId.split(".");
             const termNum = parts.length > 1 ? parts[1] : "1";
-            const tabTitle = m.semesterLabel && m.semesterLabel.trim().length > 0
+            let tabTitle = m.semesterLabel && m.semesterLabel.trim().length > 0
               ? m.semesterLabel
-              : `HK${termNum} (${m.yearName})`;
+              : `Học kỳ ${termNum}/${m.yearName}`;
+
+            // Chuẩn hóa xóa bỏ lặp từ hoặc ký tự gạch dưới
+            tabTitle = tabTitle.replace(/Học kỳ\s+Học[_\s]kỳ/gi, "Học kỳ");
+            tabTitle = tabTitle.replace(/Học_kỳ_/gi, "Học kỳ ");
+            tabTitle = tabTitle.replace(/_/g, " ");
 
             return (
               <button

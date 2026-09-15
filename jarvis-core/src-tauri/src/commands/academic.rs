@@ -918,6 +918,10 @@ pub fn get_academic_macro_metrics_ssot(
 ) -> Result<Vec<AcademicMacroMetricSSOT>, String> {
     let mut conn = db.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
 
+    // Tự động phục hồi và chuẩn hóa dữ liệu học kỳ / loại bỏ LATEST
+    crate::db::academic::self_heal_academic_data(&conn)
+        .map_err(|e| format!("Lỗi self-heal academic data: {e}"))?;
+
     let query_fn = |c: &rusqlite::Connection| -> Result<Vec<AcademicMacroMetricSSOT>, String> {
         let mut stmt = c
             .prepare(
@@ -930,6 +934,7 @@ pub fn get_academic_macro_metrics_ssot(
                        COALESCE(NULLIF(rank_label, ''), classification, 'Giỏi'),
                        updated_at
                 FROM academic_macro_metrics
+                WHERE semester_id != 'LATEST' AND semester_id NOT LIKE 'Học_kỳ_%'
                 ORDER BY semester_id ASC
                 "#,
             )
@@ -1009,7 +1014,23 @@ pub fn get_resolved_curriculum(
     db: tauri::State<'_, SharedDb>,
 ) -> Result<crate::modules::academic::curriculum_resolver::CurriculumResolution, String> {
     let conn = db.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
-    let (curriculum_code, major_code) = {
+
+    // 1. Tầng ưu tiên cao nhất (Single Source of Truth):
+    // Nếu portal API đã trả về total_program_credit trực tiếp từ byCtdt.statistics
+    // và đã lưu vào academic_program_summary (id='MAIN') hoặc settings
+    let portal_credits: Option<i64> = conn.query_row(
+        "SELECT total_degree_credits FROM academic_program_summary WHERE id = 'MAIN' AND total_degree_credits > 0",
+        [],
+        |r| r.get(0),
+    ).ok().or_else(|| {
+        conn.query_row(
+            "SELECT CAST(value AS INTEGER) FROM settings WHERE key = 'total_degree_credits' AND CAST(value AS INTEGER) > 0",
+            [],
+            |r| r.get(0),
+        ).ok()
+    });
+
+    let (curriculum_code, major_code, student_class) = {
         let get_val = |k: &str| -> String {
             conn.query_row(
                 "SELECT value FROM settings WHERE key = ?1",
@@ -1017,12 +1038,35 @@ pub fn get_resolved_curriculum(
                 |r| r.get(0),
             ).unwrap_or_default()
         };
-        (get_val("curriculum_code"), get_val("major_code"))
+        (get_val("curriculum_code"), get_val("major_code"), get_val("student_class"))
     };
+
+    let user_major: String = conn.query_row(
+        "SELECT value FROM settings WHERE key = 'user_major'",
+        [],
+        |r| r.get(0),
+    ).unwrap_or_else(|_| "UIT".to_string());
+
+    if let Some(credits) = portal_credits {
+        let resolved_code = if !major_code.is_empty() {
+            major_code
+        } else if !user_major.is_empty() && user_major != "UIT" {
+            user_major
+        } else {
+            "OFFICIAL_CTDT".to_string()
+        };
+        return Ok(crate::modules::academic::curriculum_resolver::CurriculumResolution {
+            major_code: resolved_code,
+            total_credits: credits,
+            matched_via: "portal_api_direct".to_string(),
+        });
+    }
+
+    let combined_hint = format!("{major_code} {student_class}");
     crate::modules::academic::curriculum_resolver::resolve_curriculum(
         &conn,
         &curriculum_code,
-        if major_code.is_empty() { None } else { Some(&major_code) },
+        if combined_hint.trim().is_empty() { None } else { Some(&combined_hint) },
     )
 }
 
@@ -1178,6 +1222,58 @@ pub fn get_student_profile(
 ) -> Result<Option<StudentProfilePayload>, String> {
     let conn = db.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
     query_student_profile(&conn)
+}
+
+#[tauri::command]
+pub fn ingest_portal_sync_payload_json(
+    app: AppHandle,
+    db: tauri::State<'_, SharedDb>,
+    payload_json: String,
+) -> Result<usize, String> {
+    if payload_json.contains("\"training_point_history\"") && !payload_json.contains("\"bySemester\"") {
+        let drl_payload: crate::services::portal_harvester::OfficialUitDrlPayload =
+            serde_json::from_str(&payload_json).map_err(|e| format!("Lỗi parse JSON DRL UIT: {e}"))?;
+        let count = crate::services::portal_harvester::PortalIngestionEngine::commit_drl_records(
+            db.inner().clone(),
+            drl_payload,
+        )?;
+        let _ = app.emit("academic-data-synced", ());
+        let _ = app.emit("academic://sync-complete", ());
+        return Ok(count);
+    }
+
+    let (profile, drl_records, courses, summary, avg_drl) = if payload_json.contains("\"bySemester\"") {
+        let official: crate::services::portal_harvester::OfficialUitTranscriptPayload =
+            serde_json::from_str(&payload_json).map_err(|e| format!("Lỗi parse JSON Official UIT: {e}"))?;
+        crate::services::portal_harvester::convert_official_uit_payload(official)
+    } else {
+        let payload: crate::server::PortalSyncPayload =
+            serde_json::from_str(&payload_json).map_err(|e| format!("Lỗi parse JSON PortalSyncPayload: {e}"))?;
+        (
+            payload.profile.unwrap_or_default(),
+            payload.drl_records.unwrap_or_default(),
+            payload.courses,
+            payload.summary,
+            payload.avg_drl,
+        )
+    };
+
+    let courses_count = courses.len();
+    let db_arc = db.inner().clone();
+    crate::services::portal_harvester::PortalIngestionEngine::commit_academic_records(
+        db_arc,
+        profile,
+        drl_records,
+        courses,
+        summary,
+        avg_drl,
+        1,
+        1,
+    )?;
+
+    let _ = app.emit("academic-data-synced", ());
+    let _ = app.emit("academic://sync-complete", ());
+    Ok(courses_count)
 }
 
 #[cfg(test)]

@@ -62,11 +62,13 @@ macro_rules! registered_commands {
             commands::academic::get_resolved_curriculum,
             commands::academic::get_sync_token,
             commands::academic::get_student_profile,
+            commands::academic::ingest_portal_sync_payload_json,
             // Portal In-App SSO
             commands::portal_auth::launch_portal_sso_sync,
             commands::portal_auth::launch_wecode_sso_sync,
             // Wecode
             commands::wecode::get_wecode_submissions,
+            commands::wecode::ingest_wecode_submissions_json,
             // Moodle & Workspace
             commands::workspace::ingest_moodle_course_html,
             commands::workspace::get_upcoming_deadlines,
@@ -146,11 +148,13 @@ macro_rules! registered_commands {
             commands::academic::get_resolved_curriculum,
             commands::academic::get_sync_token,
             commands::academic::get_student_profile,
+            commands::academic::ingest_portal_sync_payload_json,
             // Portal In-App SSO
             commands::portal_auth::launch_portal_sso_sync,
             commands::portal_auth::launch_wecode_sso_sync,
             // Wecode
             commands::wecode::get_wecode_submissions,
+            commands::wecode::ingest_wecode_submissions_json,
             // Moodle & Workspace
             commands::workspace::ingest_moodle_course_html,
             commands::workspace::get_upcoming_deadlines,
@@ -245,9 +249,10 @@ pub fn run() {
             // Server HTTP cũ (nhận webhook từ Chrome extension) vẫn chạy song song -
             // 2 nguồn ghi vào CÙNG 1 DB, dedup qua UNIQUE INDEX cf_submission_id đảm
             // bảo dù cả 2 nguồn cùng bắt được 1 submission cũng không double-count XP.
+            let server_app = app.handle().clone();
             let server_db = shared_db.clone();
             tauri::async_runtime::spawn(async move {
-                server::run_server(server_db).await;
+                server::run_server(server_app, server_db).await;
             });
 
             // Portal Browser Bridge — Loopback sync server nhận payload từ

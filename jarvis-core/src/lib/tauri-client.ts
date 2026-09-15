@@ -451,3 +451,17 @@ export async function resetUserDataToGenesis(): Promise<void> {
   return invoke<void>("reset_user_data_to_genesis");
 }
 
+/**
+ * Nạp toàn bộ dữ liệu Portal UIT (Profile, DRL, Bảng điểm) từ JSON sync payload.
+ */
+export async function ingestPortalSyncPayloadJson(payloadJson: string): Promise<number> {
+  return invoke<number>("ingest_portal_sync_payload_json", { payloadJson });
+}
+
+/**
+ * Nạp danh sách Wecode Submissions từ JSON sync payload.
+ */
+export async function ingestWecodeSubmissionsJson(payloadJson: string): Promise<number> {
+  return invoke<number>("ingest_wecode_submissions_json", { payloadJson });
+}
+

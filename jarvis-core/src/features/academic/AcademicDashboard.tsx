@@ -7,7 +7,7 @@ import {
 import { useAcademicRadar } from "./hooks/useAcademicRadar";
 import { AcademicRadarChart } from "./components/AcademicRadarChart";
 import { GpaSimulatorCard } from "./components/GpaSimulatorCard";
-import { SyncPortalButton } from "./components/SyncPortalButton";
+import { SyncPortalModal } from "./components/SyncPortalModal";
 import { AcademicSummaryCards } from "./components/AcademicSummaryCards";
 import { SemesterTabs } from "./components/SemesterTabs";
 import { AcademicCourseTable } from "./components/AcademicCourseTable";
@@ -19,7 +19,6 @@ import {
 import {
   getSemesterCourses,
   getAcademicMacroMetricsSsot,
-  launchPortalSsoSync,
   getResolvedCurriculum,
 } from "../../lib/tauri-client";
 import { listen } from "@tauri-apps/api/event";
@@ -54,6 +53,7 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
   const [radarScope, setRadarScope] = useState<"all" | "semester">("all");
 
   const [curriculumCredits, setCurriculumCredits] = useState<number>(126);
+  const [isSyncPortalModalOpen, setIsSyncPortalModalOpen] = useState<boolean>(false);
 
   const loadMacroMetrics = useCallback(async () => {
     try {
@@ -198,12 +198,8 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
     };
   }, [handleRefresh]);
 
-  const handleSyncPortal = useCallback(async () => {
-    try {
-      await launchPortalSsoSync();
-    } catch (err) {
-      console.error("Khởi tạo cửa sổ SSO thất bại:", err);
-    }
+  const handleSyncPortal = useCallback(() => {
+    setIsSyncPortalModalOpen(true);
   }, []);
 
   const isRefreshing = isLoadingOverview || isLoadingMacro;
@@ -238,7 +234,14 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
             <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? "animate-spin text-violet-400" : ""}`} />
             <span>Làm mới</span>
           </button>
-          <SyncPortalButton onSyncSuccess={() => { void handleRefresh(); }} />
+          <button
+            type="button"
+            onClick={() => setIsSyncPortalModalOpen(true)}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 active:bg-sky-700 text-white text-xs font-semibold shadow-sm transition-all cursor-pointer"
+          >
+            <span className="text-white">⚡</span>
+            <span>Đồng bộ Cổng UIT</span>
+          </button>
         </div>
       </div>
 
@@ -363,6 +366,12 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
           />
         </div>
       </div>
+
+      <SyncPortalModal
+        isOpen={isSyncPortalModalOpen}
+        onClose={() => setIsSyncPortalModalOpen(false)}
+        onSyncSuccess={() => { void handleRefresh(); }}
+      />
     </div>
   );
 };

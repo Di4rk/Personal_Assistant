@@ -80,7 +80,11 @@ pub mod models {
         #[serde(default)]
         pub cgpa_10: f64,
         #[serde(default)]
+        pub total_program_credits: Option<i64>,
+        #[serde(default)]
         pub semester_summaries: Vec<SemesterSummaryItem>,
+        #[serde(default)]
+        pub ctdt_curriculum_courses: Vec<crate::modules::academic::parser::CurriculumCourseRecord>,
     }
 
     #[derive(Deserialize, Serialize, Clone, Debug, Default)]
@@ -92,6 +96,365 @@ pub mod models {
         pub drl_records: Option<Vec<DrlItem>>,
         #[serde(default)]
         pub total_course_batches: usize,
+    }
+
+    #[derive(Deserialize, Serialize, Clone, Debug, Default)]
+    pub struct OfficialUitSubject {
+        pub subject_code: String,
+        pub subject_name: String,
+        pub number_of_credit: i64,
+        #[serde(default)]
+        pub process_point: Option<String>,
+        #[serde(default)]
+        pub practice_point: Option<String>,
+        #[serde(default)]
+        pub midterm_score: Option<String>,
+        #[serde(default)]
+        pub final_point: Option<String>,
+        #[serde(default)]
+        pub course_point: Option<String>,
+        #[serde(default)]
+        pub note: Option<String>,
+    }
+
+    #[derive(Deserialize, Serialize, Clone, Debug, Default)]
+    pub struct OfficialUitSemesterGroup {
+        pub semester_key: String,
+        pub semester_label: String,
+        pub year_name: String,
+        pub subjects: Vec<OfficialUitSubject>,
+        #[serde(default)]
+        pub total_credit: Option<i64>,
+        #[serde(default)]
+        pub average_point: Option<f64>,
+    }
+
+    #[derive(Deserialize, Serialize, Clone, Debug, Default)]
+    pub struct OfficialUitBySemesterSummary {
+        #[serde(default)]
+        pub total_credits_all: Option<f64>,
+        #[serde(default)]
+        pub accumulated_credits: Option<f64>,
+        #[serde(default)]
+        pub gpa_all: Option<f64>,
+        #[serde(default)]
+        pub gpa_accumulated: Option<f64>,
+    }
+
+    #[derive(Deserialize, Serialize, Clone, Debug, Default)]
+    pub struct OfficialUitBySemester {
+        pub semester_groups: Vec<OfficialUitSemesterGroup>,
+        #[serde(default)]
+        pub summary: Option<OfficialUitBySemesterSummary>,
+    }
+
+    #[derive(Deserialize, Serialize, Clone, Debug, Default)]
+    #[allow(non_snake_case)]
+    pub struct OfficialUitTermSummary {
+        #[serde(default)]
+        pub yearName: Option<String>,
+        #[serde(default)]
+        pub semester: Option<String>,
+        #[serde(default)]
+        pub termGpa: Option<f64>,
+        #[serde(default)]
+        pub cumulativeGpa: Option<f64>,
+        #[serde(default)]
+        pub termCredit: Option<i64>,
+        #[serde(default)]
+        pub accumulatedCredit: Option<i64>,
+        #[serde(default)]
+        pub classifyLabel: Option<String>,
+    }
+
+    #[derive(Deserialize, Serialize, Clone, Debug, Default)]
+    pub struct OfficialUitDrlHistoryItem {
+        #[serde(default)]
+        pub id: Option<String>,
+        #[serde(default)]
+        pub semester: Option<String>,
+        #[serde(default)]
+        pub semester_label: Option<String>,
+        #[serde(default)]
+        pub year_name: Option<String>,
+        #[serde(default)]
+        pub specialized_class_name: Option<String>,
+        #[serde(default)]
+        pub point: Option<i64>,
+        #[serde(default)]
+        pub rank: Option<String>,
+    }
+
+    #[derive(Deserialize, Serialize, Clone, Debug, Default)]
+    pub struct OfficialUitDrlPayload {
+        #[serde(default)]
+        pub average_training_point: Option<f64>,
+        #[serde(default)]
+        pub average_rank: Option<String>,
+        #[serde(default)]
+        pub training_point_history: Option<Vec<OfficialUitDrlHistoryItem>>,
+    }
+
+    #[derive(Deserialize, Serialize, Clone, Debug, Default)]
+    pub struct OfficialUitCtdtStatistics {
+        #[serde(default)]
+        pub not_learned: Option<i64>,
+        #[serde(default)]
+        pub passed: Option<i64>,
+        #[serde(default)]
+        pub retake: Option<i64>,
+        #[serde(default)]
+        pub in_progress: Option<i64>,
+        #[serde(default)]
+        pub outside_program: Option<i64>,
+        #[serde(default)]
+        pub elective_learned: Option<i64>,
+        #[serde(default)]
+        pub passed_credit: Option<i64>,
+        #[serde(default)]
+        pub total_program_credit: Option<i64>,
+        #[serde(default)]
+        pub total_studied_credit: Option<i64>,
+        #[serde(default)]
+        pub avg_score: Option<f64>,
+        #[serde(default)]
+        pub accumulated_gpa: Option<f64>,
+        #[serde(default)]
+        pub credit_in_ctdt: Option<i64>,
+        #[serde(default)]
+        pub credit_outside: Option<i64>,
+    }
+
+    #[derive(Deserialize, Serialize, Clone, Debug, Default)]
+    pub struct OfficialUitCtdtLine {
+        #[serde(default)]
+        pub subject_id: Option<String>,
+        pub subject_code: String,
+        pub subject_name: String,
+        pub credit: i64,
+        #[serde(default)]
+        pub credit_theory: Option<i64>,
+        #[serde(default)]
+        pub credit_pract: Option<i64>,
+        #[serde(default)]
+        pub subject_required: Option<bool>,
+        #[serde(default)]
+        pub course_point: Option<String>,
+        #[serde(default)]
+        pub status: Option<String>,
+        #[serde(default)]
+        pub weights: Option<serde_json::Value>,
+    }
+
+    #[derive(Deserialize, Serialize, Clone, Debug, Default)]
+    pub struct OfficialUitCtdtProgramScore {
+        pub semester: i64,
+        #[serde(default)]
+        pub semester_label: Option<String>,
+        #[serde(default)]
+        pub lines: Vec<OfficialUitCtdtLine>,
+        #[serde(default)]
+        pub total_credit: Option<i64>,
+    }
+
+    #[derive(Deserialize, Serialize, Clone, Debug, Default)]
+    #[allow(non_snake_case)]
+    pub struct OfficialUitByCtdt {
+        #[serde(default)]
+        pub statistics: Option<OfficialUitCtdtStatistics>,
+        #[serde(default)]
+        pub program_scores: Option<Vec<OfficialUitCtdtProgramScore>>,
+        #[serde(default)]
+        pub outsideProgramSubjects: Option<Vec<serde_json::Value>>,
+        #[serde(default)]
+        pub defenseEducation: Option<serde_json::Value>,
+        #[serde(default)]
+        pub foreignLanguage: Option<serde_json::Value>,
+    }
+
+    #[derive(Deserialize, Serialize, Clone, Debug, Default)]
+    #[allow(non_snake_case)]
+    pub struct OfficialUitTranscriptPayload {
+        pub bySemester: OfficialUitBySemester,
+        #[serde(default)]
+        pub byCtdt: Option<OfficialUitByCtdt>,
+        #[serde(default)]
+        pub termSummaries: Option<Vec<OfficialUitTermSummary>>,
+        #[serde(default)]
+        pub drl: Option<OfficialUitDrlPayload>,
+        #[serde(default)]
+        pub profile: Option<PortalProfilePayload>,
+        #[serde(default)]
+        pub drl_records: Option<Vec<DrlItem>>,
+        #[serde(default)]
+        pub avg_drl: Option<f64>,
+    }
+
+    pub fn parse_point_string(s: &Option<String>) -> Option<f64> {
+        s.as_deref().and_then(|v| {
+            let t = v.trim().replace(',', ".");
+            if t.is_empty() || t == "—" || t == "-" || t == "null" {
+                None
+            } else {
+                t.parse::<f64>().ok()
+            }
+        })
+    }
+
+    pub fn convert_official_uit_payload(
+        official: OfficialUitTranscriptPayload,
+    ) -> (PortalProfilePayload, Vec<DrlItem>, Vec<AcademicCourseItem>, Option<PortalSummaryPayload>, Option<f64>) {
+        let mut courses = Vec::new();
+
+        for grp in &official.bySemester.semester_groups {
+            let sem_label = &grp.semester_label;
+            for subj in &grp.subjects {
+                let score_10 = parse_point_string(&subj.course_point).unwrap_or(0.0);
+                let is_passed = if score_10 >= 5.0 { 1 } else { 0 };
+
+                courses.push(AcademicCourseItem {
+                    course_code: subj.subject_code.clone(),
+                    course_name: subj.subject_name.clone(),
+                    semester: sem_label.clone(),
+                    credits: subj.number_of_credit,
+                    score_qt: parse_point_string(&subj.process_point),
+                    score_th: parse_point_string(&subj.practice_point),
+                    score_gk: parse_point_string(&subj.midterm_score),
+                    score_ck: parse_point_string(&subj.final_point),
+                    score_10,
+                    is_passed,
+                });
+            }
+        }
+
+        let total_credits = official.bySemester.summary.as_ref().and_then(|s| s.accumulated_credits).unwrap_or(0.0);
+        let cgpa_10 = official.bySemester.summary.as_ref().and_then(|s| s.gpa_accumulated).unwrap_or(0.0);
+
+        let mut semester_summaries = Vec::new();
+        if let Some(ref terms) = official.termSummaries {
+            for t in terms {
+                let term_sem_num = t.semester.as_deref().unwrap_or("");
+                let matched_group = official.bySemester.semester_groups.iter().find(|g| {
+                    g.semester_key == format!("semester_{}", term_sem_num)
+                        || (t.yearName.as_deref().map(|y| g.year_name.starts_with(y)).unwrap_or(false)
+                            && g.semester_label.contains(term_sem_num))
+                });
+
+                let sem_str = if let Some(g) = matched_group {
+                    g.semester_label.clone()
+                } else {
+                    format!("Học kỳ {}/{}", term_sem_num, t.yearName.as_deref().unwrap_or_default())
+                };
+
+                semester_summaries.push(SemesterSummaryItem {
+                    semester: Some(sem_str),
+                    gpa_semester: t.termGpa,
+                    cpa_cumulative: t.cumulativeGpa,
+                    ranking: t.classifyLabel.clone(),
+                    credits_semester: t.termCredit,
+                    credits_cumulative: t.accumulatedCredit,
+                });
+            }
+        }
+
+        let mut ctdt_curriculum_courses = Vec::new();
+        let mut total_program_credits = None;
+
+        if let Some(ref ctdt) = official.byCtdt {
+            if let Some(ref stats) = ctdt.statistics {
+                if let Some(tot) = stats.total_program_credit {
+                    if tot > 0 {
+                        total_program_credits = Some(tot);
+                    }
+                }
+            }
+
+            if let Some(ref scores) = ctdt.program_scores {
+                for sem_group in scores {
+                    let term = sem_group.semester;
+                    for line in &sem_group.lines {
+                        let c_code = line.subject_code.trim().to_string();
+                        if c_code.is_empty() {
+                            continue;
+                        }
+                        let c_type = if line.subject_required.unwrap_or(true) {
+                            "Bắt buộc".to_string()
+                        } else {
+                            "Tự chọn".to_string()
+                        };
+
+                        let c_status = match line.status.as_deref().unwrap_or("not_learned") {
+                            "passed" => "Đã qua".to_string(),
+                            "in_progress" => "Đang học".to_string(),
+                            "retake" => "Học lại".to_string(),
+                            "outside_program" => "Ngoài CTĐT".to_string(),
+                            _ => "Chưa học".to_string(),
+                        };
+
+                        let final_score = parse_point_string(&line.course_point);
+
+                        ctdt_curriculum_courses.push(crate::modules::academic::parser::CurriculumCourseRecord {
+                            course_code: c_code,
+                            course_name: line.subject_name.trim().to_string(),
+                            credits: line.credit,
+                            course_type: c_type,
+                            ideal_term: term,
+                            status: c_status,
+                            final_score,
+                        });
+                    }
+                }
+            }
+        }
+
+        let summary = PortalSummaryPayload {
+            total_credits,
+            cgpa_10,
+            total_program_credits,
+            semester_summaries,
+            ctdt_curriculum_courses,
+        };
+
+        let mut profile = official.profile.unwrap_or_default();
+        let mut drl_records = official.drl_records.unwrap_or_default();
+        let mut avg_drl = official.avg_drl;
+
+        if let Some(drl_data) = official.drl {
+            if avg_drl.is_none() {
+                avg_drl = drl_data.average_training_point;
+            }
+            if let Some(history) = drl_data.training_point_history {
+                for item in history {
+                    let sem_lbl = item.semester_label.as_deref().unwrap_or("");
+                    let yr = item.year_name.as_deref().unwrap_or("");
+                    let sem_name = if !sem_lbl.is_empty() && !yr.is_empty() {
+                        format!("{sem_lbl}/{yr}")
+                    } else if !sem_lbl.is_empty() {
+                        sem_lbl.to_string()
+                    } else {
+                        item.semester.clone().unwrap_or_default()
+                    };
+
+                    if !sem_name.is_empty() {
+                        drl_records.push(DrlItem {
+                            semester: sem_name,
+                            score: item.point.unwrap_or(0),
+                            grade_text: item.rank.unwrap_or_default(),
+                        });
+                    }
+
+                    if profile.student_class.is_empty() {
+                        if let Some(ref cls) = item.specialized_class_name {
+                            if !cls.trim().is_empty() {
+                                profile.student_class = cls.trim().to_string();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        (profile, drl_records, courses, Some(summary), avg_drl)
     }
 }
 
@@ -230,44 +593,51 @@ impl PortalIngestionEngine {
         ).map_err(|e| format!("Failed to ensure academic_drl table: {e}"))?;
 
         // 2. Phân giải mã ngành động thông qua Curriculum Resolver 4-tier
+        let combined_hint = format!("{} {} {}", profile.specialization, profile.student_class, profile.faculty);
         let resolved_major = crate::modules::academic::curriculum_resolver::resolve_curriculum(
             &tx,
             &profile.curriculum_code,
-            Some(&profile.specialization),
+            Some(&combined_hint),
         ).unwrap_or_else(|_| crate::modules::academic::curriculum_resolver::CurriculumResolution {
             major_code: if !profile.curriculum_code.is_empty() {
                 profile.curriculum_code.clone()
             } else {
-                "7480101".to_string()
+                "D480101".to_string()
             },
-            total_credits: 130,
+            total_credits: 126,
             matched_via: "hard_fallback".to_string(),
         });
 
-        // 3. Upsert vào bảng student_profile
-        tx.execute(
-            "INSERT INTO student_profile (
-                student_id, full_name, faculty, major_code, specialization,
-                student_class, curriculum_code, updated_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, strftime('%s', 'now'))
-            ON CONFLICT(student_id) DO UPDATE SET
-                full_name = excluded.full_name,
-                faculty = excluded.faculty,
-                major_code = excluded.major_code,
-                specialization = excluded.specialization,
-                student_class = excluded.student_class,
-                curriculum_code = excluded.curriculum_code,
-                updated_at = excluded.updated_at",
-            params![
-                profile.student_id,
-                profile.full_name,
-                profile.faculty,
-                resolved_major.major_code, // Dynamic resolution
-                profile.specialization,
-                profile.student_class,
-                profile.curriculum_code,
-            ],
-        ).map_err(|e| format!("Failed to update student_profile: {}", e))?;
+        // Ưu tiên total_program_credits chính thức từ API UIT portal (byCtdt.statistics.total_program_credit)
+        let official_program_credits = summary.as_ref().and_then(|s| s.total_program_credits);
+        let effective_total_credits = official_program_credits.unwrap_or(resolved_major.total_credits);
+
+        // 3. Upsert vào bảng student_profile (chỉ khi có student_id)
+        if !profile.student_id.trim().is_empty() {
+            tx.execute(
+                "INSERT INTO student_profile (
+                    student_id, full_name, faculty, major_code, specialization,
+                    student_class, curriculum_code, updated_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, strftime('%s', 'now'))
+                ON CONFLICT(student_id) DO UPDATE SET
+                    full_name = excluded.full_name,
+                    faculty = excluded.faculty,
+                    major_code = excluded.major_code,
+                    specialization = excluded.specialization,
+                    student_class = excluded.student_class,
+                    curriculum_code = excluded.curriculum_code,
+                    updated_at = excluded.updated_at",
+                params![
+                    profile.student_id,
+                    profile.full_name,
+                    profile.faculty,
+                    resolved_major.major_code, // Dynamic resolution
+                    profile.specialization,
+                    profile.student_class,
+                    profile.curriculum_code,
+                ],
+            ).map_err(|e| format!("Failed to update student_profile: {}", e))?;
+        }
 
         // 4. Đồng bộ vào bảng settings để phục vụ các hook hiện tại của app
         let upsert_setting = |key: &str, value: &str, t: &rusqlite::Transaction| -> Result<(), String> {
@@ -289,7 +659,9 @@ impl PortalIngestionEngine {
         if !profile.faculty.trim().is_empty() {
             upsert_setting("faculty", profile.faculty.trim(), &tx)?;
         }
-        upsert_setting("major_code", &resolved_major.major_code, &tx)?;
+        if !profile.student_id.trim().is_empty() {
+            upsert_setting("major_code", &resolved_major.major_code, &tx)?;
+        }
         if !profile.specialization.trim().is_empty() {
             upsert_setting("specialization", profile.specialization.trim(), &tx)?;
             upsert_setting("user_major", profile.specialization.trim(), &tx)?;
@@ -300,17 +672,20 @@ impl PortalIngestionEngine {
         if !profile.curriculum_code.trim().is_empty() {
             upsert_setting("curriculum_code", profile.curriculum_code.trim(), &tx)?;
         }
+        upsert_setting("total_degree_credits", &effective_total_credits.to_string(), &tx)?;
 
-        // Cập nhật academic_program_summary với total_credits từ curriculum resolver
-        let _ = tx.execute(
-            "INSERT INTO academic_program_summary (id, total_degree_credits, updated_at)
-             VALUES ('MAIN', ?1, strftime('%s', 'now'))
-             ON CONFLICT(id) DO UPDATE SET total_degree_credits = excluded.total_degree_credits, updated_at = excluded.updated_at",
-            params![resolved_major.total_credits],
-        );
+        // Cập nhật academic_program_summary với effective_total_credits
+        if !profile.student_id.trim().is_empty() {
+            let _ = tx.execute(
+                "INSERT INTO academic_program_summary (id, total_degree_credits, updated_at)
+                 VALUES ('MAIN', ?1, strftime('%s', 'now'))
+                 ON CONFLICT(id) DO UPDATE SET total_degree_credits = excluded.total_degree_credits, updated_at = excluded.updated_at",
+                params![effective_total_credits],
+            );
+        }
 
         // 5. Upsert danh sách DRL
-        for drl in drl_list {
+        for drl in &drl_list {
             if drl.semester.trim().is_empty() {
                 continue;
             }
@@ -391,26 +766,206 @@ impl PortalIngestionEngine {
 
         // 7. Cập nhật Macro Metrics nếu có summary
         if let Some(ref sum) = summary {
-            let latest_drl = avg_drl.map(|v| v as i64);
+            let latest_drl = avg_drl.or_else(|| {
+                if !drl_list.is_empty() {
+                    let s: i64 = drl_list.iter().map(|d| d.score).sum();
+                    Some(s as f64 / drl_list.len() as f64)
+                } else {
+                    None
+                }
+            });
+
+            // Ghi nhận tóm tắt toàn khóa vào academic_program_summary (id='MAIN')
+            // Single Source of Truth: Ưu tiên total_program_credits chính thức từ UIT portal
             let _ = tx.execute(
-                "INSERT INTO academic_macro_metrics (
-                    semester_id, term_gpa, cumulative_gpa, classification,
-                    term_credits, cumulative_credits, drl, updated_at
-                ) VALUES ('LATEST', ?1, ?1, 'Tự động', ?2, ?2, ?3, strftime('%s', 'now'))
-                ON CONFLICT(semester_id) DO UPDATE SET
-                    term_gpa = excluded.term_gpa,
+                "INSERT INTO academic_program_summary (
+                    id, cumulative_gpa, cumulative_drl, cumulative_credits, total_degree_credits, updated_at
+                ) VALUES ('MAIN', ?1, ?2, ?3, ?4, strftime('%s', 'now'))
+                ON CONFLICT(id) DO UPDATE SET
                     cumulative_gpa = excluded.cumulative_gpa,
-                    term_credits = excluded.term_credits,
+                    cumulative_drl = excluded.cumulative_drl,
                     cumulative_credits = excluded.cumulative_credits,
-                    drl = excluded.drl,
+                    total_degree_credits = excluded.total_degree_credits,
                     updated_at = excluded.updated_at",
-                params![sum.cgpa_10, sum.total_credits as i64, latest_drl],
+                params![sum.cgpa_10, latest_drl, sum.total_credits as i64, effective_total_credits],
             );
+
+            for sem in &sum.semester_summaries {
+                if let Some(ref s_name) = sem.semester {
+                    let (sem_id, acad_year, term_num) = if let Some(p) = crate::services::uit_portal::parse_semester_header(s_name) {
+                        p
+                    } else {
+                        (s_name.replace(' ', "_").replace('/', "."), "2025-2026".to_string(), 1)
+                    };
+
+                    let sem_drl = drl_list.iter()
+                        .find(|d| d.semester.contains(s_name) || s_name.contains(&d.semester) || d.semester.contains(&format!("Học kỳ {term_num}")))
+                        .map(|d| d.score)
+                        .or(latest_drl.map(|v| v.round() as i64));
+
+                    let sem_label = format!("Học kỳ {}/{}", term_num, acad_year);
+
+                    let _ = tx.execute(
+                        "INSERT INTO academic_macro_metrics (
+                            semester_id, semester_label, year_name, term_gpa, cumulative_gpa, classification, rank_label,
+                            term_credits, cumulative_credits, drl, drl_score, updated_at
+                        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6, ?7, ?8, ?9, ?9, strftime('%s', 'now'))
+                        ON CONFLICT(semester_id) DO UPDATE SET
+                            semester_label = excluded.semester_label,
+                            year_name = excluded.year_name,
+                            term_gpa = excluded.term_gpa,
+                            cumulative_gpa = excluded.cumulative_gpa,
+                            classification = excluded.classification,
+                            rank_label = excluded.rank_label,
+                            term_credits = excluded.term_credits,
+                            cumulative_credits = excluded.cumulative_credits,
+                            drl = excluded.drl,
+                            drl_score = excluded.drl_score,
+                            updated_at = excluded.updated_at",
+                        params![
+                            sem_id,
+                            sem_label,
+                            acad_year,
+                            sem.gpa_semester.unwrap_or(0.0),
+                            sem.cpa_cumulative.unwrap_or(0.0),
+                            sem.ranking.as_deref().unwrap_or("Giỏi"),
+                            sem.credits_semester.unwrap_or(0),
+                            sem.credits_cumulative.unwrap_or(0),
+                            sem_drl.unwrap_or(0),
+                        ],
+                    );
+                }
+            }
+
+            // 8. Đảm bảo bảng academic_curriculum tồn tại và nạp danh mục môn học theo khung CTĐT
+            tx.execute(
+                "CREATE TABLE IF NOT EXISTS academic_curriculum (
+                    course_code TEXT PRIMARY KEY,
+                    course_name TEXT NOT NULL,
+                    credits INTEGER NOT NULL,
+                    course_type TEXT NOT NULL,
+                    ideal_term INTEGER NOT NULL,
+                    status TEXT NOT NULL,
+                    final_score REAL,
+                    updated_at INTEGER NOT NULL
+                )",
+                [],
+            ).map_err(|e| format!("Failed to ensure academic_curriculum table: {e}"))?;
+
+            if !sum.ctdt_curriculum_courses.is_empty() {
+                let mut stmt = tx.prepare_cached(
+                    "INSERT INTO academic_curriculum (
+                        course_code, course_name, credits, course_type, ideal_term, status, final_score, updated_at
+                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, strftime('%s', 'now'))
+                    ON CONFLICT(course_code) DO UPDATE SET
+                        course_name = excluded.course_name,
+                        credits = excluded.credits,
+                        course_type = excluded.course_type,
+                        ideal_term = excluded.ideal_term,
+                        status = excluded.status,
+                        final_score = excluded.final_score,
+                        updated_at = excluded.updated_at",
+                ).map_err(|e| format!("Failed to prepare academic_curriculum stmt: {e}"))?;
+
+                for c in &sum.ctdt_curriculum_courses {
+                    stmt.execute(params![
+                        c.course_code,
+                        c.course_name,
+                        c.credits,
+                        c.course_type,
+                        c.ideal_term,
+                        c.status,
+                        c.final_score,
+                    ]).map_err(|e| format!("Failed to upsert academic_curriculum: {e}"))?;
+                }
+            }
         }
 
         tx.commit().map_err(|e| format!("Failed to commit transaction: {}", e))?;
         println!("[Diark DB] Portal Academic Ingestion committed successfully with dynamic major: {}.", resolved_major.major_code);
         Ok(())
+    }
+
+    pub fn commit_drl_records(
+        db: Arc<Mutex<Connection>>,
+        drl_payload: OfficialUitDrlPayload,
+    ) -> Result<usize, String> {
+        let mut conn = db.lock().map_err(|e| format!("DB lock error: {e}"))?;
+        let tx = conn.transaction().map_err(|e| format!("Transaction error: {e}"))?;
+
+        tx.execute(
+            "CREATE TABLE IF NOT EXISTS academic_drl (
+                semester TEXT PRIMARY KEY,
+                score INTEGER NOT NULL,
+                grade_text TEXT NOT NULL DEFAULT '',
+                updated_at INTEGER NOT NULL
+            )",
+            [],
+        ).map_err(|e| format!("Failed to ensure academic_drl: {e}"))?;
+
+        let history = drl_payload.training_point_history.unwrap_or_default();
+        let count = history.len();
+        let mut latest_class = String::new();
+
+        for item in &history {
+            let sem_label = item.semester_label.as_deref().unwrap_or("");
+            let yr = item.year_name.as_deref().unwrap_or("");
+            let sem_name = if !sem_label.is_empty() && !yr.is_empty() {
+                format!("{sem_label}/{yr}")
+            } else if !sem_label.is_empty() {
+                sem_label.to_string()
+            } else {
+                item.semester.clone().unwrap_or_default()
+            };
+
+            if sem_name.trim().is_empty() {
+                continue;
+            }
+
+            let score = item.point.unwrap_or(0);
+            let rank = item.rank.as_deref().unwrap_or("");
+
+            tx.execute(
+                "INSERT INTO academic_drl (semester, score, grade_text, updated_at)
+                 VALUES (?1, ?2, ?3, strftime('%s', 'now'))
+                 ON CONFLICT(semester) DO UPDATE SET
+                     score = excluded.score,
+                     grade_text = excluded.grade_text,
+                     updated_at = excluded.updated_at",
+                params![sem_name.trim(), score, rank],
+            ).map_err(|e| format!("Failed to upsert academic_drl: {e}"))?;
+
+            if latest_class.is_empty() {
+                if let Some(ref cls) = item.specialized_class_name {
+                    if !cls.trim().is_empty() {
+                        latest_class = cls.trim().to_string();
+                    }
+                }
+            }
+        }
+
+        if !latest_class.is_empty() {
+            let _ = tx.execute(
+                "INSERT INTO settings (key, value) VALUES ('student_class', ?1)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                params![latest_class],
+            );
+        }
+
+        if let Some(avg) = drl_payload.average_training_point {
+            let _ = tx.execute(
+                "INSERT INTO academic_program_summary (
+                    id, cumulative_drl, updated_at
+                ) VALUES ('MAIN', ?1, strftime('%s', 'now'))
+                ON CONFLICT(id) DO UPDATE SET
+                    cumulative_drl = excluded.cumulative_drl,
+                    updated_at = excluded.updated_at",
+                params![avg],
+            );
+        }
+
+        tx.commit().map_err(|e| format!("Commit error: {e}"))?;
+        Ok(count)
     }
 }
 
@@ -466,17 +1021,34 @@ mod tests {
             );
             CREATE TABLE IF NOT EXISTS academic_program_summary (
                 id TEXT PRIMARY KEY,
+                cumulative_gpa REAL,
+                cumulative_drl REAL,
+                cumulative_credits INTEGER,
                 total_degree_credits INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
             );
             CREATE TABLE IF NOT EXISTS academic_macro_metrics (
                 semester_id TEXT PRIMARY KEY,
+                semester_label TEXT NOT NULL DEFAULT '',
+                year_name TEXT NOT NULL DEFAULT '',
                 term_gpa REAL NOT NULL DEFAULT 0.0,
                 cumulative_gpa REAL NOT NULL DEFAULT 0.0,
                 classification TEXT NOT NULL DEFAULT 'Chưa xếp loại',
+                rank_label TEXT NOT NULL DEFAULT 'Chưa xếp loại',
                 term_credits INTEGER NOT NULL DEFAULT 0,
                 cumulative_credits INTEGER NOT NULL DEFAULT 0,
                 drl INTEGER,
+                drl_score INTEGER NOT NULL DEFAULT 0,
+                updated_at INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS academic_curriculum (
+                course_code TEXT PRIMARY KEY,
+                course_name TEXT NOT NULL,
+                credits INTEGER NOT NULL,
+                course_type TEXT NOT NULL,
+                ideal_term INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                final_score REAL,
                 updated_at INTEGER NOT NULL
             );"
         ).unwrap();
@@ -586,7 +1158,7 @@ mod tests {
         assert_eq!(setting_name, "Nguyen Van Test");
 
         let course_count: i64 = conn.query_row(
-            "SELECT count(*) FROM academic_courses WHERE semester_id = '2024_2025_HK1'",
+            "SELECT count(*) FROM academic_courses WHERE semester_id = '2024-2025.1'",
             [],
             |r| r.get(0),
         ).unwrap();
@@ -609,5 +1181,166 @@ mod tests {
             |r| r.get(0),
         ).unwrap();
         assert_eq!(drl_score, 92);
+    }
+
+    #[test]
+    fn test_official_uit_payload_conversion_and_commit() {
+        let json_data = r#"{
+            "bySemester": {
+                "semester_groups": [
+                    {
+                        "semester_key": "semester_2",
+                        "semester_label": "Học kỳ 2/2025-2026",
+                        "year_name": "2025-2026",
+                        "subjects": [
+                            {
+                                "id": "IT002-1",
+                                "subject_code": "IT002",
+                                "subject_name": "Lập trình hướng đối tượng",
+                                "number_of_credit": 4,
+                                "training_type_code": "CQUI",
+                                "process_point": "10",
+                                "midterm_score": "",
+                                "practice_point": "9",
+                                "final_point": "6.5",
+                                "course_point": "8.0"
+                            },
+                            {
+                                "id": "IT003-2",
+                                "subject_code": "IT003",
+                                "subject_name": "Cấu trúc dữ liệu và giải thuật",
+                                "number_of_credit": 4,
+                                "training_type_code": "CQUI",
+                                "process_point": "10",
+                                "midterm_score": "",
+                                "practice_point": "9",
+                                "final_point": "7.5",
+                                "course_point": "8.5"
+                            }
+                        ],
+                        "total_credit": 8,
+                        "average_point": 8.25
+                    }
+                ],
+                "summary": {
+                    "total_credits_all": 42,
+                    "accumulated_credits": 42,
+                    "gpa_all": 8.4,
+                    "gpa_accumulated": 8.4,
+                    "graduation_credits": 0
+                }
+            },
+            "termSummaries": [
+                {
+                    "yearName": "2025",
+                    "semester": "2",
+                    "termGpa": 8.25,
+                    "cumulativeGpa": 8.4,
+                    "termCredit": 8,
+                    "accumulatedCredit": 42,
+                    "classifyLabel": "Giỏi"
+                }
+            ],
+            "byCtdt": {
+                "statistics": {
+                    "total_program_credit": 126,
+                    "passed_credit": 42,
+                    "avg_score": 8.4,
+                    "accumulated_gpa": 8.4
+                },
+                "program_scores": [
+                    {
+                        "semester": 1,
+                        "semester_label": "Học kỳ 1",
+                        "lines": [
+                            {
+                                "subject_code": "CS005",
+                                "subject_name": "Giới thiệu ngành Khoa học Máy tính",
+                                "credit": 1,
+                                "subject_required": true,
+                                "course_point": "9.7",
+                                "status": "passed"
+                            },
+                            {
+                                "subject_code": "IT001",
+                                "subject_name": "Nhập môn lập trình",
+                                "credit": 4,
+                                "subject_required": true,
+                                "course_point": "9.1",
+                                "status": "passed"
+                            }
+                        ]
+                    }
+                ]
+            }
+        }"#;
+
+        let official: OfficialUitTranscriptPayload = serde_json::from_str(json_data).unwrap();
+        let (profile, drl_records, courses, summary, avg_drl) = convert_official_uit_payload(official);
+
+        assert_eq!(courses.len(), 2);
+        assert_eq!(courses[0].course_code, "IT002");
+        assert_eq!(courses[0].score_10, 8.0);
+        assert_eq!(courses[0].score_qt, Some(10.0));
+        assert_eq!(courses[0].score_gk, None);
+        assert_eq!(courses[0].score_th, Some(9.0));
+        assert_eq!(courses[0].score_ck, Some(6.5));
+
+        assert_eq!(summary.as_ref().unwrap().cgpa_10, 8.4);
+        assert_eq!(summary.as_ref().unwrap().total_credits, 42.0);
+        assert_eq!(summary.as_ref().unwrap().total_program_credits, Some(126));
+        assert_eq!(summary.as_ref().unwrap().ctdt_curriculum_courses.len(), 2);
+
+        let db = setup_test_db();
+        let res = PortalIngestionEngine::commit_academic_records(
+            db.clone(),
+            profile,
+            drl_records,
+            courses,
+            summary,
+            avg_drl,
+            1,
+            1,
+        );
+        assert!(res.is_ok());
+
+        let conn = db.lock().unwrap();
+        let course_count: i64 = conn.query_row("SELECT count(*) FROM academic_courses", [], |r| r.get(0)).unwrap();
+        assert_eq!(course_count, 2);
+
+        let macro_count: i64 = conn.query_row("SELECT count(*) FROM academic_macro_metrics", [], |r| r.get(0)).unwrap();
+        assert!(macro_count >= 1);
+
+        // Kiểm tra số tín chỉ tốt nghiệp chính thức từ byCtdt được lưu đúng 126
+        let total_degree_cred: i64 = conn.query_row(
+            "SELECT total_degree_credits FROM academic_program_summary WHERE id = 'MAIN'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(total_degree_cred, 126);
+
+        let setting_deg_cred: String = conn.query_row(
+            "SELECT value FROM settings WHERE key = 'total_degree_credits'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(setting_deg_cred, "126");
+
+        // Kiểm tra danh mục môn học theo CTĐT (Tab 3) được lưu đúng
+        let ctdt_count: i64 = conn.query_row(
+            "SELECT count(*) FROM academic_curriculum",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(ctdt_count, 2);
+
+        let (c_name, c_status, c_score): (String, String, Option<f64>) = conn.query_row(
+            "SELECT course_name, status, final_score FROM academic_curriculum WHERE course_code = 'CS005'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        ).unwrap();
+        assert_eq!(c_name, "Giới thiệu ngành Khoa học Máy tính");
+        assert_eq!(c_status, "Đã qua");
+        assert_eq!(c_score, Some(9.7));
     }
 }

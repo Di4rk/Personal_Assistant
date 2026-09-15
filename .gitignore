@@ -10,7 +10,15 @@ tools/vendor/
 # Rust & Cargo build artifacts
 target/
 src-tauri/target/
+**/target/
+**/target*/
+**/target_*/
+**/target-*/
 **/*.rs.bk
+
+# Temporary artifacts
+temp_claude/
+.system_generated/
 
 # Tauri build outputs
 src-tauri/gen/

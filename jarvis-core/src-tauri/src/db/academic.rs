@@ -339,6 +339,85 @@ pub fn ensure_academic_schema(conn: &Connection) -> SqlResult<()> {
     ensure_column("academic_courses", "status", "TEXT NOT NULL DEFAULT 'normal'")?;
     ensure_column("academic_courses", "note", "TEXT")?;
 
+    self_heal_academic_data(conn)?;
+
+    Ok(())
+}
+
+/// Tự phục hồi dữ liệu học vụ: chuẩn hóa semester_id lệch, dọn dẹp row 'LATEST', đồng bộ program summary
+pub fn self_heal_academic_data(conn: &Connection) -> SqlResult<()> {
+    // 1. Xóa bỏ sentinel LATEST và legacy prefixes khỏi macro metrics
+    let _ = conn.execute("DELETE FROM academic_macro_metrics WHERE semester_id = 'LATEST' OR semester_id LIKE 'Học_kỳ_%';", []);
+
+    // 2. Chuẩn hóa semester_id trong academic_courses
+    let _ = conn.execute("UPDATE OR IGNORE academic_courses SET semester_id = '2025-2026.1' WHERE semester_id IN ('2025_2026_HK1', 'Học_kỳ_1.2025-2026');", []);
+    let _ = conn.execute("UPDATE OR IGNORE academic_courses SET semester_id = '2025-2026.2' WHERE semester_id IN ('2025_2026_HK2', 'Học_kỳ_2.2025-2026');", []);
+    let _ = conn.execute("DELETE FROM academic_courses WHERE semester_id IN ('2025_2026_HK1', 'Học_kỳ_1.2025-2026', '2025_2026_HK2', 'Học_kỳ_2.2025-2026');", []);
+
+    // 3. Chuẩn hóa ID trong academic_semesters
+    let _ = conn.execute("UPDATE OR IGNORE academic_semesters SET id = '2025-2026.1', academic_year = '2025-2026', semester_term = 1 WHERE id IN ('2025_2026_HK1', 'Học_kỳ_1.2025-2026');", []);
+    let _ = conn.execute("UPDATE OR IGNORE academic_semesters SET id = '2025-2026.2', academic_year = '2025-2026', semester_term = 2 WHERE id IN ('2025_2026_HK2', 'Học_kỳ_2.2025-2026');", []);
+    let _ = conn.execute("DELETE FROM academic_semesters WHERE id IN ('2025_2026_HK1', 'Học_kỳ_1.2025-2026', '2025_2026_HK2', 'Học_kỳ_2.2025-2026');", []);
+
+    // 4. Chuẩn hóa semester_id và label trong academic_macro_metrics
+    let _ = conn.execute("UPDATE OR IGNORE academic_macro_metrics SET semester_id = '2025-2026.1', semester_label = 'Học kỳ 1/2025-2026', year_name = '2025-2026' WHERE semester_id = '2025_2026_HK1';", []);
+    let _ = conn.execute("UPDATE OR IGNORE academic_macro_metrics SET semester_id = '2025-2026.2', semester_label = 'Học kỳ 2/2025-2026', year_name = '2025-2026' WHERE semester_id = '2025_2026_HK2';", []);
+    let _ = conn.execute("DELETE FROM academic_macro_metrics WHERE semester_id IN ('2025_2026_HK1', '2025_2026_HK2');", []);
+
+    // 5. Cập nhật label sạch sẽ nếu nhãn còn chứa ký tự gạch dưới hoặc thiếu
+    let _ = conn.execute(
+        "UPDATE academic_macro_metrics 
+         SET semester_label = 'Học kỳ 1/2025-2026', year_name = '2025-2026'
+         WHERE semester_id = '2025-2026.1' AND (semester_label = '' OR semester_label LIKE '%Học_kỳ%');",
+        [],
+    );
+    let _ = conn.execute(
+        "UPDATE academic_macro_metrics 
+         SET semester_label = 'Học kỳ 2/2025-2026', year_name = '2025-2026'
+         WHERE semester_id = '2025-2026.2' AND (semester_label = '' OR semester_label LIKE '%Học_kỳ%');",
+        [],
+    );
+
+    // 6. Tự động giải quyết số tín chỉ CTĐT: Ưu tiên số tín chỉ chính thức từ portal nếu đã có
+    let existing_portal_credits: Option<i64> = conn.query_row(
+        "SELECT CAST(value AS INTEGER) FROM settings WHERE key = 'total_degree_credits' AND CAST(value AS INTEGER) > 0",
+        [],
+        |r| r.get(0),
+    ).ok();
+
+    if let Some(portal_credits) = existing_portal_credits {
+        let _ = conn.execute(
+            "UPDATE academic_program_summary 
+             SET total_degree_credits = ?1 
+             WHERE id = 'MAIN';",
+            rusqlite::params![portal_credits],
+        );
+    } else {
+        let (curriculum_code, major_code, student_class) = {
+            let get_val = |k: &str| -> String {
+                conn.query_row(
+                    "SELECT value FROM settings WHERE key = ?1",
+                    [k],
+                    |r| r.get(0),
+                ).unwrap_or_default()
+            };
+            (get_val("curriculum_code"), get_val("major_code"), get_val("student_class"))
+        };
+        let combined_hint = format!("{major_code} {student_class}");
+        if let Ok(res) = crate::modules::academic::curriculum_resolver::resolve_curriculum(
+            conn,
+            &curriculum_code,
+            if combined_hint.trim().is_empty() { None } else { Some(&combined_hint) },
+        ) {
+            let _ = conn.execute(
+                "UPDATE academic_program_summary 
+                 SET total_degree_credits = ?1 
+                 WHERE id = 'MAIN' AND (total_degree_credits IS NULL OR total_degree_credits = 0);",
+                rusqlite::params![res.total_credits],
+            );
+        }
+    }
+
     Ok(())
 }
 

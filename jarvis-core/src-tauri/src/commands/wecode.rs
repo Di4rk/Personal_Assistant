@@ -157,6 +157,24 @@ fn map_sub_row(row: &rusqlite::Row) -> rusqlite::Result<WecodeSubmissionDto> {
     })
 }
 
+#[tauri::command]
+pub fn ingest_wecode_submissions_json(
+    app: AppHandle,
+    state: State<AppState>,
+    payload_json: String,
+) -> Result<usize, String> {
+    let submissions: Vec<WecodeSubmissionDto> =
+        serde_json::from_str(&payload_json).map_err(|e| format!("Lỗi parse JSON Wecode Submissions: {e}"))?;
+    let count = submissions.len();
+    let db_arc = state.db.clone();
+    crate::services::wecode_harvester::WecodeIngestionEngine::commit_wecode_records(
+        db_arc,
+        submissions,
+    )?;
+    let _ = app.emit("wecode-submissions-synced", ());
+    Ok(count)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

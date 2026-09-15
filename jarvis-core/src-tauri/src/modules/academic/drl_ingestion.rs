@@ -130,8 +130,7 @@ pub fn parse_portal_drl(html: &str) -> Result<DrlParseResult, String> {
             .replace("Năm học", "")
             .trim()
             .to_string();
-        let year_clean = academic_year.replace('-', "_");
-        let semester_id = format!("{}_HK{}", year_clean, term);
+        let semester_id = format!("{academic_year}.{term}");
 
         // Cột 2: Lớp chuyên ngành (e.g. "KHMT2025.1")
         let class_name = cells[2].text().collect::<String>().trim().to_string();
@@ -210,10 +209,12 @@ pub fn persist_portal_drl(
     {
         let mut stmt = tx.prepare_cached(
             "INSERT INTO academic_macro_metrics (
-                semester_id, term_gpa, cumulative_gpa, classification, rank_label,
+                semester_id, semester_label, year_name, term_gpa, cumulative_gpa, classification, rank_label,
                 term_credits, cumulative_credits, drl, drl_score, updated_at
-            ) VALUES (?1, 0.0, 0.0, ?2, ?2, 0, 0, ?3, ?3, ?4)
+            ) VALUES (?1, ?2, ?3, 0.0, 0.0, ?4, ?4, 0, 0, ?5, ?5, ?6)
             ON CONFLICT(semester_id) DO UPDATE SET
+                semester_label = CASE WHEN academic_macro_metrics.semester_label IS NULL OR academic_macro_metrics.semester_label = '' THEN excluded.semester_label ELSE academic_macro_metrics.semester_label END,
+                year_name      = CASE WHEN academic_macro_metrics.year_name IS NULL OR academic_macro_metrics.year_name = '' THEN excluded.year_name ELSE academic_macro_metrics.year_name END,
                 drl        = excluded.drl,
                 drl_score  = excluded.drl_score,
                 classification = CASE WHEN academic_macro_metrics.classification IS NULL OR academic_macro_metrics.classification = '' THEN excluded.classification ELSE academic_macro_metrics.classification END,
@@ -227,7 +228,8 @@ pub fn persist_portal_drl(
             } else {
                 sem.classification.as_str()
             };
-            stmt.execute(params![sem.semester_id, classif, sem.drl_score, now])?;
+            let sem_label = format!("Học kỳ {}/{}", sem.semester_term, sem.academic_year);
+            stmt.execute(params![sem.semester_id, sem_label, sem.academic_year, classif, sem.drl_score, now])?;
             updated_semesters.push(sem.semester_id.clone());
         }
     }
@@ -324,7 +326,7 @@ mod tests {
         assert_eq!(result.semesters.len(), 2);
 
         let hk2 = &result.semesters[0];
-        assert_eq!(hk2.semester_id, "2025_2026_HK2");
+        assert_eq!(hk2.semester_id, "2025-2026.2");
         assert_eq!(hk2.academic_year, "2025-2026");
         assert_eq!(hk2.semester_term, 2);
         assert_eq!(hk2.class_name, "KHMT2025.1");
@@ -332,7 +334,7 @@ mod tests {
         assert_eq!(hk2.classification, "Xuất sắc");
 
         let hk1 = &result.semesters[1];
-        assert_eq!(hk1.semester_id, "2025_2026_HK1");
+        assert_eq!(hk1.semester_id, "2025-2026.1");
         assert_eq!(hk1.drl_score, 95);
     }
 
@@ -362,7 +364,7 @@ mod tests {
         let result = parse_portal_drl(html).expect("parse phải thành công");
         // Dòng đầu có term không hợp lệ ("Học kỳ X") phải bị bỏ qua
         assert_eq!(result.semesters.len(), 1);
-        assert_eq!(result.semesters[0].semester_id, "2025_2026_HK2");
+        assert_eq!(result.semesters[0].semester_id, "2025-2026.2");
     }
 
     #[test]
@@ -382,7 +384,7 @@ mod tests {
         "#;
         let result = parse_portal_drl(html).expect("parse phải thành công");
         assert_eq!(result.semesters.len(), 1);
-        assert_eq!(result.semesters[0].semester_id, "2024_2025_HK3");
+        assert_eq!(result.semesters[0].semester_id, "2024-2025.3");
         assert_eq!(result.semesters[0].semester_term, 3);
     }
 
@@ -394,7 +396,7 @@ mod tests {
             cumulative_drl: Some(97.5),
             cumulative_classification: Some("Xuất sắc".to_string()),
             semesters: vec![DrlSemesterEntry {
-                semester_id: "2025_2026_HK2".to_string(),
+                semester_id: "2025-2026.2".to_string(),
                 academic_year: "2025-2026".to_string(),
                 semester_term: 2,
                 class_name: "KHMT2025.1".to_string(),
@@ -405,7 +407,7 @@ mod tests {
 
         let report = persist_portal_drl(&mut conn, &parsed).expect("persist phải thành công");
 
-        assert_eq!(report.updated_semesters, vec!["2025_2026_HK2"]);
+        assert_eq!(report.updated_semesters, vec!["2025-2026.2"]);
         assert_eq!(report.cumulative_drl, Some(97.5));
 
         // Kiểm tra academic_program_summary
@@ -422,7 +424,7 @@ mod tests {
         // Kiểm tra academic_macro_metrics
         let drl: Option<i64> = conn
             .query_row(
-                "SELECT drl FROM academic_macro_metrics WHERE semester_id = '2025_2026_HK2'",
+                "SELECT drl FROM academic_macro_metrics WHERE semester_id = '2025-2026.2'",
                 [],
                 |r| r.get(0),
             )
@@ -439,7 +441,7 @@ mod tests {
         conn.execute(
             "INSERT INTO academic_macro_metrics
              (semester_id, term_gpa, cumulative_gpa, classification, term_credits, cumulative_credits, drl, updated_at)
-             VALUES ('2025_2026_HK2', 3.8, 3.9, 'Xuất sắc', 18, 36, NULL, ?1)",
+             VALUES ('2025-2026.2', 3.8, 3.9, 'Xuất sắc', 18, 36, NULL, ?1)",
             params![now],
         )
         .expect("insert row ban đầu phải thành công");
@@ -448,7 +450,7 @@ mod tests {
             cumulative_drl: Some(95.0),
             cumulative_classification: Some("Xuất sắc".to_string()),
             semesters: vec![DrlSemesterEntry {
-                semester_id: "2025_2026_HK2".to_string(),
+                semester_id: "2025-2026.2".to_string(),
                 academic_year: "2025-2026".to_string(),
                 semester_term: 2,
                 class_name: "KHMT2025.1".to_string(),
@@ -462,7 +464,7 @@ mod tests {
         // GPA phải KHÔNG bị thay đổi (ON CONFLICT chỉ update drl + updated_at)
         let (term_gpa, drl): (f64, Option<i64>) = conn
             .query_row(
-                "SELECT term_gpa, drl FROM academic_macro_metrics WHERE semester_id = '2025_2026_HK2'",
+                "SELECT term_gpa, drl FROM academic_macro_metrics WHERE semester_id = '2025-2026.2'",
                 [],
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )

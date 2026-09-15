@@ -26,10 +26,21 @@ fn d_code_pattern() -> &'static Regex {
 
 /// Phân tách chuỗi thô thành danh sách các token chuẩn hóa (viết hoa, bỏ ký tự ngăn cách)
 pub fn tokenize(raw: &str) -> Vec<String> {
-    raw.split(|c: char| !c.is_alphanumeric())
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_uppercase())
-        .collect()
+    let mut tokens = Vec::new();
+    for s in raw.split(|c: char| !c.is_alphanumeric()) {
+        let trimmed = s.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        tokens.push(trimmed.to_uppercase());
+
+        // Nếu token có dạng chuyên ngành gắn liền năm tuyển sinh (VD: KHMT2025, KTPM2024, ATTT2025)
+        let alpha_prefix: String = trimmed.chars().take_while(|c| c.is_alphabetic()).collect();
+        if alpha_prefix.len() >= 3 && alpha_prefix.len() < trimmed.len() {
+            tokens.push(alpha_prefix.to_uppercase());
+        }
+    }
+    tokens
 }
 
 /// Phân giải chương trình đào tạo theo 4 tầng thứ bậc nghiêm ngặt:
@@ -213,6 +224,15 @@ mod tests {
         assert_eq!(res.major_code, "UNKNOWN");
         assert_eq!(res.total_credits, 130);
         assert_eq!(res.matched_via, "hard_fallback");
+    }
+
+    #[test]
+    fn test_student_class_resolution() {
+        let conn = setup_mock_db();
+        let res = resolve_curriculum(&conn, "", Some("KHMT2025.1")).unwrap();
+        assert_eq!(res.major_code, "D480101");
+        assert_eq!(res.total_credits, 126);
+        assert_eq!(res.matched_via, "alias_acronym_fallback");
     }
 
     #[test]

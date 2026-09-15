@@ -1,438 +1,323 @@
+/**
+ * DIARK OS — Automated Zero-Friction UIT Portal Harvester v3.0
+ * 
+ * Auto-detects authenticated session, fetches official APIs (Transcript, DRL, Profile)
+ * in parallel, dispatches directly to Diark OS local sync server (port 3030), and closes window.
+ * Zero manual F12, zero console pasting required.
+ */
 (() => {
-    // RÀNG BUỘC P0: TUYỆT ĐỐI CẤM TRUY CẬP document.cookie HOẶC HEADER CHỨA SESSION
-    if (window.__DIARK_PORTAL_HARVESTER_V2__) return;
-    window.__DIARK_PORTAL_HARVESTER_V2__ = true;
+    if (window.__DIARK_PORTAL_HARVESTER_V3__) return;
+    window.__DIARK_PORTAL_HARVESTER_V3__ = true;
 
-    const HARVEST_STORAGE_KEY = "__DIARK_PORTAL_HARVEST_BUFFER__";
-    const BATCH_SIZE = 20; // An toàn tuyệt đối cho URL Scheme length limit (< 4KB)
+    const LOCAL_SYNC_ENDPOINT = "http://127.0.0.1:3030/api/v1/sync/portal";
 
     function sleep(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));
     }
 
-    // --- AUTH GATEKEEPER ---
-    // Chờ xuất hiện thẻ h2 và URL chứa /sinh-vien/ mới bắt đầu chạy
-    async function waitForAuthGatekeeper(timeout = 180000) {
-        console.log("[Diark Harvester] Auth Gatekeeper: Waiting for h2 and URL containing /sinh-vien/...");
-        const start = Date.now();
-        while (Date.now() - start < timeout) {
-            const currentUrl = window.location.href || "";
-            const h2 = document.querySelector('h2');
-            if (currentUrl.includes('/sinh-vien/') && h2 && h2.innerText.trim().length > 0) {
-                console.log("[Diark Harvester] Auth Gatekeeper PASSED: Found h2 and /sinh-vien/ in URL.");
-                return true;
+    // --- SLEEK FLOATING STATUS PILL ---
+    let pillEl = null;
+    function showPill(text, type = "info") {
+        try {
+            if (!pillEl) {
+                pillEl = document.createElement("div");
+                pillEl.id = "__diark_sync_pill";
+                pillEl.style.position = "fixed";
+                pillEl.style.top = "16px";
+                pillEl.style.right = "16px";
+                pillEl.style.zIndex = "99999999";
+                pillEl.style.padding = "10px 18px";
+                pillEl.style.borderRadius = "10px";
+                pillEl.style.fontFamily = "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
+                pillEl.style.fontSize = "12px";
+                pillEl.style.fontWeight = "600";
+                pillEl.style.boxShadow = "0 8px 30px rgba(0,0,0,0.45)";
+                pillEl.style.transition = "all 0.3s cubic-bezier(0.16, 1, 0.3, 1)";
+                pillEl.style.display = "flex";
+                pillEl.style.alignItems = "center";
+                pillEl.style.gap = "8px";
+                pillEl.style.backdropFilter = "blur(8px)";
+                document.body?.appendChild(pillEl);
             }
 
-            // Nếu người dùng đã đăng nhập và đang ở trang chủ portal không có /sinh-vien/, điều hướng về /sinh-vien/ho-so
-            const host = (window.location.hostname || "").toLowerCase();
-            const path = (window.location.pathname || "").toLowerCase();
-            if (host.includes('portal.uit.edu.vn') && (path === '/' || path === '' || path.includes('/home') || path.includes('/trang-chu'))) {
-                console.log("[Diark Harvester] On portal root, redirecting to /sinh-vien/ho-so...");
-                window.location.href = "https://portal.uit.edu.vn/sinh-vien/ho-so";
+            if (type === "success") {
+                pillEl.style.backgroundColor = "rgba(12, 74, 110, 0.92)"; // sky-950
+                pillEl.style.border = "1px solid rgba(56, 189, 248, 0.5)"; // sky-400
+                pillEl.style.color = "#38bdf8";
+            } else if (type === "error") {
+                pillEl.style.backgroundColor = "rgba(136, 19, 55, 0.92)"; // rose-950
+                pillEl.style.border = "1px solid rgba(251, 113, 133, 0.5)"; // rose-400
+                pillEl.style.color = "#fb7185";
+            } else {
+                pillEl.style.backgroundColor = "rgba(24, 24, 27, 0.92)"; // zinc-900
+                pillEl.style.border = "1px solid rgba(82, 82, 91, 0.6)"; // zinc-600
+                pillEl.style.color = "#e4e4e7"; // zinc-200
             }
 
-            await sleep(500);
-        }
-        console.warn("[Diark Harvester] Auth Gatekeeper timed out.");
-        return false;
+            pillEl.innerHTML = text;
+        } catch (_) {}
     }
 
-    async function waitForElement(selector, timeout = 10000) {
-        const start = Date.now();
-        while (Date.now() - start < timeout) {
-            const el = document.querySelector(selector);
-            const hasPulse = el && (el.classList.contains("animate-pulse") || el.querySelector('.animate-pulse'));
-            if (el && !hasPulse) return el;
-            await sleep(150);
+    // --- STUDENT IDENTITY PARSER ---
+    function extractStudentIdentityFromDOM() {
+        let student_id = "";
+        let full_name = "";
+
+        // 1. Header user chip
+        const idElem = document.querySelector('header button span.text-xs') || document.querySelector('header span.text-muted-foreground');
+        const nameElem = document.querySelector('header button span.text-sm') || document.querySelector('header span.font-medium');
+
+        if (idElem && /^\d{8}$/.test(idElem.textContent.trim())) {
+            student_id = idElem.textContent.trim();
         }
-        return null;
+        if (nameElem && nameElem.textContent.trim()) {
+            full_name = nameElem.textContent.trim();
+        }
+
+        // 2. Next.js Flight Data stream
+        if ((!student_id || !full_name) && Array.isArray(window.__next_f)) {
+            for (const chunk of window.__next_f) {
+                if (Array.isArray(chunk) && typeof chunk[1] === "string") {
+                    const match = chunk[1].match(/"user":\{"sub":"[^"]*","id":null,"username":"(\d{8})","displayName":"([^"]+)","email":"([^"]+)"/);
+                    if (match) {
+                        if (!student_id) student_id = match[1];
+                        if (!full_name) full_name = match[2];
+                        break;
+                    }
+                }
+            }
+        }
+
+        // 3. Fallback H2
+        if (!full_name) {
+            const h2 = document.querySelector("h2");
+            if (h2 && h2.textContent.trim()) {
+                full_name = h2.textContent.trim();
+            }
+        }
+
+        return { student_id, full_name };
     }
 
-    async function triggerSyntheticClick(el) {
-        if (!el) return;
-        el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
-        el.click();
-        await sleep(350);
-        const start = Date.now();
-        while (Date.now() - start < 6000) {
-            const pulses = document.querySelectorAll('.animate-pulse');
-            if (pulses.length === 0) break;
-            await sleep(150);
-        }
+    // --- BACKGROUND PROFILE ENRICHMENT ---
+    async function tryEnrichProfileFromHoSo(existingProfile) {
+        try {
+            let rawText = "";
+
+            // 1. Kiểm tra nếu đang ở trang /sinh-vien/ho-so và có sẵn window.__next_f
+            if (Array.isArray(window.__next_f)) {
+                for (const chunk of window.__next_f) {
+                    if (Array.isArray(chunk) && typeof chunk[1] === "string" && chunk[1].includes('"academic":')) {
+                        rawText = chunk[1];
+                        break;
+                    }
+                }
+            }
+
+            // 2. Nếu chưa có, fetch thẳng /sinh-vien/ho-so (session cookie gửi tự động)
+            if (!rawText) {
+                const res = await fetch("/sinh-vien/ho-so", { credentials: "include" });
+                if (res.ok) {
+                    rawText = await res.text();
+                }
+            }
+
+            if (rawText) {
+                // Xử lý unescape nếu nằm trong chuỗi flight data JSON của Next.js
+                const unescaped = rawText.replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+
+                const extractMatch = (regex) => {
+                    const m = unescaped.match(regex);
+                    return m && m[1] ? m[1].trim() : "";
+                };
+
+                const studentCode = extractMatch(/"studentCode"\s*:\s*"(\d{8})"/i) || extractMatch(/"student_code"\s*:\s*"(\d{8})"/i);
+                const fullName = extractMatch(/"fullName"\s*:\s*"([^"]+)"/i) || extractMatch(/"full_name"\s*:\s*"([^"]+)"/i);
+                const className = extractMatch(/"class_name"\s*:\s*"([^"]+)"/i) || extractMatch(/"student_class"\s*:\s*"([^"]+)"/i);
+                const specialization = extractMatch(/"specialization"\s*:\s*"([^"]+)"/i);
+                const faculty = extractMatch(/"faculty_name"\s*:\s*"([^"]+)"/i) || extractMatch(/"faculty"\s*:\s*"([^"]+)"/i);
+                const majorCode = extractMatch(/"major_name"\s*:\s*"([^"]+)"/i) || extractMatch(/"major_code"\s*:\s*"([^"]+)"/i);
+                const trainingProgram = extractMatch(/"training_program"\s*:\s*"([^"]+)"/i) || extractMatch(/"curriculum_code"\s*:\s*"([^"]+)"/i);
+                const cohort = extractMatch(/"cohort_label"\s*:\s*"([^"]+)"/i) || extractMatch(/"admission_year"\s*:\s*"([^"]+)"/i);
+
+                if (studentCode && !existingProfile.student_id) existingProfile.student_id = studentCode;
+                if (fullName && !existingProfile.full_name) existingProfile.full_name = fullName;
+                if (className) existingProfile.student_class = className;
+                if (specialization) existingProfile.specialization = specialization;
+                if (faculty) existingProfile.faculty = faculty;
+                if (majorCode) existingProfile.major_code = majorCode;
+                if (trainingProgram) existingProfile.curriculum_code = trainingProgram;
+                if (cohort) existingProfile.cohort = cohort;
+            }
+
+            // Fallback: DOM query selector nếu trang render static
+            if (!existingProfile.student_class || !existingProfile.specialization) {
+                const doc = new DOMParser().parseFromString(rawText, "text/html");
+                const nodes = Array.from(doc.querySelectorAll("div, span, td, p, dt, dd"));
+                const findVal = (label) => {
+                    const l = label.toLowerCase();
+                    const node = nodes.find(n => n.textContent?.trim().toLowerCase().startsWith(l));
+                    if (!node) return "";
+                    const valNode = node.nextElementSibling || node.parentElement?.querySelector(".font-medium, .font-semibold, dd") || node.parentElement?.children[1];
+                    return valNode?.textContent?.trim() || "";
+                };
+
+                if (!existingProfile.student_class) existingProfile.student_class = findVal("lớp sinh hoạt") || findVal("lớp");
+                if (!existingProfile.specialization) existingProfile.specialization = findVal("chuyên ngành") || findVal("ngành");
+                if (!existingProfile.faculty) existingProfile.faculty = findVal("khoa");
+            }
+        } catch (_) {}
+        return existingProfile;
     }
 
-    // --- BƯỚC 1: ROUTE /sinh-vien/ho-so (TAB HỌC VỤ INDEX 2) ---
-    async function scrapeProfile() {
-        console.log("[Diark Harvester] Scraping Profile at /sinh-vien/ho-so...");
+    // --- MAIN ENGINE ---
+    let harvestRunning = false;
+    async function runAutoHarvester() {
+        if (harvestRunning) return;
+        harvestRunning = true;
 
-        let fullName = "";
-        let studentId = "";
-        let faculty = "";
-        let specialization = "";
-        let curriculumCode = "";
+        console.log("[Diark OS] Starting Auto-Harvester Engine...");
+        showPill("<span>⚡ Diark OS: Đang kiểm tra phiên làm việc...</span>", "info");
+
+        // 1. Fetch official Transcript API
+        let transcriptData = null;
+        try {
+            const res = await fetch("/api/sinh-vien/bang-diem", { credentials: "include" });
+            if (!res.ok) {
+                harvestRunning = false;
+                return false;
+            }
+            transcriptData = await res.json();
+        } catch (e) {
+            harvestRunning = false;
+            return false;
+        }
+
+        if (!transcriptData || !transcriptData.bySemester) {
+            harvestRunning = false;
+            return false;
+        }
+
+        showPill("<span>📥 Đã nhận diện phiên đăng nhập! Đang kéo Bảng điểm & DRL...</span>", "info");
+
+        // 2. Fetch official DRL API
+        let drlData = null;
+        try {
+            const drlRes = await fetch("/api/sinh-vien/diem-ren-luyen", { credentials: "include" });
+            if (drlRes.ok) {
+                drlData = await drlRes.json();
+            }
+        } catch (_) {}
+
+        // 3. Extract Student Identity
+        const identity = extractStudentIdentityFromDOM();
         let studentClass = "";
-
-        for (let attempt = 0; attempt < 60; attempt++) {
-            // A. Định danh: document.querySelector('h2').innerText.trim()
-            const h2El = document.querySelector('h2');
-            if (h2El && h2El.innerText.trim()) {
-                fullName = h2El.innerText.trim();
-            }
-
-            // B. Tab Học vụ (Index 2 hoặc tìm theo nhãn 'Học vụ')
-            const tabs = Array.from(document.querySelectorAll('button[role="tab"]'));
-            const hocVuBtn = tabs.find(b => b.innerText.trim() === 'Học vụ') || tabs[2];
-            if (hocVuBtn && hocVuBtn.getAttribute('aria-selected') !== 'true') {
-                await triggerSyntheticClick(hocVuBtn);
-                await sleep(400);
-            }
-
-            // Container: div[role="tabpanel"] chứa "Thông tin học vụ"
-            const panels = Array.from(document.querySelectorAll('div[role="tabpanel"]'));
-            const tabpanel = panels.find(p => (p.innerText || '').includes("Thông tin học vụ")) || document.querySelector('div[role="tabpanel"]');
-
-            if (tabpanel) {
-                const text = tabpanel.innerText || '';
-                const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
-
-                const getValueAfterLabel = (label) => {
-                    const target = label.toUpperCase();
-                    const idx = lines.findIndex(l => l.toUpperCase() === target || l.toUpperCase().startsWith(target + ":") || l.toUpperCase() === target + ":");
-                    if (idx !== -1) {
-                        if (lines[idx].includes(':')) {
-                            const parts = lines[idx].split(':');
-                            if (parts.length > 1 && parts[1].trim()) return parts[1].trim();
-                        }
-                        if (idx + 1 < lines.length) {
-                            return lines[idx + 1];
-                        }
-                    }
-                    return "";
-                };
-
-                const getDomLabelValue = (label) => {
-                    const target = label.toUpperCase();
-                    const allEls = Array.from(tabpanel.querySelectorAll('*'));
-                    for (const el of allEls) {
-                        if (el.children.length === 0 && el.innerText.trim().toUpperCase() === target) {
-                            const next = el.nextElementSibling || (el.parentElement ? el.parentElement.children[1] : null);
-                            if (next && next.innerText.trim()) return next.innerText.trim();
-                        }
-                    }
-                    return "";
-                };
-
-                const getField = (label) => getValueAfterLabel(label) || getDomLabelValue(label);
-
-                const rawId = getField("MÃ SINH VIÊN");
-                if (/^\d{8}$/.test(rawId)) {
-                    studentId = rawId;
-                } else {
-                    const fallbackId = lines.find(l => /^\d{8}$/.test(l));
-                    if (fallbackId) studentId = fallbackId;
+        if (drlData?.training_point_history && Array.isArray(drlData.training_point_history)) {
+            for (const item of drlData.training_point_history) {
+                if (item.specialized_class_name && item.specialized_class_name.trim()) {
+                    studentClass = item.specialized_class_name.trim();
+                    break;
                 }
-
-                faculty = getField("KHOA");
-                specialization = getField("CHUYÊN NGÀNH");
-                curriculumCode = getField("CTĐT CỤ THỂ");
-                studentClass = getField("LỚP SINH HOẠT");
-
-                if (studentId) break;
             }
-
-            await sleep(1000);
         }
 
-        if (!studentId) {
-            console.warn("[Diark Harvester] Cannot find student ID on /sinh-vien/ho-so after waiting.");
-            return;
-        }
-
-        const profileData = {
-            student_id: studentId,
-            full_name: fullName || document.querySelector("header button span.text-sm")?.innerText.trim() || "",
-            faculty: faculty || "CNTT",
+        let profile = {
+            student_id: identity.student_id || "",
+            full_name: identity.full_name || "",
+            faculty: "",
             major_code: "",
-            specialization: specialization || "Khoa học Máy tính",
-            student_class: studentClass || "",
-            curriculum_code: curriculumCode || ""
+            specialization: "",
+            student_class: studentClass,
+            curriculum_code: ""
         };
 
-        console.log("[Diark Harvester] Scraped profile successfully:", profileData);
-        let buffer = JSON.parse(sessionStorage.getItem(HARVEST_STORAGE_KEY) || "{}");
-        buffer.profile = profileData;
-        sessionStorage.setItem(HARVEST_STORAGE_KEY, JSON.stringify(buffer));
+        // 4. Enrich Profile from /sinh-vien/ho-so in background (quick non-blocking)
+        try {
+            profile = await tryEnrichProfileFromHoSo(profile);
+        } catch (_) {}
 
-        // Điều hướng tuần tự sang Route 2: /sinh-vien/diem-ren-luyen
-        window.location.href = "https://portal.uit.edu.vn/sinh-vien/diem-ren-luyen";
-    }
-
-    // --- BƯỚC 2: ROUTE /sinh-vien/diem-ren-luyen (BẢNG DRL) ---
-    function normalizeDrlSemester(rawText) {
-        if (!rawText) return "";
-        const clean = rawText.replace(/\s+/g, ' ').trim();
-        const m = clean.match(/(?:Học\s*kỳ|HK)\s*(\d+|hè|he).*?(\d{4})\s*[-–_]\s*(\d{4})/i);
-        if (m) {
-            let term = m[1].toLowerCase();
-            if (term === 'hè' || term === 'he') term = '3';
-            return `HK${term}_${m[2]}_${m[3]}`;
-        }
-        return clean;
-    }
-
-    async function scrapeDrl() {
-        console.log("[Diark Harvester] Scraping DRL at /sinh-vien/diem-ren-luyen...");
-        await waitForElement("table tbody tr");
-
-        const rows = Array.from(document.querySelectorAll('table tbody tr'));
-        const drlRecords = [];
-        let sumScore = 0;
-        let validCount = 0;
-
-        rows.forEach(r => {
-            const cells = r.querySelectorAll('td');
-            // DOM Contract: td[1] = semester, td[3] = score, td[4] = grade_text
-            if (cells.length >= 4) {
-                const rawSem = cells[1]?.innerText?.trim() || "";
-                const rawScore = cells[3]?.innerText?.trim() || "";
-                const gradeText = cells[4]?.innerText?.trim() || "";
-
-                const semester = normalizeDrlSemester(rawSem);
-                const score = parseInt(rawScore, 10);
-
-                if (semester && !isNaN(score)) {
-                    drlRecords.push({
-                        semester: semester,
-                        score: score,
-                        grade_text: gradeText
-                    });
-                    sumScore += score;
-                    validCount++;
-                }
-            }
-        });
-
-        // Điểm TB toàn khóa nếu có block hero hoặc tính trung bình các kỳ
-        let avgDrl = validCount > 0 ? parseFloat((sumScore / validCount).toFixed(1)) : 0.0;
-        const heroBlocks = Array.from(document.querySelectorAll('div, p, span'));
-        for (let b of heroBlocks) {
-            if ((b.innerText || '').includes("Trung bình toàn khóa") || (b.innerText || '').includes("Điểm TB")) {
-                const numMatch = (b.innerText || '').match(/(\d+\.?\d*)/);
-                if (numMatch) {
-                    avgDrl = parseFloat(numMatch[1]);
-                    break;
-                }
-            }
-        }
-
-        console.log(`[Diark Harvester] Scraped DRL successfully: ${drlRecords.length} records, avg: ${avgDrl}`);
-        let buffer = JSON.parse(sessionStorage.getItem(HARVEST_STORAGE_KEY) || "{}");
-        buffer.avg_drl = avgDrl;
-        buffer.drl_records = drlRecords;
-        sessionStorage.setItem(HARVEST_STORAGE_KEY, JSON.stringify(buffer));
-
-        // Điều hướng tuần tự sang Route 3: /sinh-vien/bang-diem
-        window.location.href = "https://portal.uit.edu.vn/sinh-vien/bang-diem";
-    }
-
-    // --- BƯỚC 3: ROUTE /sinh-vien/bang-diem (RADIX TABS: SLOT 0 & SLOT 1) ---
-    async function scrapeTranscript() {
-        console.log("[Diark Harvester] Scraping Transcript & Semesters at /sinh-vien/bang-diem...");
-        await waitForElement('button[role="tab"]');
-
-        const tabs = Array.from(document.querySelectorAll('button[role="tab"]'));
-        const tabSummary = tabs[0] || tabs.find(t => (t.innerText || '').includes('Tổng kết') || (t.innerText || '').includes('theo kỳ'));
-        const tabDetail = tabs[1] || tabs.find(t => (t.innerText || '').includes('Chi tiết') || (t.innerText || '').includes('môn học'));
-
-        // Slot 0: 'Tổng kết theo kỳ' (tabs[0])
-        if (tabSummary) {
-            await triggerSyntheticClick(tabSummary);
-            await waitForElement('div[role="tabpanel"] table tbody tr');
-        }
-
-        const semesterSummaries = [];
-        const summaryRows = Array.from(document.querySelectorAll('div[role="tabpanel"] table tbody tr'));
-        summaryRows.forEach(r => {
-            const cells = r.querySelectorAll('td');
-            // DOM Contract: td[0] = semester, td[1] = gpa_semester, td[2] = cpa_cumulative, td[3] = ranking, td[5] = credits_semester, td[6] = credits_cumulative
-            if (cells.length >= 7) {
-                const semester = cells[0]?.innerText?.trim() || "";
-                const gpaSemester = parseFloat(cells[1]?.innerText?.trim().replace(',', '.') || "0");
-                const cpaCumulative = parseFloat(cells[2]?.innerText?.trim().replace(',', '.') || "0");
-                const ranking = cells[3]?.innerText?.trim() || "";
-                const creditsSemester = parseInt(cells[5]?.innerText?.trim() || "0", 10);
-                const creditsCumulative = parseInt(cells[6]?.innerText?.trim() || "0", 10);
-
-                if (semester) {
-                    semesterSummaries.push({
-                        semester: semester,
-                        gpa_semester: isNaN(gpaSemester) ? null : gpaSemester,
-                        cpa_cumulative: isNaN(cpaCumulative) ? null : cpaCumulative,
-                        ranking: ranking,
-                        credits_semester: isNaN(creditsSemester) ? null : creditsSemester,
-                        credits_cumulative: isNaN(creditsCumulative) ? null : creditsCumulative
-                    });
-                }
-            }
-        });
-
-        // Slot 1: 'Chi tiết môn học' (tabs[1])
-        const freshTabs = Array.from(document.querySelectorAll('button[role="tab"]'));
-        const activeTabDetail = freshTabs[1] || freshTabs.find(t => (t.innerText || '').includes('Chi tiết') || (t.innerText || '').includes('môn học'));
-        if (activeTabDetail) {
-            await triggerSyntheticClick(activeTabDetail);
-            await waitForElement('div[role="tabpanel"] table');
-            await sleep(400);
-        }
-
-        // Hero Metrics: Text chứa "TC tích lũy <TC> GPA toàn khóa <GPA>"
-        let totalEarnedCredits = 0.0;
-        let cumulativeGpa10 = 0.0;
-
-        const panel = document.querySelector('div[role="tabpanel"]');
-        const panelText = panel ? panel.innerText : document.body.innerText;
-
-        const tcMatch = panelText.match(/TC\s*tích\s*lũy\s*[:\s]*(\d+)/i);
-        if (tcMatch) totalEarnedCredits = parseFloat(tcMatch[1]);
-
-        const gpaMatch = panelText.match(/GPA\s*(?:toàn\s*khóa|tích\s*lũy)\s*[:\s]*([\d\.,]+)/i);
-        if (gpaMatch) cumulativeGpa10 = parseFloat(gpaMatch[1].replace(',', '.'));
-
-        const parseScore = (text) => {
-            if (!text) return null;
-            const clean = text.trim();
-            if (clean === '—' || clean === '-' || clean === '' || clean === 'null') return null;
-            const val = parseFloat(clean.replace(',', '.'));
-            return isNaN(val) ? null : val;
+        // 5. Construct Unified Payload
+        const unifiedPayload = {
+            ...transcriptData,
+            drl: drlData,
+            profile: profile
         };
 
-        const courses = [];
-        const courseTables = Array.from(document.querySelectorAll('div[role="tabpanel"] table'));
+        console.log("[Diark OS] Unified payload assembled:", {
+            student_id: profile.student_id,
+            student_name: profile.full_name,
+            class: profile.student_class,
+            semesters: transcriptData.bySemester?.semester_groups?.length || 0,
+            has_drl: Boolean(drlData),
+            total_program_credit: transcriptData.byCtdt?.statistics?.total_program_credit
+        });
 
-        courseTables.forEach(tbl => {
-            let semesterName = "Unknown";
-            let prev = tbl.previousElementSibling;
-            while (prev) {
-                if (/Học kỳ|Năm học|HK/i.test(prev.innerText || '')) {
-                    semesterName = prev.innerText.trim();
-                    break;
-                }
-                prev = prev.previousElementSibling;
-            }
-            if (semesterName === "Unknown" && tbl.parentElement) {
-                const h = tbl.parentElement.querySelector('h2, h3, h4, div.font-semibold, div.font-bold');
-                if (h && /Học kỳ|Năm học|HK/i.test(h.innerText || '')) {
-                    semesterName = h.innerText.trim();
-                }
-            }
-
-            const rows = Array.from(tbl.querySelectorAll('tbody tr'));
-            rows.forEach(r => {
-                const cells = r.querySelectorAll('td');
-                // DOM Contract: td[0]=code, td[1]=name, td[2]=credits, td[3]=qt, td[4]=th, td[5]=gk, td[6]=ck, td[7]=score_10
-                if (cells.length >= 8) {
-                    const courseCode = cells[0]?.innerText?.trim() || "";
-                    const courseName = cells[1]?.innerText?.trim() || "";
-                    const credits = parseInt(cells[2]?.innerText?.trim() || "0", 10);
-                    const scoreQt = parseScore(cells[3]?.innerText);
-                    const scoreTh = parseScore(cells[4]?.innerText);
-                    const scoreGk = parseScore(cells[5]?.innerText);
-                    const scoreCk = parseScore(cells[6]?.innerText);
-                    const score10 = parseScore(cells[7]?.innerText) || 0.0;
-                    const isPassed = score10 >= 5.0 ? 1 : 0;
-
-                    if (courseCode && courseName) {
-                        courses.push({
-                            course_code: courseCode,
-                            course_name: courseName,
-                            semester: semesterName,
-                            credits: isNaN(credits) ? 0 : credits,
-                            score_qt: scoreQt,
-                            score_th: scoreTh,
-                            score_gk: scoreGk,
-                            score_ck: scoreCk,
-                            score_10: score10,
-                            is_passed: isPassed
-                        });
-                    }
-                }
+        // 6. Push to Diark OS Local Sync Server (Port 3030)
+        showPill("<span>💾 Đang nạp dữ liệu vào Diark OS (SQLite)...</span>", "info");
+        try {
+            const syncResponse = await fetch(LOCAL_SYNC_ENDPOINT, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(unifiedPayload)
             });
-        });
 
-        console.log(`[Diark Harvester] Scraped transcript successfully: ${courses.length} courses, ${semesterSummaries.length} semester summaries`);
+            if (syncResponse.ok) {
+                const json = await syncResponse.json();
+                console.log("[Diark OS] Sync Server Response:", json);
+                showPill("<span>✅ Đồng bộ thành công 100%! Cửa sổ sẽ đóng lại...</span>", "success");
 
-        let buffer = JSON.parse(sessionStorage.getItem(HARVEST_STORAGE_KEY) || "{}");
-        buffer.summary = {
-            total_credits: totalEarnedCredits,
-            cgpa_10: cumulativeGpa10,
-            semester_summaries: semesterSummaries
-        };
-        buffer.courses = courses;
-
-        await dispatchHarvestedData(buffer);
-    }
-
-    // --- BƯỚC 4: DISPATCH VIA TOP-LEVEL NAVIGATION QUEUE (TUYỆT ĐỐI KHÔNG DÙNG IFRAME) ---
-    async function dispatchHarvestedData(fullPayload) {
-        console.log("[Diark Harvester] Dispatching payload via Top-Level Navigation Queue (no iframe)...");
-        sessionStorage.removeItem(HARVEST_STORAGE_KEY);
-
-        const courses = fullPayload.courses || [];
-        const totalBatches = Math.ceil(courses.length / BATCH_SIZE) || 1;
-
-        const queue = [];
-
-        // 1. Meta batch
-        const metaPayload = {
-            profile: fullPayload.profile,
-            summary: fullPayload.summary,
-            avg_drl: fullPayload.avg_drl,
-            drl_records: fullPayload.drl_records,
-            total_course_batches: totalBatches
-        };
-        queue.push(`diark-sso://partial#target=portal_meta&data=${encodeURIComponent(JSON.stringify(metaPayload))}`);
-
-        // 2. Chunks khóa học (cách nhau an toàn ~100ms)
-        for (let i = 0; i < totalBatches; i++) {
-            const chunk = courses.slice(i * BATCH_SIZE, (i + 1) * BATCH_SIZE);
-            queue.push(`diark-sso://partial#target=portal_courses&batch_idx=${i}&data=${encodeURIComponent(JSON.stringify(chunk))}`);
-        }
-
-        // 3. Commit callback cuối cùng
-        queue.push(`diark-sso://callback#target=portal&action=commit&total_courses=${courses.length}`);
-
-        for (let i = 0; i < queue.length; i++) {
-            console.log(`[Diark Harvester] Emitting navigation step ${i + 1}/${queue.length}`);
-            window.location.href = queue[i];
-            await sleep(100);
+                // Dispatch callback scheme to close Webview window
+                setTimeout(() => {
+                    window.location.href = "diark-sso://callback#target=portal&status=success";
+                }, 1000);
+                return true;
+            } else {
+                throw new Error("Sync server returned status " + syncResponse.status);
+            }
+        } catch (err) {
+            console.warn("[Diark OS] Local server sync failed, falling back to scheme navigation:", err);
+            // Fallback: Dispatch via diark-sso scheme
+            showPill("<span>✅ Đã chuyển dữ liệu về ứng dụng...</span>", "success");
+            const fallbackUri = "diark-sso://callback#target=academic&data=" + encodeURIComponent(JSON.stringify(unifiedPayload));
+            window.location.href = fallbackUri;
+            return true;
         }
     }
 
-    // --- KHỞI TẠO VÀ ĐIỀU PHỐI HARVESTER ---
-    const startHarvester = async () => {
-        const ready = await waitForAuthGatekeeper();
-        if (!ready) {
-            console.warn("[Diark Harvester] Auth Gatekeeper not ready or timed out.");
+    // --- LIFECYCLE POLLER ---
+    let pollInterval = null;
+    function startPoller() {
+        const hostname = (window.location.hostname || "").toLowerCase();
+        // Skip Microsoft login pages
+        if (hostname.includes("microsoft") || hostname.includes("live.com") || hostname.includes("msft")) {
             return;
         }
 
-        const path = (window.location.pathname || "").toLowerCase();
-
-        if (path.includes('/sinh-vien/ho-so')) {
-            await scrapeProfile();
-        } else if (path.includes('/sinh-vien/diem-ren-luyen')) {
-            await scrapeDrl();
-        } else if (path.includes('/sinh-vien/bang-diem')) {
-            await scrapeTranscript();
-        } else {
-            console.log("[Diark Harvester] At non-target route, navigating to /sinh-vien/ho-so...");
-            window.location.href = "https://portal.uit.edu.vn/sinh-vien/ho-so";
+        if (!hostname.includes("portal.uit.edu.vn")) {
+            return;
         }
-    };
 
-    if (document.readyState === 'loading') {
-        window.addEventListener('DOMContentLoaded', startHarvester);
+        let attempts = 0;
+        const maxAttempts = 120; // 120 x 1s = 2 minutes
+
+        pollInterval = setInterval(async () => {
+            attempts++;
+            if (attempts > maxAttempts) {
+                clearInterval(pollInterval);
+                showPill("<span>⚠️ Quá thời gian chờ đăng nhập UIT.</span>", "error");
+                return;
+            }
+
+            const success = await runAutoHarvester();
+            if (success) {
+                clearInterval(pollInterval);
+            }
+        }, 1000);
+    }
+
+    if (document.readyState === "loading") {
+        window.addEventListener("DOMContentLoaded", startPoller);
     } else {
-        startHarvester();
+        startPoller();
     }
 })();
