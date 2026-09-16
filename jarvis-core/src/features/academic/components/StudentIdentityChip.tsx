@@ -73,11 +73,6 @@ export function StudentIdentityChip() {
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
               Đang học - Học kỳ 2
             </span>
-            {isDemoMode && (
-              <span className="text-[10px] font-mono text-amber-400 bg-amber-950/60 border border-amber-800/40 px-1.5 py-0.2 rounded">
-                DEMO MODE
-              </span>
-            )}
           </div>
 
           {/* Tầng 2: Metadata thu gọn: MSSV • Lớp • Hệ */}
@@ -97,20 +92,24 @@ export function StudentIdentityChip() {
         </div>
       </div>
 
-      {/* Nút bật/tắt Demo Mode bảo mật Presentation-only */}
-      <div className="flex items-center gap-2 self-end sm:self-center">
+      {/* Nút bật/tắt Privacy Mode (Chỉ đổi icon con mắt) */}
+      <div className="flex items-center self-end sm:self-center">
         <button
           type="button"
           onClick={toggleDemoMode}
-          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-colors cursor-pointer ${
+          className={`p-2 rounded-lg border transition-colors cursor-pointer ${
             isDemoMode
-              ? "bg-amber-950/40 text-amber-300 border-amber-800/50 hover:bg-amber-950/60"
-              : "bg-zinc-800/60 text-zinc-400 border-zinc-700/60 hover:bg-zinc-800 hover:text-zinc-200"
+              ? "bg-zinc-800 text-zinc-100 border-zinc-700 hover:bg-zinc-700"
+              : "bg-zinc-900/80 text-zinc-400 border-zinc-800 hover:bg-zinc-800 hover:text-zinc-200"
           }`}
-          title={isDemoMode ? "Tắt Demo Mode (Hiện thông tin thật)" : "Bật Demo Mode (Che MSSV & Tên khi chia sẻ màn hình)"}
+          title={isDemoMode ? "Chế độ riêng tư: Đang bật (Click để hiện thông tin)" : "Chế độ riêng tư: Đang tắt (Click để ẩn thông tin)"}
+          aria-label="Toggle Privacy Mode"
         >
-          {isDemoMode ? <EyeOff className="w-3.5 h-3.5 text-amber-400" /> : <Eye className="w-3.5 h-3.5" />}
-          <span className="text-[11px]">{isDemoMode ? "Bảo mật Demo ON" : "Demo Mode"}</span>
+          {isDemoMode ? (
+            <EyeOff className="w-4 h-4 text-zinc-200" />
+          ) : (
+            <Eye className="w-4 h-4 text-zinc-400" />
+          )}
         </button>
       </div>
     </div>

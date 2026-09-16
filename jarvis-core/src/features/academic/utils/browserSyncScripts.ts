@@ -179,119 +179,202 @@ export const WECODE_BROWSER_SYNC_SCRIPT = `(async () => {
 
     try {
         showBanner("⏳ Đang kiểm tra đăng nhập Wecode...", true);
-        const profileLink = document.querySelector('#profile_link, a[href*="/users/"]');
-        if (!profileLink) {
-            throw new Error("Không tìm thấy thông tin đăng nhập! Hãy chắc chắn bạn đã đăng nhập Wecode.");
+
+        // 1. Trích xuất Wecode User ID số (ví dụ: 2429, KHÔNG lấy MSSV như 25520458)
+        let wecodeUserId = null;
+        const profileUserLink = document.querySelector('a[href*="/users/"]');
+        if (profileUserLink) {
+            const m = (profileUserLink.getAttribute("href") || "").match(/\\/users\\/(\\d+)/);
+            if (m && m[1]) wecodeUserId = parseInt(m[1], 10);
+        }
+        if (!wecodeUserId) {
+            const anySubLink = document.querySelector('a[href*="/user/"]');
+            if (anySubLink) {
+                const m = (anySubLink.getAttribute("href") || "").match(/\\/user\\/(\\d+)/);
+                if (m && m[1]) wecodeUserId = parseInt(m[1], 10);
+            }
+        }
+        if (!wecodeUserId) {
+            const profileContainer = document.querySelector("#profile_link")?.closest("li");
+            const dropdownLink = profileContainer?.querySelector('a[href*="/users/"]');
+            if (dropdownLink) {
+                const m = (dropdownLink.getAttribute("href") || "").match(/\\/users\\/(\\d+)/);
+                if (m && m[1]) wecodeUserId = parseInt(m[1], 10);
+            }
         }
 
-        const href = profileLink.getAttribute("href") || "";
-        const userMatch = href.match(/\\/users\\/(\\d+)/);
-        if (!userMatch) {
-            throw new Error("Không trích xuất được User ID dạng số từ profile link: " + href);
+        if (!wecodeUserId) {
+            throw new Error("Không trích xuất được User ID Wecode! Hãy chắc chắn bạn đã đăng nhập và đang ở trang Wecode.");
         }
-        const wecodeUserId = parseInt(userMatch[1], 10);
 
+        // 2. Trích xuất Base Prefix (ví dụ: /wecode25/it00x)
         let basePrefix = "";
-        const prefixMatch = href.match(/^(\\/.*)\\/users\\/\\d+/);
-        if (prefixMatch && prefixMatch[1]) {
-            basePrefix = prefixMatch[1];
-        } else {
+        if (window.wcj && window.wcj.site_url) {
+            try {
+                basePrefix = new URL(window.wcj.site_url).pathname.replace(/\\/+$/, "");
+            } catch (_) {}
+        }
+        if (!basePrefix && window.site_url) {
+            try {
+                basePrefix = new URL(window.site_url).pathname.replace(/\\/+$/, "");
+            } catch (_) {}
+        }
+        if (!basePrefix && profileUserLink) {
+            const href = profileUserLink.getAttribute("href") || "";
+            const m = href.match(/^(\\/.*)\\/users\\/\\d+/);
+            if (m && m[1]) basePrefix = m[1];
+        }
+        if (!basePrefix) {
             const p = window.location.pathname;
             const pm = p.match(/^(\\/[^\\/]+\\/[^\\/]+)/);
             if (pm) basePrefix = pm[1];
         }
 
         showBanner("⏳ Đang lấy danh sách bài tập...", true);
-        const assignResp = await fetch(\`\${basePrefix}/assignments\`, { credentials: "include" });
-        const assignHtml = await assignResp.text();
-        const parser = new DOMParser();
-        const assignDoc = parser.parseFromString(assignHtml, "text/html");
 
-        const assignmentIds = new Set();
-        const assignRows = Array.from(assignDoc.querySelectorAll("#DataTables_Table_0 tbody tr, table tbody tr"));
+        // Map lưu assignment_id -> { id, name, subUrl }
+        const assignmentMap = new Map();
 
-        assignRows.forEach((row) => {
-            if (row.classList.contains("dataTables_empty") || row.querySelectorAll("td").length <= 1) return;
-            const dataId = row.getAttribute("data-id");
-            if (dataId && !isNaN(parseInt(dataId, 10))) {
-                assignmentIds.add(parseInt(dataId, 10));
-                return;
-            }
-            const aLink = row.querySelector('a[href*="/assignment/"], a[href*="/assignments/"]');
-            if (aLink) {
-                const m = aLink.getAttribute("href")?.match(/\\/assignments?\\/(\\d+)/);
-                if (m) {
-                    assignmentIds.add(parseInt(m[1], 10));
-                    return;
+        function parseAssignmentRows(doc) {
+            const rows = Array.from(doc.querySelectorAll("table tbody tr, tr[data-id]"));
+            rows.forEach((row) => {
+                if (row.classList.contains("dataTables_empty") || row.querySelectorAll("td").length <= 1) return;
+                let assignId = parseInt(row.getAttribute("data-id") || "", 10);
+                if (isNaN(assignId)) {
+                    const aLink = row.querySelector('a[href*="/assignment/"], a[href*="/assignments/"]');
+                    if (aLink) {
+                        const m = aLink.getAttribute("href")?.match(/\\/assignments?\\/(\\d+)/);
+                        if (m) assignId = parseInt(m[1], 10);
+                    }
                 }
-            }
-            const firstTd = row.querySelector("td");
-            if (firstTd) {
-                const idVal = parseInt(firstTd.innerText.trim(), 10);
-                if (!isNaN(idVal) && idVal > 0) assignmentIds.add(idVal);
-            }
-        });
+                if (isNaN(assignId)) {
+                    const firstTd = row.querySelector("td");
+                    if (firstTd) {
+                        const idVal = parseInt(firstTd.innerText.trim(), 10);
+                        if (!isNaN(idVal) && idVal > 0) assignId = idVal;
+                    }
+                }
+                if (!assignId || isNaN(assignId)) return;
 
-        const sortedAssignmentIds = Array.from(assignmentIds).sort((a, b) => b - a);
-        if (sortedAssignmentIds.length === 0) {
+                // Tên bài tập ở cột 3 (thường có strong hoặc thẻ a)
+                let assignName = "";
+                const strongEl = row.querySelector("td:nth-child(3) strong");
+                if (strongEl) {
+                    assignName = strongEl.innerText.trim();
+                } else {
+                    const nameLink = row.querySelector('td:nth-child(3) a[href*="/assignment/"]');
+                    if (nameLink) {
+                        const fullTxt = nameLink.innerText.trim();
+                        assignName = fullTxt.split('\\n')[0].trim();
+                    }
+                }
+
+                // Link submissions trực tiếp ở cột 4 nếu có
+                let subUrl = "";
+                const subLinkEl = row.querySelector('td:nth-child(4) a[href*="/submissions/"]');
+                if (subLinkEl) {
+                    subUrl = subLinkEl.getAttribute("href") || "";
+                }
+
+                assignmentMap.set(assignId, {
+                    id: assignId,
+                    name: assignName || \`Assignment #\${assignId}\`,
+                    subUrl: subUrl
+                });
+            });
+        }
+
+        // Thử parse từ DOM hiện tại nếu đang ở /home hoặc /assignments
+        parseAssignmentRows(document);
+
+        // Nếu chưa có hoặc ít bài tập, fetch thêm từ /assignments
+        if (assignmentMap.size === 0) {
+            const assignResp = await fetch(\`\${basePrefix}/assignments\`, { credentials: "include" });
+            const assignHtml = await assignResp.text();
+            const parser = new DOMParser();
+            const assignDoc = parser.parseFromString(assignHtml, "text/html");
+            parseAssignmentRows(assignDoc);
+        }
+
+        const sortedAssignments = Array.from(assignmentMap.values()).sort((a, b) => b.id - a.id);
+        if (sortedAssignments.length === 0) {
             throw new Error("Không tìm thấy bài tập nào trong danh mục assignments.");
         }
 
+        console.log(\`[Diark OS] Tìm thấy \${sortedAssignments.length} assignments:\`, sortedAssignments);
+
         const allSubmissions = [];
         let completed = 0;
+        const parser = new DOMParser();
 
-        for (const assignId of sortedAssignmentIds) {
+        for (const assign of sortedAssignments) {
             completed++;
-            showBanner(\`⏳ Đang lấy bài nộp \${completed}/\${sortedAssignmentIds.length} (Assignment #\${assignId})...\`, true);
+            showBanner(\`⏳ Đang lấy bài nộp \${completed}/\${sortedAssignments.length}: \${assign.name}...\`, true);
 
-            const subUrl = \`\${basePrefix}/submissions/assignment/\${assignId}/user/\${wecodeUserId}/problem/all/view/all\`;
+            const subUrl = assign.subUrl && assign.subUrl.startsWith("http")
+                ? assign.subUrl
+                : assign.subUrl
+                ? \`\${window.location.origin}\${assign.subUrl}\`
+                : \`\${basePrefix}/submissions/assignment/\${assign.id}/user/\${wecodeUserId}/problem/all/view/all\`;
+
             try {
                 const subResp = await fetch(subUrl, { credentials: "include" });
                 const subHtml = await subResp.text();
                 const subDoc = parser.parseFromString(subHtml, "text/html");
-                const rows = Array.from(subDoc.querySelectorAll("table tbody tr"));
+                const rows = Array.from(subDoc.querySelectorAll("table tbody tr, tr[data-id]"));
 
                 rows.forEach((tr) => {
                     if (tr.classList.contains("dataTables_empty") || tr.querySelectorAll("td").length < 5) return;
                     const tds = tr.querySelectorAll("td");
 
                     let subId = parseInt(tr.getAttribute("data-id") || "", 10);
+                    if (isNaN(subId) && tds[1]) subId = parseInt(tds[1].innerText.trim(), 10);
                     if (isNaN(subId) && tds[0]) subId = parseInt(tds[0].innerText.trim(), 10);
                     if (isNaN(subId)) return;
 
                     let aId = parseInt(tr.getAttribute("data-a") || "", 10);
-                    if (isNaN(aId)) aId = assignId;
+                    if (isNaN(aId)) aId = assign.id;
 
                     let pId = parseInt(tr.getAttribute("data-p") || "0", 10);
                     let pName = "";
-                    const pLink = tds[2]?.querySelector("a") || tr.querySelector('a[href*="/problem/"]');
+                    const pLink = tds[2]?.querySelector("a") || tr.querySelector('a[href*="/assignment/"], a[href*="/problem/"]');
                     if (pLink) {
                         pName = pLink.innerText.trim();
                         if (!pId) {
-                            const pMatch = pLink.getAttribute("href")?.match(/\\/problem\\/(\\d+)/);
+                            const pMatch = pLink.getAttribute("href")?.match(/\\/(?:problem|assignment\\/\\d+)\\/(\\d+)/);
                             if (pMatch) pId = parseInt(pMatch[1], 10);
                         }
                     } else if (tds[2]) {
                         pName = tds[2].innerText.trim();
                     }
 
-                    const submitTimeStr = tds[3]?.innerText?.trim() || "";
+                    // Trích xuất chính xác timestamp, loại bỏ các dòng ghi chú trễ ("1mo 1w late")
+                    const rawTime = tds[3]?.querySelector(".small")?.innerText?.trim() || tds[3]?.innerText?.trim() || "";
+                    const timeMatch = rawTime.match(/[A-Za-z]{3},\\s+\\d{1,2}\\s+[A-Za-z]{3}\\s+\\d{4}\\s+\\d{2}:\\d{2}:\\d{2}/);
+                    const submitTimeStr = timeMatch ? timeMatch[0] : rawTime.split('\\n')[0].trim();
+
                     const verdictEl = tr.querySelector(".js-verdict, [class*='verdict']") || tds[4];
                     const verdict = verdictEl?.innerText?.trim() || "";
-                    const scoreEl = tr.querySelector(".js-score span, .js-score") || tds[5];
-                    const score = parseInt(scoreEl?.innerText?.trim() || "0", 10);
-                    const timeEl = tr.querySelector(".js-time") || tds[6];
+
+                    const timeEl = tr.querySelector(".js-time") || tds[5];
                     const executionTime = parseFloat(timeEl?.innerText?.replace("s", "")?.trim() || "0") || 0.0;
-                    const memEl = tr.querySelector(".js-mem") || tds[7];
+
+                    const memEl = tr.querySelector(".js-mem") || tds[6];
                     const memoryKib = parseInt(memEl?.innerText?.replace(/[^\\d]/g, "")?.trim() || "0", 10) || 0;
+
+                    const scoreEl = tr.querySelector(".js-score span, .js-score, .status span") || tds[7];
+                    const score = parseInt(scoreEl?.innerText?.trim() || "0", 10);
+
                     const langEl = tr.querySelector('div[data-type="code"]') || tds[8];
                     const language = langEl?.innerText?.trim() || "C++";
+
                     const isFinal = tr.querySelector(".set_final")?.classList.contains("bi-check-circle") ||
                                     tr.querySelector(".bi-check-circle") !== null;
 
                     allSubmissions.push({
                         submission_id: subId,
                         assignment_id: aId,
+                        assignment_name: assign.name,
                         problem_id: pId,
                         problem_name: pName || \`Problem \${pId}\`,
                         submit_time_str: submitTimeStr,
@@ -305,7 +388,7 @@ export const WECODE_BROWSER_SYNC_SCRIPT = `(async () => {
                 });
                 await sleep(150);
             } catch (err) {
-                console.warn(\`Lỗi fetch Assignment #\${assignId}:\`, err);
+                console.warn(\`Lỗi fetch Assignment #\${assign.id}:\`, err);
             }
         }
 
@@ -322,7 +405,7 @@ export const WECODE_BROWSER_SYNC_SCRIPT = `(async () => {
         });
 
         if (resp.ok) {
-            showBanner(\`✅ <b>ĐỒNG BỘ WECODE THÀNH CÔNG!</b><br>Đã nạp \${allSubmissions.length} submissions vào Diark OS.\`, true);
+            showBanner(\`✅ <b>ĐỒNG BỘ WECODE THÀNH CÔNG!</b><br>Đã nạp \${allSubmissions.length} submissions từ \${sortedAssignments.length} assignments vào Diark OS.\`, true);
         } else {
             throw new Error(\`Server status \${resp.status}\`);
         }

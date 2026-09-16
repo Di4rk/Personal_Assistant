@@ -1,6 +1,7 @@
 export interface WecodeSubmission {
   submission_id: number;
   assignment_id: number;
+  assignment_name?: string;
   problem_id: number;
   problem_name: string;
   submit_time_str: string;
@@ -11,3 +12,4 @@ export interface WecodeSubmission {
   language: string;
   is_final: boolean;
 }
+

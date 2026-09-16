@@ -7,6 +7,8 @@ use crate::modules::wecode::time_parser::parse_wecode_timestamp;
 pub struct WecodeSubmissionDto {
     pub submission_id: i64,
     pub assignment_id: i64,
+    #[serde(default)]
+    pub assignment_name: Option<String>,
     pub problem_id: i64,
     pub problem_name: String,
     pub submit_time_str: String,
@@ -17,6 +19,7 @@ pub struct WecodeSubmissionDto {
     pub language: String,
     pub is_final: bool,
 }
+
 
 pub fn ingest_wecode_submissions_internal(
     app: &AppHandle,
@@ -39,10 +42,17 @@ pub fn ingest_wecode_submissions_internal(
         };
 
         // Đảm bảo assignment tồn tại trong wecode_assignments để thỏa mãn FK constraint
+        let assign_name = dto.assignment_name.as_deref().unwrap_or("");
+        let fallback_name = format!("Assignment {}", dto.assignment_id);
+        let final_name = if assign_name.is_empty() { &fallback_name } else { assign_name };
+
         let _ = tx.execute(
-            "INSERT OR IGNORE INTO wecode_assignments (id, name) VALUES (?1, ?2)",
-            params![dto.assignment_id, format!("Assignment {}", dto.assignment_id)],
+            "INSERT INTO wecode_assignments (id, name, created_at) VALUES (?1, ?2, strftime('%s', 'now'))
+             ON CONFLICT(id) DO UPDATE SET
+                name = CASE WHEN excluded.name != '' AND excluded.name NOT LIKE 'Assignment %' THEN excluded.name ELSE name END",
+            params![dto.assignment_id, final_name],
         );
+
 
         tx.execute(
             "INSERT INTO wecode_submissions
@@ -110,14 +120,18 @@ pub fn get_wecode_submissions(
     let conn = state.db.lock().map_err(|e| e.to_string())?;
     let query = match assignment_id {
         Some(_) => {
-            "SELECT submission_id, assignment_id, problem_id, problem_name, submit_time, \
-             verdict, score, execution_time, memory_kib, language, is_final \
-             FROM wecode_submissions WHERE assignment_id = ?1 ORDER BY submit_time DESC"
+            "SELECT s.submission_id, s.assignment_id, s.problem_id, s.problem_name, s.submit_time, \
+             s.verdict, s.score, s.execution_time, s.memory_kib, s.language, s.is_final, a.name \
+             FROM wecode_submissions s \
+             LEFT JOIN wecode_assignments a ON a.id = s.assignment_id \
+             WHERE s.assignment_id = ?1 ORDER BY s.submit_time DESC"
         }
         None => {
-            "SELECT submission_id, assignment_id, problem_id, problem_name, submit_time, \
-             verdict, score, execution_time, memory_kib, language, is_final \
-             FROM wecode_submissions ORDER BY submit_time DESC LIMIT 200"
+            "SELECT s.submission_id, s.assignment_id, s.problem_id, s.problem_name, s.submit_time, \
+             s.verdict, s.score, s.execution_time, s.memory_kib, s.language, s.is_final, a.name \
+             FROM wecode_submissions s \
+             LEFT JOIN wecode_assignments a ON a.id = s.assignment_id \
+             ORDER BY s.submit_time DESC LIMIT 200"
         }
     };
 
@@ -141,10 +155,12 @@ fn map_sub_row(row: &rusqlite::Row) -> rusqlite::Result<WecodeSubmissionDto> {
     let submit_time_str = chrono::DateTime::from_timestamp(submit_time, 0)
         .map(|dt| dt.format("%a, %d %b %Y %H:%M:%S").to_string())
         .unwrap_or_else(|| "Unknown".to_string());
+    let assignment_name: Option<String> = row.get(11)?;
 
     Ok(WecodeSubmissionDto {
         submission_id: row.get(0)?,
         assignment_id: row.get(1)?,
+        assignment_name,
         problem_id: row.get(2)?,
         problem_name: row.get(3)?,
         submit_time_str,
@@ -198,6 +214,7 @@ mod tests {
         let dto_ac = WecodeSubmissionDto {
             submission_id: 1001,
             assignment_id: 12,
+            assignment_name: Some("Test Assignment".to_string()),
             problem_id: 34,
             problem_name: "Binary Search".to_string(),
             submit_time_str: "Fri, 17 Jul 2026 01:50:46".to_string(),
@@ -213,6 +230,7 @@ mod tests {
         let dto_partial = WecodeSubmissionDto {
             submission_id: 1002,
             assignment_id: 12,
+            assignment_name: Some("Test Assignment".to_string()),
             problem_id: 35,
             problem_name: "Merge Sort".to_string(),
             submit_time_str: "Fri, 17 Jul 2026 02:10:00".to_string(),

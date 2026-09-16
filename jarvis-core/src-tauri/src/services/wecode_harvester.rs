@@ -96,9 +96,15 @@ impl WecodeIngestionEngine {
             };
 
             // 2. Đảm bảo assignment tồn tại trong wecode_assignments để thỏa mãn FK constraint
+            let assign_name = dto.assignment_name.as_deref().unwrap_or("");
+            let fallback_name = format!("Assignment {}", dto.assignment_id);
+            let final_name = if assign_name.is_empty() { &fallback_name } else { assign_name };
+
             let _ = tx.execute(
-                "INSERT OR IGNORE INTO wecode_assignments (id, name, created_at) VALUES (?1, ?2, strftime('%s', 'now'))",
-                params![dto.assignment_id, format!("Assignment {}", dto.assignment_id)],
+                "INSERT INTO wecode_assignments (id, name, created_at) VALUES (?1, ?2, strftime('%s', 'now'))
+                 ON CONFLICT(id) DO UPDATE SET
+                    name = CASE WHEN excluded.name != '' AND excluded.name NOT LIKE 'Assignment %' THEN excluded.name ELSE name END",
+                params![dto.assignment_id, final_name],
             );
 
             // 3. Upsert vào wecode_submissions
@@ -175,6 +181,7 @@ mod tests {
         let sub = WecodeSubmissionDto {
             submission_id: 101,
             assignment_id: 1,
+            assignment_name: Some("Assignment 1".to_string()),
             problem_id: 2,
             problem_name: "Two Sum".to_string(),
             submit_time_str: "Fri, 17 Jul 2026 01:50:46".to_string(),
@@ -201,6 +208,7 @@ mod tests {
         let sub1 = WecodeSubmissionDto {
             submission_id: 201,
             assignment_id: 5,
+            assignment_name: Some("Assignment 5".to_string()),
             problem_id: 10,
             problem_name: "Hello World".to_string(),
             submit_time_str: "Fri, 17 Jul 2026 01:50:46".to_string(),
@@ -214,6 +222,7 @@ mod tests {
         let sub2 = WecodeSubmissionDto {
             submission_id: 202,
             assignment_id: 5,
+            assignment_name: Some("Assignment 5".to_string()),
             problem_id: 11,
             problem_name: "Sum Array".to_string(),
             submit_time_str: "Fri, 17 Jul 2026 02:10:00".to_string(),

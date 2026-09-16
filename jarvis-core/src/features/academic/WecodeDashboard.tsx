@@ -74,10 +74,28 @@ export const WecodeDashboard: React.FC = () => {
     setIsSyncModalOpen(true);
   };
 
-  // Distinct assignment IDs for filter
-  const assignmentIds = useMemo(() => {
-    const ids = Array.from(new Set(submissions.map((s) => s.assignment_id)));
-    return ids.sort((a, b) => b - a);
+  // Distinct assignments (ID & Name) for filter
+  const assignmentList = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const s of submissions) {
+      if (!map.has(s.assignment_id)) {
+        map.set(
+          s.assignment_id,
+          s.assignment_name && s.assignment_name.trim() !== ""
+            ? s.assignment_name
+            : `Assignment #${s.assignment_id}`
+        );
+      } else if (
+        s.assignment_name &&
+        s.assignment_name.trim() !== "" &&
+        !s.assignment_name.startsWith("Assignment #")
+      ) {
+        map.set(s.assignment_id, s.assignment_name);
+      }
+    }
+    return Array.from(map.entries())
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => b.id - a.id);
   }, [submissions]);
 
   // Derived statistics
@@ -241,7 +259,7 @@ export const WecodeDashboard: React.FC = () => {
         <div className="flex flex-wrap items-center gap-2 font-mono text-xs">
           <div className="flex items-center gap-1.5 text-zinc-400 mr-1">
             <Filter className="w-3.5 h-3.5 text-zinc-500" />
-            <span>Bộ lọc Assignment:</span>
+            <span>Bộ lọc Bài tập:</span>
           </div>
 
           <button
@@ -255,17 +273,18 @@ export const WecodeDashboard: React.FC = () => {
             Tất cả bài nộp
           </button>
 
-          {assignmentIds.map((id) => (
+          {assignmentList.map(({ id, name }) => (
             <button
               key={id}
               onClick={() => setSelectedAssignment(id)}
-              className={`px-3 py-1.5 rounded-lg border transition-colors ${
+              className={`px-3 py-1.5 rounded-lg border transition-colors max-w-[240px] truncate ${
                 selectedAssignment === id
                   ? "bg-emerald-950/80 border-emerald-700 text-emerald-300 font-semibold"
                   : "bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200"
               }`}
+              title={name}
             >
-              Assignment #{id}
+              {name}
             </button>
           ))}
         </div>

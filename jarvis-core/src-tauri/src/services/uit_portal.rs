@@ -355,7 +355,7 @@ mod tests {
         }];
 
         let overview = ingest_portal_transcript(&mut conn, &payload).expect("ingest success");
-        assert_eq!(overview.id, "2024_2025_HK1");
+        assert_eq!(overview.id, "2024-2025.1");
         assert_eq!(overview.academic_year, "2024-2025");
         assert_eq!(overview.semester_term, 1);
         assert_eq!(overview.total_credits, 6); // 4 + 2

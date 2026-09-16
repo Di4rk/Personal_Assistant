@@ -59,7 +59,7 @@ export const WecodeSubmissionsList: React.FC<WecodeSubmissionsListProps> = ({
                     <div className="flex flex-col">
                       <span>{sub.problem_name || `Problem #${sub.problem_id}`}</span>
                       <span className="text-[10px] text-zinc-500">
-                        Assign #{sub.assignment_id} • Prob #{sub.problem_id}
+                        {sub.assignment_name ? `${sub.assignment_name} • ` : `Assign #${sub.assignment_id} • `}Prob #{sub.problem_id}
                       </span>
                     </div>
                   </td>
