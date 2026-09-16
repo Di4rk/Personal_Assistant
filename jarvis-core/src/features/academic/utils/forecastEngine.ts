@@ -1,4 +1,4 @@
-import type { AcademicCourseRecord } from "../types";
+import type { AcademicCourseRecord, UitWorkloadEvaluation } from "../types";
 
 export interface ForecastParams {
   currentEarnedCredits: number;
@@ -37,6 +37,79 @@ export function calculateGraduationForecast(params: ForecastParams): ForecastRes
     requiredAverageGpa10: isAchievable ? Math.max(0, requiredAverageGpa10) : requiredAverageGpa10,
     isAchievable,
     termsRemaining,
+  };
+}
+
+/**
+ * Đánh giá tải trọng tín chỉ mỗi kỳ theo quy chế đào tạo thực tế của UIT:
+ * - > 30 TC: Vượt trần quy chế đào tạo Portal UIT (isInvalid = true)
+ * - < 14 TC: Dưới sàn tối thiểu xét học bổng KKHT (scholarshipEligible = false)
+ * - 14 - 20 TC: Mức tải tối ưu, lý tưởng (scholarshipEligible = true)
+ * - 21 - 25 TC: Cường độ cao (scholarshipEligible = true)
+ * - 26 - 30 TC: Kịch trần UIT cho phép (scholarshipEligible = true)
+ */
+export function evaluateUitWorkload(creditsPerTerm: number): UitWorkloadEvaluation {
+  if (creditsPerTerm > 30) {
+    return {
+      tier: "overload",
+      creditsPerTerm,
+      label: "Vượt trần 30 TC",
+      badgeColor: "text-rose-400 border-rose-500/40 bg-rose-950/50",
+      advice:
+        "Cảnh báo: Đăng ký vượt quá 30 tín chỉ trong một học kỳ chính vi phạm quy chế đào tạo UIT và sẽ bị hệ thống Portal từ chối.",
+      scholarshipEligible: false,
+      isInvalid: true,
+    };
+  }
+
+  if (creditsPerTerm < 14) {
+    return {
+      tier: "below_floor",
+      creditsPerTerm,
+      label: "Mất quyền xét HB (<14 TC)",
+      badgeColor: "text-amber-400 border-amber-500/40 bg-amber-950/50",
+      advice:
+        "Lưu ý: Đăng ký dưới 14 tín chỉ trong học kỳ chính sẽ mất tư cách tham gia xét Học bổng Khuyến khích Học tập (KKHT) theo quy chế đào tạo UIT.",
+      scholarshipEligible: false,
+      isInvalid: false,
+    };
+  }
+
+  if (creditsPerTerm <= 20) {
+    return {
+      tier: "optimal",
+      creditsPerTerm,
+      label: "Mức tải tối ưu • Bao HB",
+      badgeColor: "text-emerald-400 border-emerald-500/40 bg-emerald-950/50",
+      advice:
+        "Mức học vừa sức, đảm bảo thời gian tự học, làm lab đồ án và đủ điều kiện xét học bổng.",
+      scholarshipEligible: true,
+      isInvalid: false,
+    };
+  }
+
+  if (creditsPerTerm <= 25) {
+    return {
+      tier: "high_pace",
+      creditsPerTerm,
+      label: "Cường độ cao • Bao HB",
+      badgeColor: "text-cyan-400 border-cyan-500/40 bg-cyan-950/50",
+      advice:
+        "Đủ điều kiện học bổng nhưng áp lực thi cử, bài tập lớn dồn ứ cao.",
+      scholarshipEligible: true,
+      isInvalid: false,
+    };
+  }
+
+  return {
+    tier: "max_limit",
+    creditsPerTerm,
+    label: "Kịch trần (26-30 TC)",
+    badgeColor: "text-orange-400 border-orange-500/40 bg-orange-950/50",
+    advice:
+      "Nguy cơ quá tải, rủi ro tụt cGPA nghiêm trọng nếu rớt môn.",
+    scholarshipEligible: true,
+    isInvalid: false,
   };
 }
 

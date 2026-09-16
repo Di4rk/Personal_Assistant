@@ -258,3 +258,23 @@ export interface FullPortalIngestionRequest {
   drl_history: DrlItemPayload[];
 }
 
+// ============================================================
+//  UIT Workload & Scholarship Eligibility Types
+// ============================================================
+
+export type UitWorkloadTier =
+  | "overload"
+  | "below_floor"
+  | "optimal"
+  | "high_pace"
+  | "max_limit";
+
+export interface UitWorkloadEvaluation {
+  tier: UitWorkloadTier;
+  creditsPerTerm: number;
+  label: string;
+  badgeColor: string;
+  advice: string;
+  scholarshipEligible: boolean;
+  isInvalid: boolean;
+}
