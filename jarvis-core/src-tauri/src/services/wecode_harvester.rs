@@ -76,16 +76,73 @@ impl WecodeHarvesterRegistry {
 pub struct WecodeIngestionEngine;
 
 impl WecodeIngestionEngine {
-    pub fn commit_wecode_records(
+    pub fn commit_wecode_sync_request(
         db: Arc<Mutex<Connection>>,
-        submissions: Vec<WecodeSubmissionDto>,
-    ) -> Result<(), String> {
+        req: crate::commands::wecode::WecodeSyncRequest,
+    ) -> Result<usize, String> {
+        let (submissions, assignments, problems) = match req {
+            crate::commands::wecode::WecodeSyncRequest::Full(payload) => (
+                payload.submissions,
+                payload.assignments,
+                payload.problems,
+            ),
+            crate::commands::wecode::WecodeSyncRequest::Legacy(subs) => (
+                subs,
+                Vec::new(),
+                Vec::new(),
+            ),
+        };
+
         let mut conn = db.lock().map_err(|e| format!("Mutex poisoned: {e}"))?;
         let tx = conn.transaction().map_err(|e| format!("Cannot begin transaction: {e}"))?;
 
         // 1. Đảm bảo bảng tồn tại
         crate::db::schema::ensure_wecode_schema(&tx).map_err(|e| e.to_string())?;
 
+        // 2. Upsert assignments metadata nếu có
+        for a in &assignments {
+            let start_time = a.start_time.as_deref().unwrap_or("");
+            let finish_time = a.finish_time.as_deref().unwrap_or("");
+            let base_url = a.base_url.as_deref().unwrap_or("");
+
+            let _ = tx.execute(
+                "INSERT INTO wecode_assignments (id, name, classes, total_problems, start_time, finish_time, base_url, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, strftime('%s', 'now'))
+                 ON CONFLICT(id) DO UPDATE SET
+                    name = CASE WHEN excluded.name != '' AND excluded.name NOT LIKE 'Assignment %' THEN excluded.name ELSE name END,
+                    classes = CASE WHEN excluded.classes != '' THEN excluded.classes ELSE classes END,
+                    total_problems = CASE WHEN excluded.total_problems > 0 THEN excluded.total_problems ELSE total_problems END,
+                    start_time = CASE WHEN excluded.start_time != '' THEN excluded.start_time ELSE start_time END,
+                    finish_time = CASE WHEN excluded.finish_time != '' THEN excluded.finish_time ELSE finish_time END,
+                    base_url = CASE WHEN excluded.base_url != '' THEN excluded.base_url ELSE base_url END",
+                params![a.id, a.name, a.classes.as_deref().unwrap_or(""), a.total_problems, start_time, finish_time, base_url],
+            );
+        }
+
+        // 3. Upsert problems catalog nếu có
+        for p in &problems {
+            let _ = tx.execute(
+                "INSERT INTO wecode_assignments (id, name, created_at) VALUES (?1, 'Assignment ' || ?1, strftime('%s', 'now'))
+                 ON CONFLICT(id) DO NOTHING",
+                params![p.assignment_id],
+            );
+
+            let problem_url = p.problem_url.as_deref().unwrap_or("");
+
+            tx.execute(
+                "INSERT INTO wecode_problems (assignment_id, problem_id, problem_name, problem_order, max_score, is_ac, problem_url, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, strftime('%s', 'now'))
+                 ON CONFLICT(assignment_id, problem_id) DO UPDATE SET
+                    problem_name = excluded.problem_name,
+                    problem_order = excluded.problem_order,
+                    max_score = excluded.max_score,
+                    is_ac = CASE WHEN excluded.is_ac THEN 1 ELSE is_ac END,
+                    problem_url = CASE WHEN excluded.problem_url != '' THEN excluded.problem_url ELSE problem_url END",
+                params![p.assignment_id, p.problem_id, p.problem_name, p.problem_order, p.max_score, p.is_ac, problem_url],
+            ).map_err(|e| format!("Failed to upsert wecode_problem: {e}"))?;
+        }
+
+        // 4. Upsert submissions & XP awards
         let mut affected_dates: HashSet<String> = HashSet::new();
         let now = chrono::Utc::now().timestamp();
 
@@ -95,19 +152,20 @@ impl WecodeIngestionEngine {
                 Err(_) => now,
             };
 
-            // 2. Đảm bảo assignment tồn tại trong wecode_assignments để thỏa mãn FK constraint
+            // Đảm bảo assignment tồn tại trong wecode_assignments
             let assign_name = dto.assignment_name.as_deref().unwrap_or("");
             let fallback_name = format!("Assignment {}", dto.assignment_id);
             let final_name = if assign_name.is_empty() { &fallback_name } else { assign_name };
 
+            let assign_classes = dto.classes.as_deref().unwrap_or("");
             let _ = tx.execute(
-                "INSERT INTO wecode_assignments (id, name, created_at) VALUES (?1, ?2, strftime('%s', 'now'))
+                "INSERT INTO wecode_assignments (id, name, classes, created_at) VALUES (?1, ?2, ?3, strftime('%s', 'now'))
                  ON CONFLICT(id) DO UPDATE SET
-                    name = CASE WHEN excluded.name != '' AND excluded.name NOT LIKE 'Assignment %' THEN excluded.name ELSE name END",
-                params![dto.assignment_id, final_name],
+                    name = CASE WHEN excluded.name != '' AND excluded.name NOT LIKE 'Assignment %' THEN excluded.name ELSE name END,
+                    classes = CASE WHEN excluded.classes != '' THEN excluded.classes ELSE classes END",
+                params![dto.assignment_id, final_name, assign_classes],
             );
 
-            // 3. Upsert vào wecode_submissions
             tx.execute(
                 "INSERT INTO wecode_submissions
                  (submission_id, assignment_id, problem_id, problem_name, submit_time,
@@ -135,9 +193,13 @@ impl WecodeIngestionEngine {
                 ],
             ).map_err(|e| format!("Failed to upsert wecode_submission: {e}"))?;
 
-            // 4. Trao XP First-AC nếu đạt điểm tuyệt đối hoặc Correct Answer
             let is_accepted = dto.score == 100 || dto.verdict.to_uppercase() == "CORRECT ANSWER" || dto.verdict.to_uppercase() == "AC";
             if is_accepted {
+                let _ = tx.execute(
+                    "UPDATE wecode_problems SET is_ac = 1 WHERE assignment_id = ?1 AND problem_id = ?2",
+                    params![dto.assignment_id, dto.problem_id],
+                );
+
                 if let Some(dt) = chrono::DateTime::from_timestamp(submit_time, 0) {
                     let event_date = dt.format("%Y-%m-%d").to_string();
                     let _ = tx.execute(
@@ -153,13 +215,24 @@ impl WecodeIngestionEngine {
 
         tx.commit().map_err(|e| format!("Failed to commit wecode transaction: {e}"))?;
 
-        // 5. Tái tính toán Daily Matrix cho các ngày bị ảnh hưởng
         for date in &affected_dates {
             let _ = crate::commands::plugins::recompute_daily_matrix(&conn, date);
         }
 
-        println!("[Diark DB] Wecode Submissions committed successfully. Total: {}", submissions.len());
-        Ok(())
+        let total = submissions.len() + problems.len();
+        println!("[Diark DB] Wecode records committed successfully. Submissions: {}, Problems: {}, Assignments: {}",
+            submissions.len(), problems.len(), assignments.len());
+        Ok(total)
+    }
+
+    pub fn commit_wecode_records(
+        db: Arc<Mutex<Connection>>,
+        submissions: Vec<WecodeSubmissionDto>,
+    ) -> Result<(), String> {
+        Self::commit_wecode_sync_request(
+            db,
+            crate::commands::wecode::WecodeSyncRequest::Legacy(submissions),
+        ).map(|_| ())
     }
 }
 
@@ -182,6 +255,7 @@ mod tests {
             submission_id: 101,
             assignment_id: 1,
             assignment_name: Some("Assignment 1".to_string()),
+            classes: Some("IT003.Q27.1".to_string()),
             problem_id: 2,
             problem_name: "Two Sum".to_string(),
             submit_time_str: "Fri, 17 Jul 2026 01:50:46".to_string(),
@@ -209,6 +283,7 @@ mod tests {
             submission_id: 201,
             assignment_id: 5,
             assignment_name: Some("Assignment 5".to_string()),
+            classes: Some("IT003.Q210.1".to_string()),
             problem_id: 10,
             problem_name: "Hello World".to_string(),
             submit_time_str: "Fri, 17 Jul 2026 01:50:46".to_string(),
@@ -223,6 +298,7 @@ mod tests {
             submission_id: 202,
             assignment_id: 5,
             assignment_name: Some("Assignment 5".to_string()),
+            classes: Some("IT003.Q210.1".to_string()),
             problem_id: 11,
             problem_name: "Sum Array".to_string(),
             submit_time_str: "Fri, 17 Jul 2026 02:10:00".to_string(),

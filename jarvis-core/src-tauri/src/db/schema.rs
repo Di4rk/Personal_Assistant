@@ -446,14 +446,32 @@ pub fn ensure_curriculum_schema(conn: &Connection) -> SqlResult<()> {
     Ok(())
 }
 
-/// Tạo schema cho Wecode submissions và assignments (idempotent).
+/// Tạo schema cho Wecode submissions, assignments và problems (idempotent).
 pub fn ensure_wecode_schema(conn: &Connection) -> SqlResult<()> {
     conn.execute_batch(
         r#"
         CREATE TABLE IF NOT EXISTS wecode_assignments (
-            id          INTEGER PRIMARY KEY,
-            name        TEXT NOT NULL DEFAULT '',
-            created_at  INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+            id              INTEGER PRIMARY KEY,
+            name            TEXT NOT NULL DEFAULT '',
+            classes         TEXT NOT NULL DEFAULT '',
+            total_problems  INTEGER NOT NULL DEFAULT 0,
+            start_time      TEXT NOT NULL DEFAULT '',
+            finish_time     TEXT NOT NULL DEFAULT '',
+            base_url        TEXT NOT NULL DEFAULT '',
+            created_at      INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS wecode_problems (
+            assignment_id   INTEGER NOT NULL,
+            problem_id      INTEGER NOT NULL,
+            problem_name    TEXT NOT NULL,
+            problem_order   INTEGER NOT NULL DEFAULT 0,
+            max_score       INTEGER NOT NULL DEFAULT 100,
+            is_ac           BOOLEAN NOT NULL DEFAULT 0,
+            problem_url     TEXT NOT NULL DEFAULT '',
+            created_at      INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+            PRIMARY KEY (assignment_id, problem_id),
+            FOREIGN KEY (assignment_id) REFERENCES wecode_assignments(id) ON DELETE CASCADE
         );
 
         CREATE TABLE IF NOT EXISTS wecode_submissions (
@@ -472,10 +490,65 @@ pub fn ensure_wecode_schema(conn: &Connection) -> SqlResult<()> {
             FOREIGN KEY (assignment_id) REFERENCES wecode_assignments(id) ON DELETE CASCADE
         );
 
+        CREATE INDEX IF NOT EXISTS idx_wecode_prob_assign ON wecode_problems(assignment_id);
         CREATE INDEX IF NOT EXISTS idx_wecode_sub_assign_prob ON wecode_submissions(assignment_id, problem_id);
         CREATE INDEX IF NOT EXISTS idx_wecode_sub_time ON wecode_submissions(submit_time);
         "#,
     )?;
+
+    // Kiểm tra và bổ sung cột nếu table đã tồn tại từ trước mà chưa có các cột mở rộng
+    let mut stmt = conn.prepare("PRAGMA table_info(wecode_assignments)")?;
+    let mut has_classes_col = false;
+    let mut has_total_problems_col = false;
+    let mut has_start_time_col = false;
+    let mut has_finish_time_col = false;
+    let mut has_base_url_col = false;
+
+    let col_names = stmt.query_map([], |row| row.get::<_, String>(1))?;
+    for name in col_names {
+        if let Ok(n) = name {
+            match n.as_str() {
+                "classes" => has_classes_col = true,
+                "total_problems" => has_total_problems_col = true,
+                "start_time" => has_start_time_col = true,
+                "finish_time" => has_finish_time_col = true,
+                "base_url" => has_base_url_col = true,
+                _ => {}
+            }
+        }
+    }
+
+    if !has_classes_col {
+        let _ = conn.execute("ALTER TABLE wecode_assignments ADD COLUMN classes TEXT NOT NULL DEFAULT ''", []);
+    }
+    if !has_total_problems_col {
+        let _ = conn.execute("ALTER TABLE wecode_assignments ADD COLUMN total_problems INTEGER NOT NULL DEFAULT 0", []);
+    }
+    if !has_start_time_col {
+        let _ = conn.execute("ALTER TABLE wecode_assignments ADD COLUMN start_time TEXT NOT NULL DEFAULT ''", []);
+    }
+    if !has_finish_time_col {
+        let _ = conn.execute("ALTER TABLE wecode_assignments ADD COLUMN finish_time TEXT NOT NULL DEFAULT ''", []);
+    }
+    if !has_base_url_col {
+        let _ = conn.execute("ALTER TABLE wecode_assignments ADD COLUMN base_url TEXT NOT NULL DEFAULT ''", []);
+    }
+
+    // Kiểm tra cột problem_url trên bảng wecode_problems
+    let mut prob_stmt = conn.prepare("PRAGMA table_info(wecode_problems)")?;
+    let mut has_problem_url_col = false;
+    let prob_col_names = prob_stmt.query_map([], |row| row.get::<_, String>(1))?;
+    for name in prob_col_names {
+        if let Ok(n) = name {
+            if n == "problem_url" {
+                has_problem_url_col = true;
+            }
+        }
+    }
+    if !has_problem_url_col {
+        let _ = conn.execute("ALTER TABLE wecode_problems ADD COLUMN problem_url TEXT NOT NULL DEFAULT ''", []);
+    }
+
     Ok(())
 }
 
@@ -865,5 +938,56 @@ mod tests {
             .expect("query vec_version");
         assert!(!version.is_empty(), "vec_version should return non-empty string");
         println!("sqlite-vec loaded version: {version}");
+    }
+
+    #[test]
+    fn test_ensure_wecode_schema_classes_column_migration() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        // Giả lập bảng legacy chưa có cột classes
+        conn.execute_batch(
+            r#"
+            CREATE TABLE wecode_assignments (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL DEFAULT '',
+                created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+            );
+            "#,
+        ).unwrap();
+
+        super::ensure_wecode_schema(&conn).expect("migration should add classes and total_problems columns and wecode_problems table");
+
+        // Insert thử với classes, total_problems, start_time, finish_time, base_url
+        conn.execute(
+            "INSERT INTO wecode_assignments (id, name, classes, total_problems, start_time, finish_time, base_url)
+             VALUES (1, 'Lab 1', 'IT003.Q27.1', 34, 'Thu, 4 Jun 2026 03:33', 'Wed, 3 Jun 2026 03:33', 'https://khmt.uit.edu.vn/wecode25/it00x')",
+            [],
+        ).expect("should insert into wecode_assignments with migrated columns");
+
+        let (classes, total_problems, start_time, finish_time, base_url): (String, i64, String, String, String) = conn.query_row(
+            "SELECT classes, total_problems, start_time, finish_time, base_url FROM wecode_assignments WHERE id = 1",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+        ).unwrap();
+
+        assert_eq!(classes, "IT003.Q27.1");
+        assert_eq!(total_problems, 34);
+        assert_eq!(start_time, "Thu, 4 Jun 2026 03:33");
+        assert_eq!(finish_time, "Wed, 3 Jun 2026 03:33");
+        assert_eq!(base_url, "https://khmt.uit.edu.vn/wecode25/it00x");
+
+        // Insert thử vào wecode_problems kèm problem_url
+        conn.execute(
+            "INSERT INTO wecode_problems (assignment_id, problem_id, problem_name, problem_order, max_score, is_ac, problem_url)
+             VALUES (1, 2275, 'Tìm kiếm', 1, 100, 1, 'https://khmt.uit.edu.vn/wecode25/it00x/assignment/1/2275')",
+            [],
+        ).expect("should insert into wecode_problems");
+
+        let (prob_name, prob_url): (String, String) = conn.query_row(
+            "SELECT problem_name, problem_url FROM wecode_problems WHERE assignment_id = 1 AND problem_id = 2275",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        ).unwrap();
+        assert_eq!(prob_name, "Tìm kiếm");
+        assert_eq!(prob_url, "https://khmt.uit.edu.vn/wecode25/it00x/assignment/1/2275");
     }
 }

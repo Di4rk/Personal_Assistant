@@ -861,11 +861,11 @@ pub const UNIVERSAL_GUARDIAN_SCRIPT: &str = r#"
 const CALLBACK_SCHEME: &str = "diark-sso://callback";
 const CALLBACK_FAIL_SCHEME: &str = "diark-sso://failed";
 
-const WECODE_LOGIN_URL: &str = "https://khmt.uit.edu.vn/wecode25/it00x/login";
+const WECODE_LOGIN_URL: &str = "https://khmt.uit.edu.vn/wecode25/it00x/home";
 #[allow(dead_code)]
 const WECODE_ASSIGNMENTS_URL: &str = "https://khmt.uit.edu.vn/wecode25/it00x/assignments";
 const WECODE_LOGIN_MARKER: &str = "/wecode25/it00x/login";
-const MAX_LOGIN_REDIRECT_ATTEMPTS: u8 = 10;
+const MAX_LOGIN_REDIRECT_ATTEMPTS: u8 = 50;
 
 #[allow(dead_code)]
 #[derive(Deserialize, Debug)]
@@ -1383,19 +1383,26 @@ pub async fn launch_wecode_sso_sync(app: AppHandle) -> Result<(), String> {
                 if let Some(fragment) = fragment_opt {
                     let target = extract_query_param(fragment, "target");
                     if target == "wecode" {
-                        let wecode_reg = get_wecode_harvester_registry_static();
-                        let db_state = app_for_nav.state::<SharedDb>();
-                        let db_arc = db_state.inner().clone();
-                        match wecode_reg.commit_session("wecode-sso-login", db_arc) {
-                            Ok(count) => {
-                                println!("[SSO Final] Wecode Harvester committed {count} submissions successfully!");
-                                let _ = app_for_nav.emit("wecode-submissions-synced", ());
-                                let _ = app_for_nav.emit("sso-callback-success", "wecode");
-                            }
-                            Err(err) => {
-                                eprintln!("[SSO Final] ERROR in Wecode Harvester commit: {err}");
-                                let _ = app_for_nav.emit("sso-callback-error", err.to_string());
-                                let _ = app_for_nav.emit_to("main", "wecode-sync-failed", err.to_string());
+                        let status = extract_query_param(fragment, "status");
+                        if status == "success" {
+                            println!("[SSO Final] Wecode auto-sync completed via background API engine!");
+                            let _ = app_for_nav.emit("wecode-submissions-synced", ());
+                            let _ = app_for_nav.emit("sso-callback-success", "wecode");
+                        } else {
+                            let wecode_reg = get_wecode_harvester_registry_static();
+                            let db_state = app_for_nav.state::<SharedDb>();
+                            let db_arc = db_state.inner().clone();
+                            match wecode_reg.commit_session("wecode-sso-login", db_arc) {
+                                Ok(count) => {
+                                    println!("[SSO Final] Wecode Harvester committed {count} submissions successfully!");
+                                    let _ = app_for_nav.emit("wecode-submissions-synced", ());
+                                    let _ = app_for_nav.emit("sso-callback-success", "wecode");
+                                }
+                                Err(err) => {
+                                    eprintln!("[SSO Final] ERROR in Wecode Harvester commit: {err}");
+                                    let _ = app_for_nav.emit("sso-callback-error", err.to_string());
+                                    let _ = app_for_nav.emit_to("main", "wecode-sync-failed", err.to_string());
+                                }
                             }
                         }
                     } else {

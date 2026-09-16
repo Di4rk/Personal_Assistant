@@ -298,25 +298,24 @@ async fn handle_sync_portal(
 /// Handler: POST /api/v1/sync/wecode
 async fn handle_sync_wecode(
     State(state): State<ServerState>,
-    Json(submissions): Json<Vec<crate::commands::wecode::WecodeSubmissionDto>>,
+    Json(req): Json<crate::commands::wecode::WecodeSyncRequest>,
 ) -> impl IntoResponse {
-    let count = submissions.len();
     let db_arc = state.db.clone();
-    let commit_res = crate::services::wecode_harvester::WecodeIngestionEngine::commit_wecode_records(
+    let commit_res = crate::services::wecode_harvester::WecodeIngestionEngine::commit_wecode_sync_request(
         db_arc,
-        submissions,
+        req,
     );
 
     match commit_res {
-        Ok(_) => {
-            println!("[SyncWecode] Committed {count} submissions successfully via Browser Sync API!");
+        Ok(count) => {
+            println!("[SyncWecode] Committed {count} wecode records successfully via Browser Sync API!");
             let _ = state.app.emit("wecode-submissions-synced", ());
             let _ = state.app.emit("sso-callback-success", "wecode");
             (
                 StatusCode::OK,
                 Json(serde_json::json!({
                     "status": "ok",
-                    "message": "Wecode submissions committed successfully",
+                    "message": "Wecode records committed successfully",
                     "count": count
                 })),
             )

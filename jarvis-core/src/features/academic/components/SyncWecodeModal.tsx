@@ -1,8 +1,19 @@
 import React, { useCallback, useState } from "react";
-import { ingestWecodeSubmissionsJson } from "../../../lib/tauri-client";
+import { ingestWecodeSubmissionsJson, launchWecodeSsoSync } from "../../../lib/tauri-client";
 import { useTauriEvent } from "../../../hooks/useTauriEvent";
 import { WECODE_BROWSER_SYNC_SCRIPT } from "../utils/browserSyncScripts";
-import { Check, Copy, ExternalLink, Terminal, AlertCircle, Code2, CheckCircle2 } from "lucide-react";
+import {
+  Check,
+  Copy,
+  ExternalLink,
+  AlertCircle,
+  Code2,
+  CheckCircle2,
+  Sparkles,
+  Loader2,
+  ChevronDown,
+  ChevronUp,
+} from "lucide-react";
 
 export interface SyncWecodeModalProps {
   isOpen: boolean;
@@ -20,6 +31,7 @@ export const SyncWecodeModal: React.FC<SyncWecodeModalProps> = ({
   const [status, setStatus] = useState<"idle" | "listening" | "completed" | "error">("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [syncedCount, setSyncedCount] = useState<number | null>(null);
+  const [showManualSection, setShowManualSection] = useState<boolean>(false);
   const [showManualInput, setShowManualInput] = useState<boolean>(false);
   const [manualJson, setManualJson] = useState<string>("");
 
@@ -32,6 +44,30 @@ export const SyncWecodeModal: React.FC<SyncWecodeModalProps> = ({
   }, [onSyncSuccess]);
 
   useTauriEvent("wecode-submissions-synced", handleSyncComplete);
+  useTauriEvent<string>("sso-callback-success", (target) => {
+    if (target === "wecode") {
+      handleSyncComplete();
+    }
+  });
+  useTauriEvent<string>("wecode-sync-failed", (reason) => {
+    setErrorMessage(`Đồng bộ thất bại: ${reason}`);
+    setStatus("error");
+    setIsListening(false);
+  });
+
+  const handleLaunchAutoSync = async () => {
+    setErrorMessage(null);
+    setStatus("listening");
+    setIsListening(true);
+    try {
+      await launchWecodeSsoSync();
+    } catch (err) {
+      const msg = typeof err === "string" ? err : "Không thể khởi chạy cửa sổ đăng nhập Wecode.";
+      setErrorMessage(msg);
+      setStatus("error");
+      setIsListening(false);
+    }
+  };
 
   const handleCopyScript = async () => {
     try {
@@ -91,10 +127,10 @@ export const SyncWecodeModal: React.FC<SyncWecodeModalProps> = ({
             </div>
             <div>
               <h3 className="text-sm font-bold text-zinc-100">
-                Đồng bộ Wecode UIT (Direct Sync)
+                Đồng bộ Wecode UIT
               </h3>
               <p className="text-[11px] text-zinc-400 mt-0.5">
-                Không dùng Webview — Đồng bộ 100% an toàn từ trình duyệt chính
+                Tự động thu thập bài nộp, điểm số & Gamification XP
               </p>
             </div>
           </div>
@@ -121,107 +157,160 @@ export const SyncWecodeModal: React.FC<SyncWecodeModalProps> = ({
                   : "Toàn bộ bài nộp và XP đã được ghi nhận vào SQLite và cập nhật Life Matrix."}
               </p>
             </div>
-          ) : !showManualInput ? (
-            <div className="space-y-4 text-xs">
-              <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-4 space-y-3">
-                <div className="font-semibold text-zinc-200 flex items-center gap-2">
-                  <Terminal className="w-4 h-4 text-emerald-400" />
-                  <span>3 Bước đồng bộ cực nhanh (1-Click):</span>
+          ) : (
+            <>
+              {/* PRIMARY ACTION: 1-CLICK AUTO SSO SYNC */}
+              <div className="rounded-lg border border-emerald-900/40 bg-emerald-950/20 p-4 space-y-3">
+                <div className="flex items-center gap-2 font-semibold text-emerald-300">
+                  <Sparkles className="w-4 h-4 text-emerald-400" />
+                  <span>Phương thức Tự động (Khuyên dùng):</span>
                 </div>
-                <ol className="list-decimal list-inside space-y-2 text-zinc-300 text-[11px] leading-relaxed">
-                  <li>
-                    Mở trang Wecode môn học của bạn trên Chrome/Edge:
-                    <a
-                      href="https://khmt.uit.edu.vn/wecode25"
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-1 ml-1.5 text-emerald-400 hover:underline"
-                    >
-                      khmt.uit.edu.vn/wecode25
-                      <ExternalLink className="w-3 h-3" />
-                    </a>
-                  </li>
-                  <li>
-                    Nhấn <kbd className="px-1.5 py-0.5 rounded bg-zinc-800 border border-zinc-700 text-zinc-200">F12</kbd> (hoặc Ctrl+Shift+I) → chọn tab <b className="text-zinc-100">Console</b>.
-                  </li>
-                  <li>
-                    Dán script (bấm nút bên dưới) rồi nhấn <kbd className="px-1.5 py-0.5 rounded bg-zinc-800 border border-zinc-700 text-zinc-200">Enter</kbd>.
-                  </li>
-                </ol>
-              </div>
+                <p className="text-[11px] text-zinc-300 leading-relaxed">
+                  Nhấn nút bên dưới, đăng nhập tài khoản UIT trên cửa sổ Wecode xuất hiện.
+                  Diark OS sẽ <b>tự động thu thập toàn bộ bài nộp, điểm số & Gamification XP</b>, sau đó tự đóng cửa sổ.
+                </p>
 
-              {/* Action Button */}
-              <div className="space-y-2">
                 <button
                   type="button"
-                  onClick={handleCopyScript}
-                  className={`w-full py-2.5 px-4 rounded-lg font-semibold text-xs transition-all flex items-center justify-center gap-2 shadow-sm ${
-                    copied
-                      ? "bg-emerald-600 text-white"
-                      : "bg-emerald-500 hover:bg-emerald-400 active:bg-emerald-600 text-zinc-950"
+                  onClick={handleLaunchAutoSync}
+                  disabled={isListening}
+                  className={`w-full py-2.5 px-4 rounded-lg font-semibold text-xs transition-all flex items-center justify-center gap-2 shadow-sm cursor-pointer ${
+                    isListening
+                      ? "bg-zinc-800 text-zinc-400 cursor-not-allowed border border-zinc-700"
+                      : "bg-emerald-500 hover:bg-emerald-400 active:bg-emerald-600 text-zinc-950 font-bold"
                   }`}
                 >
-                  {copied ? (
+                  {isListening ? (
                     <>
-                      <Check className="w-4 h-4" />
-                      <span>✓ Đã sao chép Script vào Clipboard!</span>
+                      <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />
+                      <span>Đang chờ bạn đăng nhập trên cửa sổ Wecode...</span>
                     </>
                   ) : (
                     <>
-                      <Copy className="w-4 h-4" />
-                      <span>Sao chép Script đồng bộ Wecode</span>
+                      <span className="text-base">🚀</span>
+                      <span>Đăng nhập & Tự động đồng bộ Wecode</span>
                     </>
                   )}
                 </button>
 
                 {isListening && (
-                  <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 flex items-center justify-between text-[11px]">
-                    <div className="flex items-center gap-2 text-zinc-300">
-                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                      <span>Đang lắng nghe dữ liệu từ cổng local 3030...</span>
+                  <div className="p-3 rounded-lg bg-zinc-950/90 border border-zinc-800 space-y-1.5 text-[11px]">
+                    <div className="flex items-center gap-2 text-emerald-400 font-medium">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping shrink-0" />
+                      <span>Cửa sổ Wecode đã mở — Hãy đăng nhập tài khoản UIT</span>
                     </div>
-                    <span className="text-zinc-500">Tự động nhận diện</span>
+                    <p className="text-zinc-400 text-[10px] pl-4">
+                      Ngay khi đăng nhập xong, hệ thống sẽ tự động bóc tách dữ liệu và đóng cửa sổ.
+                    </p>
                   </div>
                 )}
-
-                <div className="text-center pt-1">
-                  <button
-                    type="button"
-                    onClick={() => setShowManualInput(true)}
-                    className="text-[11px] text-zinc-500 hover:text-zinc-300 underline"
-                  >
-                    Hoặc dán JSON sao lưu thủ công
-                  </button>
-                </div>
               </div>
-            </div>
-          ) : (
-            <div className="space-y-3 text-xs">
-              <div className="flex justify-between items-center">
-                <span className="text-zinc-300 font-medium">Dán JSON Submissions:</span>
+
+              {/* SECONDARY / MANUAL FALLBACK SECTION */}
+              <div className="pt-1">
                 <button
                   type="button"
-                  onClick={() => setShowManualInput(false)}
-                  className="text-zinc-400 hover:text-zinc-200 underline text-[11px]"
+                  onClick={() => setShowManualSection(!showManualSection)}
+                  className="w-full flex items-center justify-between text-[11px] text-zinc-400 hover:text-zinc-300 p-2 rounded-lg hover:bg-zinc-800/50 transition-colors"
                 >
-                  Quay lại hướng dẫn
+                  <span>Phương thức dự phòng (Console F12 / Dán JSON)</span>
+                  {showManualSection ? (
+                    <ChevronUp className="w-3.5 h-3.5" />
+                  ) : (
+                    <ChevronDown className="w-3.5 h-3.5" />
+                  )}
                 </button>
+
+                {showManualSection && (
+                  <div className="mt-2 space-y-3 text-xs border-t border-zinc-800/80 pt-3">
+                    {!showManualInput ? (
+                      <div className="space-y-3">
+                        <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3 space-y-2 text-[11px] text-zinc-400 leading-relaxed">
+                          <div>
+                            Nếu trình duyệt mặc định đang có sẵn phiên đăng nhập:
+                          </div>
+                          <ol className="list-decimal list-inside space-y-1 text-zinc-300">
+                            <li>
+                              Mở{" "}
+                              <a
+                                href="https://khmt.uit.edu.vn/wecode25"
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center gap-0.5 text-emerald-400 hover:underline"
+                              >
+                                khmt.uit.edu.vn/wecode25
+                                <ExternalLink className="w-3 h-3 ml-0.5" />
+                              </a>
+                            </li>
+                            <li>Bấm F12 → Tab Console</li>
+                            <li>Dán script và Enter</li>
+                          </ol>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={handleCopyScript}
+                          className={`w-full py-2 px-3 rounded-lg font-semibold text-xs transition-all flex items-center justify-center gap-2 shadow-sm ${
+                            copied
+                              ? "bg-emerald-600 text-white"
+                              : "bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700"
+                          }`}
+                        >
+                          {copied ? (
+                            <>
+                              <Check className="w-3.5 h-3.5" />
+                              <span>✓ Đã sao chép Script Console!</span>
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="w-3.5 h-3.5" />
+                              <span>Sao chép Script Console F12</span>
+                            </>
+                          )}
+                        </button>
+
+                        <div className="text-center pt-1">
+                          <button
+                            type="button"
+                            onClick={() => setShowManualInput(true)}
+                            className="text-[11px] text-zinc-500 hover:text-zinc-300 underline"
+                          >
+                            Hoặc dán JSON sao lưu thủ công
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-2 text-xs">
+                        <div className="flex justify-between items-center">
+                          <span className="text-zinc-300 font-medium">Dán JSON Submissions:</span>
+                          <button
+                            type="button"
+                            onClick={() => setShowManualInput(false)}
+                            className="text-zinc-400 hover:text-zinc-200 underline text-[11px]"
+                          >
+                            Quay lại script F12
+                          </button>
+                        </div>
+                        <textarea
+                          rows={5}
+                          value={manualJson}
+                          onChange={(e) => setManualJson(e.target.value)}
+                          placeholder='[{"submission_id": 12345, "assignment_id": 1, ...}]'
+                          className="w-full rounded-lg border border-zinc-800 bg-zinc-950 p-2.5 font-mono text-[11px] text-zinc-200 placeholder-zinc-700 focus:border-emerald-600 focus:outline-none"
+                        />
+                        <button
+                          type="button"
+                          onClick={handleManualSubmit}
+                          className="w-full py-2 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition-colors"
+                        >
+                          Nạp JSON Submissions
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
-              <textarea
-                rows={7}
-                value={manualJson}
-                onChange={(e) => setManualJson(e.target.value)}
-                placeholder='[&#10;  {&#10;    "submission_id": 12345,&#10;    "assignment_id": 1,&#10;    "problem_id": 10,&#10;    "problem_name": "Two Sum",&#10;    "submit_time_str": "Fri, 17 Jul 2026 01:50:46",&#10;    "verdict": "CORRECT ANSWER",&#10;    "score": 100,&#10;    "execution_time": 0.02,&#10;    "memory_kib": 1024,&#10;    "language": "C++",&#10;    "is_final": true&#10;  }&#10;]'
-                className="w-full rounded-lg border border-zinc-800 bg-zinc-950 p-3 font-mono text-[11px] text-zinc-200 placeholder-zinc-700 focus:border-emerald-600 focus:outline-none"
-              />
-              <button
-                type="button"
-                onClick={handleManualSubmit}
-                className="w-full py-2 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition-colors"
-              >
-                Nạp JSON Submissions
-              </button>
-            </div>
+            </>
           )}
 
           {errorMessage && (

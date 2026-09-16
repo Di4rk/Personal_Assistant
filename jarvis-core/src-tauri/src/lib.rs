@@ -68,6 +68,8 @@ macro_rules! registered_commands {
             commands::portal_auth::launch_wecode_sso_sync,
             // Wecode
             commands::wecode::get_wecode_submissions,
+            commands::wecode::get_wecode_problems,
+            commands::wecode::get_wecode_assignments,
             commands::wecode::ingest_wecode_submissions_json,
             // Moodle & Workspace
             commands::workspace::ingest_moodle_course_html,
@@ -154,6 +156,8 @@ macro_rules! registered_commands {
             commands::portal_auth::launch_wecode_sso_sync,
             // Wecode
             commands::wecode::get_wecode_submissions,
+            commands::wecode::get_wecode_problems,
+            commands::wecode::get_wecode_assignments,
             commands::wecode::ingest_wecode_submissions_json,
             // Moodle & Workspace
             commands::workspace::ingest_moodle_course_html,

@@ -232,29 +232,18 @@ export const WECODE_BROWSER_SYNC_SCRIPT = `(async () => {
 
         showBanner("⏳ Đang lấy danh sách bài tập...", true);
 
-        // Map lưu assignment_id -> { id, name, subUrl }
+        // Map lưu assignment_id -> { id, name, subUrl, classes, totalProblems }
         const assignmentMap = new Map();
 
         function parseAssignmentRows(doc) {
-            const rows = Array.from(doc.querySelectorAll("table tbody tr, tr[data-id]"));
+            // RÀNG BUỘC P0: Bảng bài tập Wecode LUÔN sử dụng thẻ tr có data-id: <tr data-id="1452">
+            // Tuyệt đối không query "table tbody tr" tránh nhầm lẫn bảng ví dụ đề bài hoặc widget!
+            const rows = Array.from(doc.querySelectorAll("tr[data-id]"));
             rows.forEach((row) => {
-                if (row.classList.contains("dataTables_empty") || row.querySelectorAll("td").length <= 1) return;
-                let assignId = parseInt(row.getAttribute("data-id") || "", 10);
-                if (isNaN(assignId)) {
-                    const aLink = row.querySelector('a[href*="/assignment/"], a[href*="/assignments/"]');
-                    if (aLink) {
-                        const m = aLink.getAttribute("href")?.match(/\\/assignments?\\/(\\d+)/);
-                        if (m) assignId = parseInt(m[1], 10);
-                    }
-                }
-                if (isNaN(assignId)) {
-                    const firstTd = row.querySelector("td");
-                    if (firstTd) {
-                        const idVal = parseInt(firstTd.innerText.trim(), 10);
-                        if (!isNaN(idVal) && idVal > 0) assignId = idVal;
-                    }
-                }
-                if (!assignId || isNaN(assignId)) return;
+                if (row.classList.contains("dataTables_empty") || row.querySelectorAll("td").length < 3) return;
+                const idAttr = row.getAttribute("data-id");
+                const assignId = parseInt(idAttr || "", 10);
+                if (!assignId || isNaN(assignId) || assignId <= 0) return;
 
                 // Tên bài tập ở cột 3 (thường có strong hoặc thẻ a)
                 let assignName = "";
@@ -262,38 +251,105 @@ export const WECODE_BROWSER_SYNC_SCRIPT = `(async () => {
                 if (strongEl) {
                     assignName = strongEl.innerText.trim();
                 } else {
-                    const nameLink = row.querySelector('td:nth-child(3) a[href*="/assignment/"]');
+                    const nameLink = row.querySelector('td:nth-child(3) a');
                     if (nameLink) {
-                        const fullTxt = nameLink.innerText.trim();
-                        assignName = fullTxt.split('\\n')[0].trim();
+                        assignName = nameLink.innerText.trim().split('\\n')[0].trim();
                     }
                 }
 
-                // Link submissions trực tiếp ở cột 4 nếu có
+                // URL nộp bài ở cột 4
                 let subUrl = "";
                 const subLinkEl = row.querySelector('td:nth-child(4) a[href*="/submissions/"]');
                 if (subLinkEl) {
-                    subUrl = subLinkEl.getAttribute("href") || "";
+                    subUrl = (subLinkEl.getAttribute("href") || "").trim();
+                }
+                if (!subUrl) {
+                    subUrl = \`\${basePrefix}/submissions/assignment/\${assignId}/user/\${wecodeUserId}/problem/all/view/all\`;
+                }
+
+                // Lớp học ở cột 2
+                let classBadges = [];
+                const classTd = row.querySelector("td:nth-child(2)");
+                if (classTd) {
+                    const badgeEls = Array.from(classTd.querySelectorAll(".badge, span, a"))
+                        .map(el => el.innerText.trim())
+                        .filter(b => b.length > 0 && !b.startsWith("#"));
+                    classBadges = Array.from(new Set(badgeEls));
+                }
+
+                // Số lượng problem ở cột 4 (vd: - 34 prob)
+                let totalProblems = 0;
+                const submitTd = row.querySelector("td:nth-child(4)");
+                if (submitTd) {
+                    const probMatch = submitTd.innerText.match(/(\\d+)\\s+prob/);
+                    if (probMatch) {
+                        totalProblems = parseInt(probMatch[1], 10) || 0;
+                    }
+                }
+
+                let startTime = "";
+                const startTd = row.querySelector("td:nth-child(5)");
+                if (startTd) {
+                    startTime = (startTd.querySelector("small")?.innerText || startTd.innerText || "").trim();
+                }
+
+                let finishTime = "";
+                const finishTd = row.querySelector("td:nth-child(6)");
+                if (finishTd) {
+                    finishTime = (finishTd.querySelector("small")?.innerText || finishTd.innerText || "").trim();
                 }
 
                 assignmentMap.set(assignId, {
                     id: assignId,
                     name: assignName || \`Assignment #\${assignId}\`,
-                    subUrl: subUrl
+                    classes: classBadges.join(", "),
+                    totalProblems: totalProblems,
+                    subUrl: subUrl,
+                    startTime: startTime,
+                    finishTime: finishTime,
+                    baseUrl: \`\${window.location.origin}\${basePrefix}\`
                 });
             });
         }
 
-        // Thử parse từ DOM hiện tại nếu đang ở /home hoặc /assignments
-        parseAssignmentRows(document);
+        // 1. Nếu trang hiện tại có chứa bảng assignments chuẩn với tr[data-id], parse ngay
+        const isAssignmentsRoute = window.location.pathname.includes('/home') ||
+                                   window.location.pathname.includes('/assignments') ||
+                                   window.location.pathname.endsWith('/it00x') ||
+                                   window.location.pathname.endsWith('/it00x/');
+        if (isAssignmentsRoute && document.querySelectorAll("tr[data-id]").length > 0) {
+            parseAssignmentRows(document);
+        }
 
-        // Nếu chưa có hoặc ít bài tập, fetch thêm từ /assignments
+        // 2. Nếu chưa có (ví dụ người dùng đang ở trang /assignment/.../0 hoặc profile),
+        // luôn fetch trang canonical /home (trang danh mục chuẩn của Wecode UIT)
         if (assignmentMap.size === 0) {
-            const assignResp = await fetch(\`\${basePrefix}/assignments\`, { credentials: "include" });
-            const assignHtml = await assignResp.text();
-            const parser = new DOMParser();
-            const assignDoc = parser.parseFromString(assignHtml, "text/html");
-            parseAssignmentRows(assignDoc);
+            try {
+                const homeResp = await fetch(\`\${basePrefix}/home\`, { credentials: "include" });
+                if (homeResp.ok) {
+                    const homeHtml = await homeResp.text();
+                    const parser = new DOMParser();
+                    const homeDoc = parser.parseFromString(homeHtml, "text/html");
+                    parseAssignmentRows(homeDoc);
+                }
+            } catch (err) {
+                console.warn("[Diark OS] Lỗi fetch /home:", err);
+            }
+        }
+
+        // 3. Fallback: fetch từ /assignments nếu /home không có
+        if (assignmentMap.size === 0) {
+            try {
+                const assignResp = await fetch(\`\${basePrefix}/assignments\`, { credentials: "include" });
+                if (assignResp.ok) {
+                    const assignHtml = await assignResp.text();
+                    const parser = new DOMParser();
+                    const assignDoc = parser.parseFromString(assignHtml, "text/html");
+                    parseAssignmentRows(assignDoc);
+                }
+            } catch (err) {
+                console.warn("[Diark OS] Lỗi fetch /assignments:", err);
+            }
         }
 
         const sortedAssignments = Array.from(assignmentMap.values()).sort((a, b) => b.id - a.id);
@@ -304,6 +360,7 @@ export const WECODE_BROWSER_SYNC_SCRIPT = `(async () => {
         console.log(\`[Diark OS] Tìm thấy \${sortedAssignments.length} assignments:\`, sortedAssignments);
 
         const allSubmissions = [];
+        const allProblems = [];
         let completed = 0;
         const parser = new DOMParser();
 
@@ -311,106 +368,183 @@ export const WECODE_BROWSER_SYNC_SCRIPT = `(async () => {
             completed++;
             showBanner(\`⏳ Đang lấy bài nộp \${completed}/\${sortedAssignments.length}: \${assign.name}...\`, true);
 
-            const subUrl = assign.subUrl && assign.subUrl.startsWith("http")
-                ? assign.subUrl
-                : assign.subUrl
-                ? \`\${window.location.origin}\${assign.subUrl}\`
+            const rawSubUrl = (assign.subUrl || "").trim();
+            const subUrl = rawSubUrl && rawSubUrl.startsWith("http")
+                ? rawSubUrl
+                : rawSubUrl
+                ? \`\${window.location.origin}\${rawSubUrl.startsWith("/") ? "" : "/"}\${rawSubUrl}\`
                 : \`\${basePrefix}/submissions/assignment/\${assign.id}/user/\${wecodeUserId}/problem/all/view/all\`;
 
+            const assignDetailUrl = \`\${basePrefix}/assignment/\${assign.id}/0\`;
+
             try {
-                const subResp = await fetch(subUrl, { credentials: "include" });
-                const subHtml = await subResp.text();
-                const subDoc = parser.parseFromString(subHtml, "text/html");
-                const rows = Array.from(subDoc.querySelectorAll("table tbody tr, tr[data-id]"));
+                const [assignHtml, subHtml] = await Promise.all([
+                    fetch(assignDetailUrl, { credentials: "include" }).then(r => r.text()).catch(() => ""),
+                    fetch(subUrl, { credentials: "include" }).then(r => r.text()).catch(() => "")
+                ]);
 
-                rows.forEach((tr) => {
-                    if (tr.classList.contains("dataTables_empty") || tr.querySelectorAll("td").length < 5) return;
-                    const tds = tr.querySelectorAll("td");
-
-                    let subId = parseInt(tr.getAttribute("data-id") || "", 10);
-                    if (isNaN(subId) && tds[1]) subId = parseInt(tds[1].innerText.trim(), 10);
-                    if (isNaN(subId) && tds[0]) subId = parseInt(tds[0].innerText.trim(), 10);
-                    if (isNaN(subId)) return;
-
-                    let aId = parseInt(tr.getAttribute("data-a") || "", 10);
-                    if (isNaN(aId)) aId = assign.id;
-
-                    let pId = parseInt(tr.getAttribute("data-p") || "0", 10);
-                    let pName = "";
-                    const pLink = tds[2]?.querySelector("a") || tr.querySelector('a[href*="/assignment/"], a[href*="/problem/"]');
-                    if (pLink) {
-                        pName = pLink.innerText.trim();
-                        if (!pId) {
-                            const pMatch = pLink.getAttribute("href")?.match(/\\/(?:problem|assignment\\/\\d+)\\/(\\d+)/);
-                            if (pMatch) pId = parseInt(pMatch[1], 10);
+                // 1. Phân tích problem catalog từ problems_widget
+                if (assignHtml) {
+                    const assignDoc = parser.parseFromString(assignHtml, "text/html");
+                    const probWidget = assignDoc.querySelector(".problems_widget");
+                    if (probWidget) {
+                        const countBadge = probWidget.querySelector(".count_problems");
+                        if (countBadge) {
+                            const cnt = parseInt(countBadge.innerText.trim(), 10);
+                            if (!isNaN(cnt) && cnt > 0) assign.totalProblems = cnt;
                         }
-                    } else if (tds[2]) {
-                        pName = tds[2].innerText.trim();
+
+                        const seenProbIds = new Set();
+                        const problemRows = probWidget.querySelectorAll("tr");
+                        problemRows.forEach(tr => {
+                            if (tr.querySelector("th")) return;
+                            const a = tr.querySelector('a[href*="/assignment/"]');
+                            if (!a) return;
+                            const m = (a.getAttribute("href") || "").match(/\\/assignment\\/\\d+\\/(\\d+)/);
+                            if (!m) return;
+                            const pid = parseInt(m[1], 10);
+                            if (!pid || isNaN(pid) || seenProbIds.has(pid)) return;
+                            seenProbIds.add(pid);
+
+                            const order = parseInt(tr.querySelector("td:nth-child(1)")?.innerText.trim() || "0", 10);
+                            const name = a.innerText.trim();
+                            const scoreTd = tr.querySelector("td:nth-child(3)");
+                            const maxScore = parseInt(scoreTd?.innerText.trim() || "100", 10);
+                            const isAc = scoreTd?.classList.contains("bg-success") || false;
+
+                            const rawHref = a.getAttribute("href") || "";
+                            const problemUrl = rawHref.startsWith("http")
+                                ? rawHref
+                                : window.location.origin + (rawHref.startsWith("/") ? "" : "/") + rawHref;
+
+                            allProblems.push({
+                                assignment_id: assign.id,
+                                problem_id: pid,
+                                problem_name: name,
+                                problem_order: isNaN(order) ? 0 : order,
+                                max_score: isNaN(maxScore) ? 100 : maxScore,
+                                is_ac: isAc,
+                                problem_url: problemUrl
+                            });
+                        });
                     }
+                }
 
-                    // Trích xuất chính xác timestamp, loại bỏ các dòng ghi chú trễ ("1mo 1w late")
-                    const rawTime = tds[3]?.querySelector(".small")?.innerText?.trim() || tds[3]?.innerText?.trim() || "";
-                    const timeMatch = rawTime.match(/[A-Za-z]{3},\\s+\\d{1,2}\\s+[A-Za-z]{3}\\s+\\d{4}\\s+\\d{2}:\\d{2}:\\d{2}/);
-                    const submitTimeStr = timeMatch ? timeMatch[0] : rawTime.split('\\n')[0].trim();
-
-                    const verdictEl = tr.querySelector(".js-verdict, [class*='verdict']") || tds[4];
-                    const verdict = verdictEl?.innerText?.trim() || "";
-
-                    const timeEl = tr.querySelector(".js-time") || tds[5];
-                    const executionTime = parseFloat(timeEl?.innerText?.replace("s", "")?.trim() || "0") || 0.0;
-
-                    const memEl = tr.querySelector(".js-mem") || tds[6];
-                    const memoryKib = parseInt(memEl?.innerText?.replace(/[^\\d]/g, "")?.trim() || "0", 10) || 0;
-
-                    const scoreEl = tr.querySelector(".js-score span, .js-score, .status span") || tds[7];
-                    const score = parseInt(scoreEl?.innerText?.trim() || "0", 10);
-
-                    const langEl = tr.querySelector('div[data-type="code"]') || tds[8];
-                    const language = langEl?.innerText?.trim() || "C++";
-
-                    const isFinal = tr.querySelector(".set_final")?.classList.contains("bi-check-circle") ||
-                                    tr.querySelector(".bi-check-circle") !== null;
-
-                    allSubmissions.push({
-                        submission_id: subId,
-                        assignment_id: aId,
-                        assignment_name: assign.name,
-                        problem_id: pId,
-                        problem_name: pName || \`Problem \${pId}\`,
-                        submit_time_str: submitTimeStr,
-                        verdict: verdict,
-                        score: isNaN(score) ? 0 : score,
-                        execution_time: executionTime,
-                        memory_kib: memoryKib,
-                        language: language,
-                        is_final: Boolean(isFinal)
+                // 2. Phân tích submissions
+                if (subHtml) {
+                    const subDoc = parser.parseFromString(subHtml, "text/html");
+                    const allRows = Array.from(subDoc.querySelectorAll("tr"));
+                    const rows = allRows.filter((tr) => {
+                        return tr.hasAttribute("data-p") ||
+                               tr.hasAttribute("data-u") ||
+                               Boolean(tr.querySelector(".js-verdict")) ||
+                               Boolean(tr.querySelector(".set_final"));
                     });
-                });
-                await sleep(150);
+
+                    rows.forEach((tr) => {
+                        if (tr.classList.contains("dataTables_empty") || tr.querySelectorAll("td").length < 5) return;
+                        const tds = tr.querySelectorAll("td");
+
+                        let subId = parseInt(tr.getAttribute("data-id") || "", 10);
+                        if (isNaN(subId) && tds[1]) subId = parseInt(tds[1].innerText.trim(), 10);
+                        if (isNaN(subId) && tds[0]) subId = parseInt(tds[0].innerText.trim(), 10);
+                        if (isNaN(subId)) return;
+
+                        let aId = parseInt(tr.getAttribute("data-a") || "", 10);
+                        if (isNaN(aId)) aId = assign.id;
+
+                        let pId = parseInt(tr.getAttribute("data-p") || "0", 10);
+                        let pName = "";
+                        const pLink = tds[2]?.querySelector("a") || tr.querySelector('a[href*="/assignment/"], a[href*="/problem/"]');
+                        if (pLink) {
+                            pName = pLink.innerText.trim();
+                            if (!pId) {
+                                const pMatch = pLink.getAttribute("href")?.match(/\\/(?:problem|assignment\\/\\d+)\\/(\\d+)/);
+                                if (pMatch) pId = parseInt(pMatch[1], 10);
+                            }
+                        } else if (tds[2]) {
+                            pName = tds[2].innerText.trim();
+                        }
+
+                        // Trích xuất chính xác timestamp, loại bỏ các dòng ghi chú trễ ("1mo 1w late")
+                        const rawTime = tds[3]?.querySelector(".small")?.innerText?.trim() || tds[3]?.innerText?.trim() || "";
+                        const timeMatch = rawTime.match(/[A-Za-z]{3},\\s+\\d{1,2}\\s+[A-Za-z]{3}\\s+\\d{4}\\s+\\d{2}:\\d{2}:\\d{2}/);
+                        const submitTimeStr = timeMatch ? timeMatch[0] : rawTime.split('\\n')[0].trim();
+
+                        const verdictEl = tr.querySelector(".js-verdict, [class*='verdict']") || tds[4];
+                        const verdict = verdictEl?.innerText?.trim() || "";
+
+                        const timeEl = tr.querySelector(".js-time") || tds[5];
+                        const executionTime = parseFloat(timeEl?.innerText?.replace("s", "")?.trim() || "0") || 0.0;
+
+                        const memEl = tr.querySelector(".js-mem") || tds[6];
+                        const memoryKib = parseInt(memEl?.innerText?.replace(/[^\\d]/g, "")?.trim() || "0", 10) || 0;
+
+                        const scoreEl = tr.querySelector(".js-score span, .js-score, .status span") || tds[7];
+                        const score = parseInt(scoreEl?.innerText?.trim() || "0", 10);
+
+                        const langEl = tr.querySelector('div[data-type="code"]') || tds[8];
+                        const language = langEl?.innerText?.trim() || "C++";
+
+                        const isFinal = tr.querySelector(".set_final")?.classList.contains("bi-check-circle") ||
+                                        tr.querySelector(".bi-check-circle") !== null;
+
+                        allSubmissions.push({
+                            submission_id: subId,
+                            assignment_id: aId,
+                            assignment_name: assign.name,
+                            classes: assign.classes || "",
+                            problem_id: pId,
+                            problem_name: pName || \`Problem \${pId}\`,
+                            submit_time_str: submitTimeStr,
+                            verdict: verdict,
+                            score: isNaN(score) ? 0 : score,
+                            execution_time: executionTime,
+                            memory_kib: memoryKib,
+                            language: language,
+                            is_final: Boolean(isFinal)
+                        });
+                    });
+                }
+                await sleep(50);
             } catch (err) {
                 console.warn(\`Lỗi fetch Assignment #\${assign.id}:\`, err);
             }
         }
 
+        const syncPayload = {
+            submissions: allSubmissions,
+            assignments: sortedAssignments.map(a => ({
+                id: a.id,
+                name: a.name,
+                classes: a.classes || "",
+                total_problems: a.totalProblems || 0,
+                start_time: a.startTime || "",
+                finish_time: a.finishTime || "",
+                base_url: a.baseUrl || ""
+            })),
+            problems: allProblems
+        };
+
         try {
-            await navigator.clipboard.writeText(JSON.stringify(allSubmissions, null, 2));
+            await navigator.clipboard.writeText(JSON.stringify(syncPayload, null, 2));
             console.log("%c[Diark OS] 📋 Đã copy JSON vào Clipboard!", "color: #34d399;");
         } catch (_) {}
 
-        showBanner(\`🚀 Đang gửi \${allSubmissions.length} bài nộp về Diark OS (port 3030)...\`, true);
+        showBanner(\`🚀 Đang gửi \${allSubmissions.length} bài nộp & \${allProblems.length} câu hỏi về Diark OS...\`, true);
         const resp = await fetch(LOCAL_SERVER_URL, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(allSubmissions)
+            body: JSON.stringify(syncPayload)
         });
 
         if (resp.ok) {
-            showBanner(\`✅ <b>ĐỒNG BỘ WECODE THÀNH CÔNG!</b><br>Đã nạp \${allSubmissions.length} submissions từ \${sortedAssignments.length} assignments vào Diark OS.\`, true);
+            showBanner(\`✅ <b>ĐỒNG BỘ WECODE THÀNH CÔNG!</b><br>Đã nạp \${allSubmissions.length} bài nộp & \${allProblems.length} câu hỏi từ \${sortedAssignments.length} assignments vào Diark OS.\`, true);
         } else {
             throw new Error(\`Server status \${resp.status}\`);
         }
     } catch (err) {
         console.error("[Diark OS] Lỗi đồng bộ:", err);
-        showBanner(\`⚠️ <b>ĐÃ THU THẬP XONG!</b><br>JSON submissions đã được copy vào Clipboard.<br>Bạn có thể dán trực tiếp vào Diark OS.\`, false);
+        showBanner(\`⚠️ <b>ĐÃ THU THẬP XONG!</b><br>JSON dữ liệu đã được copy vào Clipboard.<br>Bạn có thể dán trực tiếp vào Diark OS.\`, false);
     }
 })();`;

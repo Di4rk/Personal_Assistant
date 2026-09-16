@@ -10,36 +10,69 @@ import {
   Sparkles,
   AlertTriangle,
   Code2,
+  FolderCode,
+  ListFilter,
 } from "lucide-react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { getWecodeSubmissions } from "../../lib/tauri-client";
+import {
+  getWecodeSubmissions,
+  getWecodeAssignments,
+  getWecodeProblems,
+  getStudentProfile,
+} from "../../lib/tauri-client";
 import { WecodeSubmissionsList } from "./components/WecodeSubmissionsList";
+import { WecodeAssignmentList } from "./components/WecodeAssignmentList";
+import { WecodeProblemList } from "./components/WecodeProblemList";
 import { SyncWecodeModal } from "./components/SyncWecodeModal";
-import type { WecodeSubmission } from "../../types/wecode";
+import { aggregateWecodeHierarchy } from "./utils/wecodeHierarchy";
+import type {
+  WecodeSubmission,
+  WecodeAssignmentMeta,
+  WecodeProblemRecord,
+} from "../../types/wecode";
 
 export const WecodeDashboard: React.FC = () => {
   const [submissions, setSubmissions] = useState<WecodeSubmission[]>([]);
+  const [storedAssignments, setStoredAssignments] = useState<WecodeAssignmentMeta[]>([]);
+  const [storedProblems, setStoredProblems] = useState<WecodeProblemRecord[]>([]);
+  const [studentClass, setStudentClass] = useState<string | undefined>(undefined);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isSyncModalOpen, setIsSyncModalOpen] = useState<boolean>(false);
-  const [selectedAssignment, setSelectedAssignment] = useState<number | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [partialErrors, setPartialErrors] = useState<string[]>([]);
 
-  const fetchSubmissions = useCallback(async (assignmentId?: number | null) => {
+  // Navigation & Filtering States
+  const [selectedCourse, setSelectedCourse] = useState<string | null>(null); // null = Tất cả môn
+  const [selectedClass, setSelectedClass] = useState<string | null>(null); // null = Tất cả lớp trong môn
+  const [statusFilter, setStatusFilter] = useState<"all" | "urgent" | "completed" | "closed">("all");
+  const [selectedAssignmentId, setSelectedAssignmentId] = useState<number | null>(null); // null = Danh sách assignments
+  const [activeTab, setActiveTab] = useState<"assignments" | "raw_submissions">("assignments");
+
+  const fetchSubmissions = useCallback(async () => {
     setIsLoading(true);
     try {
-      const data = await getWecodeSubmissions(assignmentId ?? undefined);
-      setSubmissions(data);
+      const [subData, assignData, probData, profile] = await Promise.all([
+        getWecodeSubmissions(),
+        getWecodeAssignments().catch(() => []),
+        getWecodeProblems().catch(() => []),
+        getStudentProfile().catch(() => null),
+      ]);
+      setSubmissions(subData);
+      setStoredAssignments(assignData);
+      setStoredProblems(probData);
+      if (profile?.student_class) {
+        setStudentClass(profile.student_class);
+      }
     } catch (err) {
-      console.error("[WecodeDashboard] Lỗi tải submissions:", err);
+      console.error("[WecodeDashboard] Lỗi tải dữ liệu wecode:", err);
     } finally {
       setIsLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    void fetchSubmissions(selectedAssignment);
-  }, [fetchSubmissions, selectedAssignment]);
+    void fetchSubmissions();
+  }, [fetchSubmissions]);
 
   useEffect(() => {
     let unlistenSync: UnlistenFn | undefined;
@@ -49,7 +82,7 @@ export const WecodeDashboard: React.FC = () => {
     const setupListeners = async () => {
       unlistenSync = await listen("wecode-submissions-synced", () => {
         setSyncError(null);
-        void fetchSubmissions(selectedAssignment);
+        void fetchSubmissions();
       });
 
       unlistenFail = await listen<string>("wecode-sync-failed", (event) => {
@@ -68,45 +101,101 @@ export const WecodeDashboard: React.FC = () => {
       if (unlistenFail) unlistenFail();
       if (unlistenPartial) unlistenPartial();
     };
-  }, [fetchSubmissions, selectedAssignment]);
+  }, [fetchSubmissions]);
 
   const handleTriggerSync = () => {
     setIsSyncModalOpen(true);
   };
 
-  // Distinct assignments (ID & Name) for filter
-  const assignmentList = useMemo(() => {
-    const map = new Map<number, string>();
-    for (const s of submissions) {
-      if (!map.has(s.assignment_id)) {
-        map.set(
-          s.assignment_id,
-          s.assignment_name && s.assignment_name.trim() !== ""
-            ? s.assignment_name
-            : `Assignment #${s.assignment_id}`
-        );
-      } else if (
-        s.assignment_name &&
-        s.assignment_name.trim() !== "" &&
-        !s.assignment_name.startsWith("Assignment #")
+  // Tổng hợp dữ liệu phân cấp: Courses -> Assignments -> Problems -> Submissions
+  const hierarchy = useMemo(() => {
+    return aggregateWecodeHierarchy(submissions, storedAssignments, storedProblems, studentClass);
+  }, [submissions, storedAssignments, storedProblems, studentClass]);
+
+  // Thống kê đếm trạng thái cho Status Filter Tabs
+  const statusCounts = useMemo(() => {
+    let urgent = 0;
+    let completed = 0;
+    let closed = 0;
+    for (const a of hierarchy.assignments) {
+      const isCompleted = a.totalProblems > 0 && a.solvedProblems >= a.totalProblems;
+      // QUY TẮC SỐNG CÒN: Unlimited (1999) TUYỆT ĐỐI KHÔNG tính vào Cần làm gấp
+      if (
+        !isCompleted &&
+        (a.deadlineStatus === "urgent" || a.deadlineStatus === "critical")
       ) {
-        map.set(s.assignment_id, s.assignment_name);
+        urgent++;
+      }
+      if (isCompleted) {
+        completed++;
+      }
+      if (a.deadlineStatus === "closed") {
+        closed++;
       }
     }
-    return Array.from(map.entries())
-      .map(([id, name]) => ({ id, name }))
-      .sort((a, b) => b.id - a.id);
-  }, [submissions]);
+    return {
+      all: hierarchy.assignments.length,
+      urgent,
+      completed,
+      closed,
+    };
+  }, [hierarchy.assignments]);
 
-  // Derived statistics
+  // Danh sách các lớp học có trong môn học đang chọn
+  const availableClasses = useMemo(() => {
+    if (!selectedCourse) return [];
+    const targetAssignments = hierarchy.assignments.filter(
+      (a) => a.courseCode === selectedCourse
+    );
+    const set = new Set<string>();
+    targetAssignments.forEach((a) => a.classes.forEach((c) => set.add(c)));
+    return Array.from(set).sort();
+  }, [hierarchy.assignments, selectedCourse]);
+
+  // Lọc assignments theo môn học, lớp học & trạng thái hạn chót
+  const filteredAssignments = useMemo(() => {
+    return hierarchy.assignments.filter((assign) => {
+      // 1. Lọc theo Môn
+      if (selectedCourse && assign.courseCode !== selectedCourse) {
+        return false;
+      }
+      // 2. Lọc theo Lớp
+      if (selectedClass && !assign.classes.includes(selectedClass)) {
+        return false;
+      }
+      // 3. Lọc theo Trạng thái Deadline (Zero-Garbage Hard Rule)
+      const isCompleted = assign.totalProblems > 0 && assign.solvedProblems >= assign.totalProblems;
+      if (statusFilter === "urgent") {
+        return (
+          !isCompleted &&
+          (assign.deadlineStatus === "urgent" || assign.deadlineStatus === "critical")
+        );
+      }
+      if (statusFilter === "completed") {
+        return isCompleted;
+      }
+      if (statusFilter === "closed") {
+        return assign.deadlineStatus === "closed";
+      }
+      return true;
+    });
+  }, [hierarchy.assignments, selectedCourse, selectedClass, statusFilter]);
+
+  // Assignment đang được chọn để xem danh sách Problem
+  const activeAssignment = useMemo(() => {
+    if (selectedAssignmentId === null) return null;
+    return hierarchy.assignments.find((a) => a.id === selectedAssignmentId) || null;
+  }, [hierarchy.assignments, selectedAssignmentId]);
+
+  // Thống kê tổng quan toàn hệ thống
   const stats = useMemo(() => {
     const total = submissions.length;
     const acList = submissions.filter(
-      (s) => s.score === 100 || s.verdict === "CORRECT ANSWER"
+      (s) => s.score === 100 || s.verdict.toUpperCase().includes("CORRECT")
     );
     const totalAc = acList.length;
     const uniqueProblemsAc = new Set(acList.map((s) => s.problem_id)).size;
-    const totalXp = totalAc * 15;
+    const totalXp = uniqueProblemsAc * 15;
     const acRate = total > 0 ? Math.round((totalAc / total) * 100) : 0;
 
     return {
@@ -119,8 +208,8 @@ export const WecodeDashboard: React.FC = () => {
   }, [submissions]);
 
   return (
-    <div className="space-y-4">
-      {/* Top Banner & Control */}
+    <div className="space-y-4 font-mono">
+      {/* Top Banner & Main Metrics */}
       <div className="rounded-xl bg-zinc-900 border border-zinc-800 p-5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center gap-3">
@@ -129,14 +218,19 @@ export const WecodeDashboard: React.FC = () => {
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="text-lg font-bold text-zinc-100 font-mono">
+                <h2 className="text-lg font-bold text-zinc-100">
                   UIT Wecode Tracker
                 </h2>
-                <span className="px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-zinc-800 text-emerald-400 border border-zinc-700">
-                  v1.0.0
+                <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-zinc-800 text-emerald-400 border border-zinc-700">
+                  v2.1 • Competitive
                 </span>
+                {studentClass && (
+                  <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-950/80 text-emerald-300 border border-emerald-800/60">
+                    Lớp: {studentClass}
+                  </span>
+                )}
               </div>
-              <p className="text-xs text-zinc-500 font-mono mt-0.5">
+              <p className="text-xs text-zinc-500 mt-0.5">
                 Thu thập và định lượng thành tích thực hành lập trình tại wecode.uit.edu.vn
               </p>
             </div>
@@ -144,9 +238,9 @@ export const WecodeDashboard: React.FC = () => {
 
           <div className="flex items-center gap-2">
             <button
-              onClick={() => void fetchSubmissions(selectedAssignment)}
+              onClick={() => void fetchSubmissions()}
               disabled={isLoading}
-              className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-mono text-xs flex items-center gap-1.5 transition-colors border border-zinc-700 disabled:opacity-50"
+              className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs flex items-center gap-1.5 transition-colors border border-zinc-700 disabled:opacity-50 cursor-pointer"
               title="Tải lại dữ liệu"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? "animate-spin" : ""}`} />
@@ -155,7 +249,7 @@ export const WecodeDashboard: React.FC = () => {
 
             <button
               onClick={handleTriggerSync}
-              className="px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white font-mono text-xs font-semibold flex items-center gap-2 shadow-sm transition-all"
+              className="px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white text-xs font-semibold flex items-center gap-2 shadow-sm transition-all cursor-pointer"
             >
               <ExternalLink className="w-3.5 h-3.5" />
               <span>Đồng bộ Wecode</span>
@@ -165,7 +259,7 @@ export const WecodeDashboard: React.FC = () => {
 
         {/* Sync Failure Banner */}
         {syncError && (
-          <div className="mt-4 p-3 rounded-lg bg-rose-950/60 border border-rose-800/60 text-rose-300 text-xs font-mono flex items-start gap-2.5">
+          <div className="mt-4 p-3 rounded-lg bg-rose-950/60 border border-rose-800/60 text-rose-300 text-xs flex items-start gap-2.5">
             <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
             <div>
               <div className="font-semibold">Lỗi đồng bộ Wecode:</div>
@@ -176,7 +270,7 @@ export const WecodeDashboard: React.FC = () => {
 
         {/* Partial Parse Errors Banner */}
         {partialErrors.length > 0 && (
-          <div className="mt-4 p-3 rounded-lg bg-amber-950/60 border border-amber-800/60 text-amber-300 text-xs font-mono flex items-start gap-2.5">
+          <div className="mt-4 p-3 rounded-lg bg-amber-950/60 border border-amber-800/60 text-amber-300 text-xs flex items-start gap-2.5">
             <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
             <div>
               <div className="font-semibold">
@@ -186,29 +280,24 @@ export const WecodeDashboard: React.FC = () => {
                 {partialErrors.slice(0, 3).map((err, idx) => (
                   <li key={idx}>{err}</li>
                 ))}
-                {partialErrors.length > 3 && (
-                  <li>...và {partialErrors.length - 3} bản ghi khác.</li>
-                )}
               </ul>
             </div>
           </div>
         )}
 
         {/* Gamified Metrics Cards */}
-        <div className="mt-5 grid grid-cols-2 md:grid-cols-4 gap-3 font-mono text-xs">
+        <div className="mt-5 grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+          {/* Card 1: Unique Problems AC Hero Metric (Đồng bộ số liệu chuẩn năng lực) */}
           <div className="rounded-lg bg-slate-950/80 border border-slate-800 p-3.5">
             <div className="flex items-center gap-2 text-zinc-400 mb-1">
               <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-              <span>Bài AC (100đ)</span>
+              <span>Bài tập đã giải (AC)</span>
             </div>
             <div className="text-2xl font-bold text-white tracking-tight">
-              {stats.totalAc}{" "}
-              <span className="text-xs text-zinc-500 font-normal">
-                ({stats.acRate}%)
-              </span>
+              {stats.uniqueProblemsAc}
             </div>
-            <span className="text-[11px] text-zinc-500">
-              {stats.uniqueProblemsAc} bài tập duy nhất giải thành công
+            <span className="text-[11px] text-zinc-500 block truncate" title={`${stats.totalAc} lượt AC trên ${hierarchy.assignments.length} assignments`}>
+              {stats.totalAc} lượt AC • Tỷ lệ AC: {stats.acRate}%
             </span>
           </div>
 
@@ -235,7 +324,7 @@ export const WecodeDashboard: React.FC = () => {
               {stats.total}
             </div>
             <span className="text-[11px] text-zinc-500">
-              Lưu trữ đầy đủ lịch sử chấm bài
+              {hierarchy.assignments.length} assignments • Lưu trữ SQLite
             </span>
           </div>
 
@@ -248,57 +337,211 @@ export const WecodeDashboard: React.FC = () => {
               Loopback
             </div>
             <span className="text-[11px] text-zinc-500">
-              Zero-Cookie SSO Navigation Hook
+              1-Click In-App SSO Harvester
             </span>
           </div>
         </div>
       </div>
 
-      {/* Assignment Filter Chips & Submissions List */}
-      <div className="space-y-3">
-        <div className="flex flex-wrap items-center gap-2 font-mono text-xs">
-          <div className="flex items-center gap-1.5 text-zinc-400 mr-1">
-            <Filter className="w-3.5 h-3.5 text-zinc-500" />
-            <span>Bộ lọc Bài tập:</span>
+      {/* Main Content Area */}
+      {activeAssignment ? (
+        /* VIEW 1: Assignment Problem Drilldown */
+        <WecodeProblemList
+          assignment={activeAssignment}
+          onBack={() => setSelectedAssignmentId(null)}
+        />
+      ) : (
+        /* VIEW 2: Course / Class / Deadline Filter Bar & Assignments Grid */
+        <div className="space-y-4">
+          {/* COURSE FILTER BAR */}
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 pb-1 border-b border-zinc-800/80">
+              <div className="flex items-center gap-2 text-xs font-semibold text-zinc-200">
+                <Filter className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Lọc theo Môn học (Course):</span>
+              </div>
+              <span className="text-[11px] text-zinc-500">
+                Hiển thị số lượng Assignment của từng môn
+              </span>
+            </div>
+
+            {/* Course Chips */}
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={() => {
+                  setSelectedCourse(null);
+                  setSelectedClass(null);
+                }}
+                className={`px-3 py-1.5 rounded-lg border text-xs transition-all cursor-pointer flex items-center gap-1.5 ${
+                  selectedCourse === null
+                    ? "bg-emerald-950 text-emerald-300 border-emerald-700 font-bold shadow-sm"
+                    : "bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60"
+                }`}
+              >
+                <span>Tất cả môn</span>
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-zinc-800 text-zinc-300">
+                  {hierarchy.assignments.length}
+                </span>
+              </button>
+
+              {hierarchy.courses.map((course) => {
+                const isSelected = selectedCourse === course.courseCode;
+                return (
+                  <button
+                    key={course.courseCode}
+                    onClick={() => {
+                      setSelectedCourse(isSelected ? null : course.courseCode);
+                      setSelectedClass(null);
+                    }}
+                    className={`px-3 py-1.5 rounded-lg border text-xs transition-all cursor-pointer flex items-center gap-1.5 ${
+                      isSelected
+                        ? "bg-emerald-950 text-emerald-300 border-emerald-700 font-bold shadow-sm"
+                        : "bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60"
+                    }`}
+                  >
+                    <span>{course.courseCode}</span>
+                    <span
+                      className={`px-1.5 py-0.2 rounded-full text-[10px] ${
+                        isSelected
+                          ? "bg-emerald-900/80 text-emerald-200"
+                          : "bg-zinc-800 text-zinc-400"
+                      }`}
+                    >
+                      {course.totalAssignments} bài tập
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* SUB-FILTER: Specific Classes if Course Selected */}
+            {selectedCourse && availableClasses.length > 0 && (
+              <div className="pt-2 border-t border-zinc-800/60 flex flex-wrap items-center gap-2 text-xs">
+                <span className="text-[11px] text-zinc-500">Lớp thuộc {selectedCourse}:</span>
+                <button
+                  onClick={() => setSelectedClass(null)}
+                  className={`px-2.5 py-1 rounded text-[11px] border transition-colors cursor-pointer ${
+                    selectedClass === null
+                      ? "bg-zinc-800 border-zinc-600 text-white font-semibold"
+                      : "bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-zinc-200"
+                  }`}
+                >
+                  Tất cả lớp
+                </button>
+                {availableClasses.map((cls) => (
+                  <button
+                    key={cls}
+                    onClick={() => setSelectedClass(selectedClass === cls ? null : cls)}
+                    className={`px-2.5 py-1 rounded text-[11px] border transition-colors cursor-pointer ${
+                      selectedClass === cls
+                        ? "bg-emerald-950 border-emerald-700 text-emerald-300 font-semibold"
+                        : "bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-zinc-200"
+                    }`}
+                  >
+                    {cls}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
-          <button
-            onClick={() => setSelectedAssignment(null)}
-            className={`px-3 py-1.5 rounded-lg border transition-colors ${
-              selectedAssignment === null
-                ? "bg-zinc-800 border-zinc-600 text-white font-semibold"
-                : "bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200"
-            }`}
-          >
-            Tất cả bài nộp
-          </button>
+          {/* VIEW SWITCHER TABS & CONTENT */}
+          <div className="space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-zinc-800 pb-2 gap-2">
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setActiveTab("assignments")}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-2 transition-colors cursor-pointer ${
+                    activeTab === "assignments"
+                      ? "bg-zinc-800 text-emerald-400 border border-zinc-700"
+                      : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900"
+                  }`}
+                >
+                  <FolderCode className="w-3.5 h-3.5" />
+                  <span>Danh mục Bài tập ({filteredAssignments.length})</span>
+                </button>
 
-          {assignmentList.map(({ id, name }) => (
-            <button
-              key={id}
-              onClick={() => setSelectedAssignment(id)}
-              className={`px-3 py-1.5 rounded-lg border transition-colors max-w-[240px] truncate ${
-                selectedAssignment === id
-                  ? "bg-emerald-950/80 border-emerald-700 text-emerald-300 font-semibold"
-                  : "bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200"
-              }`}
-              title={name}
-            >
-              {name}
-            </button>
-          ))}
+                <button
+                  onClick={() => setActiveTab("raw_submissions")}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-2 transition-colors cursor-pointer ${
+                    activeTab === "raw_submissions"
+                      ? "bg-zinc-800 text-emerald-400 border border-zinc-700"
+                      : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900"
+                  }`}
+                >
+                  <ListFilter className="w-3.5 h-3.5" />
+                  <span>Lịch sử nộp bài (Log: {submissions.length})</span>
+                </button>
+              </div>
+
+              {/* Status Filter Tabs (Chỉ hiển thị khi ở tab Danh mục Bài tập) */}
+              {activeTab === "assignments" && (
+                <div className="flex items-center gap-1.5 bg-zinc-900 p-1 rounded-lg border border-zinc-800 self-start sm:self-auto">
+                  <button
+                    onClick={() => setStatusFilter("all")}
+                    className={`px-2.5 py-1 rounded text-[11px] font-medium transition-colors cursor-pointer ${
+                      statusFilter === "all"
+                        ? "bg-zinc-800 text-zinc-100 font-semibold"
+                        : "text-zinc-400 hover:text-zinc-200"
+                    }`}
+                  >
+                    Tất cả ({statusCounts.all})
+                  </button>
+                  <button
+                    onClick={() => setStatusFilter("urgent")}
+                    className={`px-2.5 py-1 rounded text-[11px] font-medium transition-colors cursor-pointer flex items-center gap-1 ${
+                      statusFilter === "urgent"
+                        ? "bg-amber-950/90 text-amber-300 font-semibold border border-amber-800/60"
+                        : "text-zinc-400 hover:text-amber-300"
+                    }`}
+                    title="Chưa đạt 100% và sắp hết hạn (loại trừ bài vô thời hạn)"
+                  >
+                    <span>⚡ Gấp ({statusCounts.urgent})</span>
+                  </button>
+                  <button
+                    onClick={() => setStatusFilter("completed")}
+                    className={`px-2.5 py-1 rounded text-[11px] font-medium transition-colors cursor-pointer flex items-center gap-1 ${
+                      statusFilter === "completed"
+                        ? "bg-emerald-950/90 text-emerald-300 font-semibold border border-emerald-800/60"
+                        : "text-zinc-400 hover:text-emerald-300"
+                    }`}
+                  >
+                    <span>✅ Xong ({statusCounts.completed})</span>
+                  </button>
+                  <button
+                    onClick={() => setStatusFilter("closed")}
+                    className={`px-2.5 py-1 rounded text-[11px] font-medium transition-colors cursor-pointer ${
+                      statusFilter === "closed"
+                        ? "bg-zinc-800 text-zinc-300 font-semibold border border-zinc-700"
+                        : "text-zinc-400 hover:text-zinc-200"
+                    }`}
+                  >
+                    Đã đóng ({statusCounts.closed})
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {activeTab === "assignments" ? (
+              <WecodeAssignmentList
+                assignments={filteredAssignments}
+                onSelectAssignment={(id) => setSelectedAssignmentId(id)}
+              />
+            ) : (
+              <WecodeSubmissionsList
+                submissions={submissions}
+                isLoading={isLoading}
+              />
+            )}
+          </div>
         </div>
+      )}
 
-        <WecodeSubmissionsList
-          submissions={submissions}
-          isLoading={isLoading}
-        />
-      </div>
-
+      {/* Sync Modal */}
       <SyncWecodeModal
         isOpen={isSyncModalOpen}
         onClose={() => setIsSyncModalOpen(false)}
-        onSyncSuccess={() => void fetchSubmissions(selectedAssignment)}
+        onSyncSuccess={() => void fetchSubmissions()}
       />
     </div>
   );

@@ -9,6 +9,8 @@ pub struct WecodeSubmissionDto {
     pub assignment_id: i64,
     #[serde(default)]
     pub assignment_name: Option<String>,
+    #[serde(default)]
+    pub classes: Option<String>,
     pub problem_id: i64,
     pub problem_name: String,
     pub submit_time_str: String,
@@ -18,6 +20,58 @@ pub struct WecodeSubmissionDto {
     pub memory_kib: i64,
     pub language: String,
     pub is_final: bool,
+}
+
+#[derive(serde::Deserialize, serde::Serialize, Clone, Debug, PartialEq)]
+pub struct WecodeAssignmentMetaDto {
+    pub id: i64,
+    pub name: String,
+    #[serde(default)]
+    pub classes: Option<String>,
+    #[serde(default)]
+    pub total_problems: i64,
+    #[serde(default)]
+    pub start_time: Option<String>,
+    #[serde(default)]
+    pub finish_time: Option<String>,
+    #[serde(default)]
+    pub base_url: Option<String>,
+}
+
+#[derive(serde::Deserialize, serde::Serialize, Clone, Debug, PartialEq)]
+pub struct WecodeProblemDto {
+    pub assignment_id: i64,
+    pub problem_id: i64,
+    pub problem_name: String,
+    #[serde(default)]
+    pub problem_order: i64,
+    #[serde(default = "default_problem_max_score")]
+    pub max_score: i64,
+    #[serde(default)]
+    pub is_ac: bool,
+    #[serde(default)]
+    pub problem_url: Option<String>,
+}
+
+fn default_problem_max_score() -> i64 {
+    100
+}
+
+#[derive(serde::Deserialize, serde::Serialize, Clone, Debug)]
+pub struct WecodeSyncPayload {
+    #[serde(default)]
+    pub submissions: Vec<WecodeSubmissionDto>,
+    #[serde(default)]
+    pub assignments: Vec<WecodeAssignmentMetaDto>,
+    #[serde(default)]
+    pub problems: Vec<WecodeProblemDto>,
+}
+
+#[derive(serde::Deserialize, serde::Serialize, Clone, Debug)]
+#[serde(untagged)]
+pub enum WecodeSyncRequest {
+    Full(WecodeSyncPayload),
+    Legacy(Vec<WecodeSubmissionDto>),
 }
 
 
@@ -46,11 +100,13 @@ pub fn ingest_wecode_submissions_internal(
         let fallback_name = format!("Assignment {}", dto.assignment_id);
         let final_name = if assign_name.is_empty() { &fallback_name } else { assign_name };
 
+        let assign_classes = dto.classes.as_deref().unwrap_or("");
         let _ = tx.execute(
-            "INSERT INTO wecode_assignments (id, name, created_at) VALUES (?1, ?2, strftime('%s', 'now'))
+            "INSERT INTO wecode_assignments (id, name, classes, created_at) VALUES (?1, ?2, ?3, strftime('%s', 'now'))
              ON CONFLICT(id) DO UPDATE SET
-                name = CASE WHEN excluded.name != '' AND excluded.name NOT LIKE 'Assignment %' THEN excluded.name ELSE name END",
-            params![dto.assignment_id, final_name],
+                name = CASE WHEN excluded.name != '' AND excluded.name NOT LIKE 'Assignment %' THEN excluded.name ELSE name END,
+                classes = CASE WHEN excluded.classes != '' THEN excluded.classes ELSE classes END",
+            params![dto.assignment_id, final_name, assign_classes],
         );
 
 
@@ -121,17 +177,17 @@ pub fn get_wecode_submissions(
     let query = match assignment_id {
         Some(_) => {
             "SELECT s.submission_id, s.assignment_id, s.problem_id, s.problem_name, s.submit_time, \
-             s.verdict, s.score, s.execution_time, s.memory_kib, s.language, s.is_final, a.name \
+             s.verdict, s.score, s.execution_time, s.memory_kib, s.language, s.is_final, a.name, COALESCE(a.classes, '') \
              FROM wecode_submissions s \
              LEFT JOIN wecode_assignments a ON a.id = s.assignment_id \
              WHERE s.assignment_id = ?1 ORDER BY s.submit_time DESC"
         }
         None => {
             "SELECT s.submission_id, s.assignment_id, s.problem_id, s.problem_name, s.submit_time, \
-             s.verdict, s.score, s.execution_time, s.memory_kib, s.language, s.is_final, a.name \
+             s.verdict, s.score, s.execution_time, s.memory_kib, s.language, s.is_final, a.name, COALESCE(a.classes, '') \
              FROM wecode_submissions s \
              LEFT JOIN wecode_assignments a ON a.id = s.assignment_id \
-             ORDER BY s.submit_time DESC LIMIT 200"
+             ORDER BY s.submit_time DESC LIMIT 2000"
         }
     };
 
@@ -156,11 +212,13 @@ fn map_sub_row(row: &rusqlite::Row) -> rusqlite::Result<WecodeSubmissionDto> {
         .map(|dt| dt.format("%a, %d %b %Y %H:%M:%S").to_string())
         .unwrap_or_else(|| "Unknown".to_string());
     let assignment_name: Option<String> = row.get(11)?;
+    let classes: Option<String> = row.get(12)?;
 
     Ok(WecodeSubmissionDto {
         submission_id: row.get(0)?,
         assignment_id: row.get(1)?,
         assignment_name,
+        classes,
         problem_id: row.get(2)?,
         problem_name: row.get(3)?,
         submit_time_str,
@@ -174,18 +232,81 @@ fn map_sub_row(row: &rusqlite::Row) -> rusqlite::Result<WecodeSubmissionDto> {
 }
 
 #[tauri::command]
+pub fn get_wecode_problems(
+    assignment_id: Option<i64>,
+    state: State<AppState>,
+) -> Result<Vec<WecodeProblemDto>, String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    let query = match assignment_id {
+        Some(_) => "SELECT assignment_id, problem_id, problem_name, problem_order, max_score, is_ac, problem_url \
+                    FROM wecode_problems WHERE assignment_id = ?1 ORDER BY problem_order ASC, problem_id ASC",
+        None => "SELECT assignment_id, problem_id, problem_name, problem_order, max_score, is_ac, problem_url \
+                 FROM wecode_problems ORDER BY assignment_id DESC, problem_order ASC, problem_id ASC",
+    };
+    let mut stmt = conn.prepare(query).map_err(|e| e.to_string())?;
+    let rows = if let Some(aid) = assignment_id {
+        stmt.query_map(params![aid], map_prob_row)
+    } else {
+        stmt.query_map([], map_prob_row)
+    }
+    .map_err(|e| e.to_string())?;
+
+    let mut result = Vec::new();
+    for r in rows {
+        result.push(r.map_err(|e| e.to_string())?);
+    }
+    Ok(result)
+}
+
+fn map_prob_row(row: &rusqlite::Row) -> rusqlite::Result<WecodeProblemDto> {
+    Ok(WecodeProblemDto {
+        assignment_id: row.get(0)?,
+        problem_id: row.get(1)?,
+        problem_name: row.get(2)?,
+        problem_order: row.get(3)?,
+        max_score: row.get(4)?,
+        is_ac: row.get(5)?,
+        problem_url: row.get(6)?,
+    })
+}
+
+#[tauri::command]
+pub fn get_wecode_assignments(
+    state: State<AppState>,
+) -> Result<Vec<WecodeAssignmentMetaDto>, String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare(
+        "SELECT id, name, classes, total_problems, start_time, finish_time, base_url FROM wecode_assignments ORDER BY id DESC"
+    ).map_err(|e| e.to_string())?;
+    let rows = stmt.query_map([], |r| Ok(WecodeAssignmentMetaDto {
+        id: r.get(0)?,
+        name: r.get(1)?,
+        classes: r.get(2)?,
+        total_problems: r.get(3)?,
+        start_time: r.get(4)?,
+        finish_time: r.get(5)?,
+        base_url: r.get(6)?,
+    })).map_err(|e| e.to_string())?;
+
+    let mut result = Vec::new();
+    for r in rows {
+        result.push(r.map_err(|e| e.to_string())?);
+    }
+    Ok(result)
+}
+
+#[tauri::command]
 pub fn ingest_wecode_submissions_json(
     app: AppHandle,
     state: State<AppState>,
     payload_json: String,
 ) -> Result<usize, String> {
-    let submissions: Vec<WecodeSubmissionDto> =
-        serde_json::from_str(&payload_json).map_err(|e| format!("Lỗi parse JSON Wecode Submissions: {e}"))?;
-    let count = submissions.len();
+    let req: WecodeSyncRequest = serde_json::from_str(&payload_json)
+        .map_err(|e| format!("Lỗi parse JSON Wecode Submissions/Payload: {e}"))?;
     let db_arc = state.db.clone();
-    crate::services::wecode_harvester::WecodeIngestionEngine::commit_wecode_records(
+    let count = crate::services::wecode_harvester::WecodeIngestionEngine::commit_wecode_sync_request(
         db_arc,
-        submissions,
+        req,
     )?;
     let _ = app.emit("wecode-submissions-synced", ());
     Ok(count)
@@ -215,6 +336,7 @@ mod tests {
             submission_id: 1001,
             assignment_id: 12,
             assignment_name: Some("Test Assignment".to_string()),
+            classes: Some("IT003.Q27.1".to_string()),
             problem_id: 34,
             problem_name: "Binary Search".to_string(),
             submit_time_str: "Fri, 17 Jul 2026 01:50:46".to_string(),
@@ -231,6 +353,7 @@ mod tests {
             submission_id: 1002,
             assignment_id: 12,
             assignment_name: Some("Test Assignment".to_string()),
+            classes: Some("IT003.Q27.1".to_string()),
             problem_id: 35,
             problem_name: "Merge Sort".to_string(),
             submit_time_str: "Fri, 17 Jul 2026 02:10:00".to_string(),
