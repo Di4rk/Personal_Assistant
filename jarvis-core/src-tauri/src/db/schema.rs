@@ -443,8 +443,58 @@ pub fn ensure_curriculum_schema(conn: &Connection) -> SqlResult<()> {
             ('HTTT',      'D480104', NULL),
             ('MMT',       'D480102', NULL),
             ('KTMT',      'D520216', NULL);
+
+        CREATE TABLE IF NOT EXISTS curriculum_index (
+            slug              TEXT PRIMARY KEY,
+            major_name        TEXT NOT NULL,
+            degree_level      TEXT,
+            cohort_year       INTEGER,
+            cohort_num        INTEGER,
+            total_credits     REAL,
+            training_duration TEXT,
+            training_form     TEXT,
+            is_cached         INTEGER DEFAULT 0,
+            updated_at        INTEGER
+        );
+
+        CREATE TABLE IF NOT EXISTS curriculum_rules (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            slug              TEXT NOT NULL,
+            knowledge_block   TEXT NOT NULL,
+            required_credits  REAL NOT NULL,
+            percent           REAL,
+            FOREIGN KEY (slug) REFERENCES curriculum_index(slug) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS curriculum_courses (
+            id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+            slug                 TEXT NOT NULL,
+            course_code          TEXT NOT NULL,
+            course_name          TEXT NOT NULL,
+            credits              REAL NOT NULL,
+            theory_credits       REAL,
+            practical_credits    REAL,
+            knowledge_block      TEXT NOT NULL,
+            is_compulsory        INTEGER NOT NULL DEFAULT 1,
+            recommended_semester INTEGER,
+            FOREIGN KEY (slug) REFERENCES curriculum_index(slug) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_curr_courses_slug_block
+            ON curriculum_courses(slug, knowledge_block);
+        CREATE INDEX IF NOT EXISTS idx_curr_courses_code
+            ON curriculum_courses(course_code);
+        CREATE INDEX IF NOT EXISTS idx_curr_rules_slug
+            ON curriculum_rules(slug);
+        CREATE INDEX IF NOT EXISTS idx_curr_index_lookup
+            ON curriculum_index(cohort_year, major_name);
         "#,
     )?;
+
+    if let Err(e) = crate::services::curriculum_harvester::seed_curriculum_catalog_if_empty(conn) {
+        eprintln!("[Curriculum] Seeding catalog deferred: {e}");
+    }
+
     Ok(())
 }
 

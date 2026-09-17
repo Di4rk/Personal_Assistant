@@ -325,11 +325,45 @@ pub fn purge_cf_data(db: tauri::State<'_, SharedDb>) -> Result<(), String> {
     purge_cf_data_internal(&mut conn)
 }
 
+/// Kiểm tra tính hợp lệ và an toàn của URL trước khi chuyển qua OS shell.
+pub fn validate_external_url(url: &str) -> Result<&str, &'static str> {
+    let trimmed = url.trim();
+    if trimmed.is_empty() {
+        return Err("URL không được để trống");
+    }
+    if !trimmed.starts_with("http://") && !trimmed.starts_with("https://") && !trimmed.starts_with("mailto:") {
+        return Err("Chỉ hỗ trợ mở đường dẫn web hợp lệ (http/https)");
+    }
+    Ok(trimmed)
+}
+
+/// Mở URL ngoài trình duyệt mặc định của hệ thống một cách an toàn.
+#[tauri::command]
+pub async fn open_external_url(url: String) -> Result<(), String> {
+    let validated = validate_external_url(&url).map_err(|e| e.to_string())?;
+    open::that(validated).map_err(|e| format!("Không thể mở trình duyệt: {e}"))?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::db::schema::create_tables;
     use rusqlite::Connection;
+
+    #[test]
+    fn test_validate_external_url() {
+        assert!(validate_external_url("https://khmt.uit.edu.vn/wecode25/it00x/assignment/1452/2275").is_ok());
+        assert!(validate_external_url("http://wecode.uit.edu.vn/").is_ok());
+        assert!(validate_external_url("   https://example.com  ").is_ok());
+        assert_eq!(validate_external_url("   https://example.com  ").unwrap(), "https://example.com");
+
+        assert!(validate_external_url("").is_err());
+        assert!(validate_external_url("   ").is_err());
+        assert!(validate_external_url("javascript:alert(1)").is_err());
+        assert!(validate_external_url("file:///etc/passwd").is_err());
+        assert!(validate_external_url("data:text/html,test").is_err());
+    }
 
     #[test]
     fn test_purge_cf_data_preserves_deadlines_cleared() {

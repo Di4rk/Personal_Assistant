@@ -1,4 +1,5 @@
 pub mod curriculum_resolver;
+pub mod degree_audit;
 pub mod drl_ingestion;
 pub mod moodle_parser;
 pub mod parser;

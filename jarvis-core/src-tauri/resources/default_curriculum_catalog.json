@@ -1,0 +1,3126 @@
+[
+  {
+    "id": 620,
+    "slug": "cu-nhan-nganh-truyen-thong-da-phuong-tien-khoa-20-2025",
+    "name": "Cử nhân ngành Truyền thông đa phương tiện (Khoá 20 - 2025)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2025
+    ],
+    "major": "Truyền thông đa phương tiện"
+  },
+  {
+    "id": 619,
+    "slug": "cu-nhan-nganh-tri-tue-nhan-tao-lien-thong-dai-hoc-hinh-thuc-dao-tao-tu-xa-qua-mang-khoa-2025",
+    "name": "Cử nhân ngành Trí tuệ nhân tạo Liên thông Đại học - Hình thức đào tạo từ xa qua mạng (Khoá 2025)",
+    "he_code": "TX",
+    "tot_code": "TX-LT",
+    "intake_years": [
+      2025
+    ],
+    "major": "Trí tuệ nhân tạo"
+  },
+  {
+    "id": 618,
+    "slug": "cu-nhan-nganh-tri-tue-nhan-tao-hinh-thuc-dao-tao-tu-xa-qua-mang-khoa-2025",
+    "name": "Cử nhân ngành Trí tuệ nhân tạo - Hình thức đào tạo từ xa qua mạng (Khoá 2025)",
+    "he_code": "TX",
+    "tot_code": "TX-VB1",
+    "intake_years": [
+      2025
+    ],
+    "major": "Trí tuệ nhân tạo"
+  },
+  {
+    "id": 617,
+    "slug": "cu-nhan-nganh-tri-tue-nhan-tao-van-bang-dai-hoc-thu-2-hinh-thuc-dao-tao-tu-xa-qua-mang-khoa-2025",
+    "name": "Cử nhân ngành Trí tuệ nhân tạo Văn bằng Đại học thứ 2 - Hình thức đào tạo từ xa qua mạng (Khoá 2025)",
+    "he_code": "TX",
+    "tot_code": "TX-VB2",
+    "intake_years": [
+      2025
+    ],
+    "major": "Trí tuệ nhân tạo"
+  },
+  {
+    "id": 616,
+    "slug": "cu-nhan-nganh-cong-nghe-thong-tin-he-vb2cq-khoa-20-2025",
+    "name": "Cử nhân ngành Công nghệ Thông tin (hệ VB2CQ) (Khoá 20 - 2025)",
+    "he_code": "CQ",
+    "tot_code": "VB2CQ",
+    "intake_years": [
+      2025
+    ],
+    "major": "Công nghệ Thông tin"
+  },
+  {
+    "id": 615,
+    "slug": "cu-nhan-nganh-cong-nghe-thong-tin-khoa-20-2025",
+    "name": "Cử nhân ngành Công nghệ Thông tin (Khoá 20 - 2025)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2025
+    ],
+    "major": "Công nghệ Thông tin"
+  },
+  {
+    "id": 614,
+    "slug": "chuong-trinh-tien-tien-nganh-he-thong-thong-tin-khoa-20-2025",
+    "name": "Chương trình tiên tiến ngành Hệ thống Thông tin (Khoá 20 - 2025)",
+    "he_code": "CQ",
+    "tot_code": "CTTT",
+    "intake_years": [
+      2025
+    ],
+    "major": "Hệ thống Thông tin"
+  },
+  {
+    "id": 613,
+    "slug": "cu-nhan-tai-nang-nganh-khoa-hoc-may-tinh-khoa-20-2025",
+    "name": "Cử nhân tài năng ngành Khoa học Máy tính (Khoá 20 - 2025)",
+    "he_code": "CQ",
+    "tot_code": "CNTN",
+    "intake_years": [
+      2025
+    ],
+    "major": "Khoa học Máy tính"
+  },
+  {
+    "id": 612,
+    "slug": "cu-nhan-nganh-he-thong-thong-tin-khoa-20-2025",
+    "name": "Cử nhân ngành Hệ thống Thông tin (Khoá 20 - 2025)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2025
+    ],
+    "major": "Hệ thống Thông tin"
+  },
+  {
+    "id": 611,
+    "slug": "cu-nhan-nganh-ky-thuat-may-tinh-khoa-20-2025",
+    "name": "Cử nhân ngành Kỹ thuật Máy tính (Khoá 20 - 2025)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2025
+    ],
+    "major": "Kỹ thuật Máy tính"
+  },
+  {
+    "id": 610,
+    "slug": "cu-nhan-nganh-an-toan-thong-tin-khoa-20-2025",
+    "name": "Cử nhân ngành An toàn Thông tin (Khoá 20 - 2025)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2025
+    ],
+    "major": "An toàn Thông tin"
+  },
+  {
+    "id": 609,
+    "slug": "cu-nhan-nganh-ky-thuat-phan-mem-khoa-20-2025",
+    "name": "Cử nhân ngành Kỹ thuật Phần mềm (Khoá 20 - 2025)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2025
+    ],
+    "major": "Kỹ thuật Phần mềm"
+  },
+  {
+    "id": 608,
+    "slug": "cu-nhan-nganh-thuong-mai-dien-tu-khoa-20-2025",
+    "name": "Cử nhân ngành Thương mại điện tử (Khoá 20 - 2025)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2025
+    ],
+    "major": "Thương mại điện tử"
+  },
+  {
+    "id": 607,
+    "slug": "cu-nhan-nganh-khoa-hoc-may-tinh-khoa-20-2025",
+    "name": "Cử nhân ngành Khoa học Máy tính (Khoá 20 - 2025)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2025
+    ],
+    "major": "Khoa học Máy tính"
+  },
+  {
+    "id": 606,
+    "slug": "cu-nhan-nganh-mang-may-tinh-va-truyen-thong-du-lieu-khoa-20-2025",
+    "name": "Cử nhân ngành Mạng máy tính và Truyền thông dữ liệu (Khoá 20 - 2025)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2025
+    ],
+    "major": "Mạng máy tính và Truyền thông dữ liệu"
+  },
+  {
+    "id": 605,
+    "slug": "cu-nhan-nganh-khoa-hoc-du-lieu-khoa-20-2025",
+    "name": "Cử nhân ngành Khoa học dữ liệu (Khoá 20 - 2025)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2025
+    ],
+    "major": "Khoa học dữ liệu"
+  },
+  {
+    "id": 604,
+    "slug": "cu-nhan-tai-nang-nganh-an-toan-thong-tin-khoa-20-2025",
+    "name": "Cử nhân tài năng ngành An toàn Thông tin (Khoá 20 - 2025)",
+    "he_code": "CQ",
+    "tot_code": "CNTN",
+    "intake_years": [
+      2025
+    ],
+    "major": "An toàn Thông tin"
+  },
+  {
+    "id": 603,
+    "slug": "cu-nhan-nganh-tri-tue-nhan-tao-khoa-20-2025",
+    "name": "Cử nhân ngành Trí tuệ nhân tạo (Khoá 20 - 2025)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2025
+    ],
+    "major": "Trí tuệ nhân tạo"
+  },
+  {
+    "id": 602,
+    "slug": "cu-nhan-nganh-cong-nghe-thong-tin-viet-nhat-he-cq-vn-khoa-20-2025",
+    "name": "Cử nhân ngành Công nghệ thông tin Việt Nhật (hệ CQ-VN) (Khoá 20 - 2025)",
+    "he_code": "CQ",
+    "tot_code": "CQ-VN",
+    "intake_years": [
+      2025
+    ],
+    "major": "Công nghệ thông tin Việt Nhật"
+  },
+  {
+    "id": 601,
+    "slug": "cu-nhan-tai-nang-nganh-thiet-ke-vi-mach-khoa-20-2025",
+    "name": "Cử nhân tài năng ngành Thiết kế vi mạch (Khoá 20 - 2025)",
+    "he_code": "CQ",
+    "tot_code": "CNTN",
+    "intake_years": [
+      2025
+    ],
+    "major": "Thiết kế vi mạch"
+  },
+  {
+    "id": 600,
+    "slug": "cu-nhan-nganh-cong-nghe-thong-tin-he-ltdh-khoa-20-2025",
+    "name": "Cử nhân ngành Công nghệ Thông tin (hệ LTĐH) (Khoá 20 - 2025)",
+    "he_code": "CQ",
+    "tot_code": "LTĐH",
+    "intake_years": [
+      2025
+    ],
+    "major": "Công nghệ Thông tin"
+  },
+  {
+    "id": 599,
+    "slug": "cu-nhan-nganh-thiet-ke-vi-mach-khoa-20-2025",
+    "name": "Cử nhân ngành Thiết kế vi mạch (Khoá 20 - 2025)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2025
+    ],
+    "major": "Thiết kế vi mạch"
+  },
+  {
+    "id": 598,
+    "slug": "cu-nhan-nganh-thiet-ke-vi-mach-khoa-19-2024",
+    "name": "Cử nhân ngành Thiết kế vi mạch (Khoá 19 - 2024)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2024
+    ],
+    "major": "Thiết kế vi mạch"
+  },
+  {
+    "id": 597,
+    "slug": "cu-nhan-nganh-cong-nghe-thong-tin-he-ltdh-khoa-19-2024",
+    "name": "Cử nhân ngành Công nghệ Thông tin (hệ LTĐH) (Khoá 19 - 2024)",
+    "he_code": "CQ",
+    "tot_code": "LTĐH",
+    "intake_years": [
+      2024
+    ],
+    "major": "Công nghệ Thông tin"
+  },
+  {
+    "id": 596,
+    "slug": "cu-nhan-tai-nang-nganh-thiet-ke-vi-mach-khoa-19-2024",
+    "name": "Cử nhân tài năng ngành Thiết kế vi mạch (Khoá 19 - 2024)",
+    "he_code": "CQ",
+    "tot_code": "CNTN",
+    "intake_years": [
+      2024
+    ],
+    "major": "Thiết kế vi mạch"
+  },
+  {
+    "id": 595,
+    "slug": "cu-nhan-nganh-mang-may-tinh-va-an-toan-thong-tin-bcu-chuong-trinh-lien-ket-voi-dh-birmingham-city-khoa-19-2024",
+    "name": "Cử nhân ngành Mạng máy tính và An toàn thông tin - BCU (Chương trình liên kết với ĐH Birmingham City) (Khoá 19 - 2024)",
+    "he_code": "CQ",
+    "tot_code": "BCU",
+    "intake_years": [
+      2024
+    ],
+    "major": "Mạng máy tính và An toàn thông tin - BCU"
+  },
+  {
+    "id": 594,
+    "slug": "cu-nhan-nganh-cong-nghe-thong-tin-viet-nhat-he-cq-vn-khoa-19-2024",
+    "name": "Cử nhân ngành Công nghệ thông tin Việt Nhật (hệ CQ-VN) (Khoá 19 - 2024)",
+    "he_code": "CQ",
+    "tot_code": "CQ-VN",
+    "intake_years": [
+      2024
+    ],
+    "major": "Công nghệ thông tin Việt Nhật"
+  },
+  {
+    "id": 593,
+    "slug": "cu-nhan-nganh-cong-nghe-thong-tin-lien-thong-dai-hoc-hinh-thuc-dao-tao-tu-xa-qua-mang-khoa-2024",
+    "name": "Cử nhân ngành Công nghệ thông tin Liên thông Đại học - Hình thức đào tạo từ xa qua mạng (Khoá 2024)",
+    "he_code": "TX",
+    "tot_code": "TX-LT",
+    "intake_years": [
+      2024
+    ],
+    "major": "Công nghệ thông tin"
+  },
+  {
+    "id": 592,
+    "slug": "cu-nhan-nganh-cong-nghe-thong-tin-van-bang-dai-hoc-thu-2-hinh-thuc-dao-tao-tu-xa-qua-mang-khoa-2024",
+    "name": "Cử nhân ngành Công nghệ thông tin Văn bằng Đại học thứ 2 - Hình thức đào tạo từ xa qua mạng (Khoá 2024)",
+    "he_code": "TX",
+    "tot_code": "TX-VB2",
+    "intake_years": [
+      2024
+    ],
+    "major": "Công nghệ thông tin"
+  },
+  {
+    "id": 591,
+    "slug": "cu-nhan-nganh-tri-tue-nhan-tao-khoa-19-2024",
+    "name": "Cử nhân ngành Trí tuệ nhân tạo (Khoá 19 - 2024)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2024
+    ],
+    "major": "Trí tuệ nhân tạo"
+  },
+  {
+    "id": 590,
+    "slug": "cu-nhan-tai-nang-nganh-an-toan-thong-tin-khoa-19-2024",
+    "name": "Cử nhân tài năng ngành An toàn Thông tin (Khoá 19 - 2024)",
+    "he_code": "CQ",
+    "tot_code": "CNTN",
+    "intake_years": [
+      2024
+    ],
+    "major": "An toàn Thông tin"
+  },
+  {
+    "id": 589,
+    "slug": "cu-nhan-nganh-khoa-hoc-du-lieu-khoa-19-2024",
+    "name": "Cử nhân ngành Khoa học dữ liệu (Khoá 19 - 2024)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2024
+    ],
+    "major": "Khoa học dữ liệu"
+  },
+  {
+    "id": 588,
+    "slug": "cu-nhan-nganh-mang-may-tinh-va-truyen-thong-du-lieu-khoa-19-2024",
+    "name": "Cử nhân ngành Mạng máy tính và Truyền thông dữ liệu (Khoá 19 - 2024)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2024
+    ],
+    "major": "Mạng máy tính và Truyền thông dữ liệu"
+  },
+  {
+    "id": 587,
+    "slug": "cu-nhan-nganh-khoa-hoc-may-tinh-khoa-19-2024",
+    "name": "Cử nhân ngành Khoa học Máy tính (Khoá 19 - 2024)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2024
+    ],
+    "major": "Khoa học Máy tính"
+  },
+  {
+    "id": 586,
+    "slug": "cu-nhan-nganh-thuong-mai-dien-tu-khoa-19-2024",
+    "name": "Cử nhân ngành Thương mại điện tử (Khoá 19 - 2024)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2024
+    ],
+    "major": "Thương mại điện tử"
+  },
+  {
+    "id": 585,
+    "slug": "cu-nhan-nganh-ky-thuat-phan-mem-khoa-19-2024",
+    "name": "Cử nhân ngành Kỹ thuật Phần mềm (Khoá 19 - 2024)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2024
+    ],
+    "major": "Kỹ thuật Phần mềm"
+  },
+  {
+    "id": 584,
+    "slug": "cu-nhan-nganh-an-toan-thong-tin-khoa-19-2024",
+    "name": "Cử nhân ngành An toàn Thông tin (Khoá 19 - 2024)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2024
+    ],
+    "major": "An toàn Thông tin"
+  },
+  {
+    "id": 583,
+    "slug": "cu-nhan-nganh-ky-thuat-may-tinh-khoa-19-2024",
+    "name": "Cử nhân ngành Kỹ thuật Máy tính (Khoá 19 - 2024)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2024
+    ],
+    "major": "Kỹ thuật Máy tính"
+  },
+  {
+    "id": 582,
+    "slug": "cu-nhan-nganh-he-thong-thong-tin-khoa-19-2024",
+    "name": "Cử nhân ngành Hệ thống Thông tin (Khoá 19 - 2024)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2024
+    ],
+    "major": "Hệ thống Thông tin"
+  },
+  {
+    "id": 581,
+    "slug": "cu-nhan-tai-nang-nganh-khoa-hoc-may-tinh-khoa-19-2024",
+    "name": "Cử nhân tài năng ngành Khoa học Máy tính (Khoá 19 - 2024)",
+    "he_code": "CQ",
+    "tot_code": "CNTN",
+    "intake_years": [
+      2024
+    ],
+    "major": "Khoa học Máy tính"
+  },
+  {
+    "id": 580,
+    "slug": "chuong-trinh-tien-tien-nganh-he-thong-thong-tin-khoa-19-2024",
+    "name": "Chương trình tiên tiến ngành Hệ thống Thông tin (Khoá 19 - 2024)",
+    "he_code": "CQ",
+    "tot_code": "CTTT",
+    "intake_years": [
+      2024
+    ],
+    "major": "Hệ thống Thông tin"
+  },
+  {
+    "id": 579,
+    "slug": "cu-nhan-nganh-cong-nghe-thong-tin-khoa-19-2024",
+    "name": "Cử nhân ngành Công nghệ Thông tin (Khoá 19 - 2024)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2024
+    ],
+    "major": "Công nghệ Thông tin"
+  },
+  {
+    "id": 578,
+    "slug": "cu-nhan-nganh-cong-nghe-thong-tin-he-vb2cq-khoa-19-2024",
+    "name": "Cử nhân ngành Công nghệ Thông tin (hệ VB2CQ) (Khoá 19 - 2024)",
+    "he_code": "CQ",
+    "tot_code": "VB2CQ",
+    "intake_years": [
+      2024
+    ],
+    "major": "Công nghệ Thông tin"
+  },
+  {
+    "id": 577,
+    "slug": "cu-nhan-nganh-cong-nghe-thong-tin-hinh-thuc-dao-tao-tu-xa-qua-mang-khoa-2024",
+    "name": "Cử nhân ngành Công nghệ thông tin - Hình thức đào tạo từ xa qua mạng (Khoá 2024)",
+    "he_code": "TX",
+    "tot_code": "TX-VB1",
+    "intake_years": [
+      2024
+    ],
+    "major": "Công nghệ thông tin"
+  },
+  {
+    "id": 576,
+    "slug": "cu-nhan-nganh-khoa-hoc-may-tinh-bcu-chuong-trinh-lien-ket-voi-dh-birmingham-city-khoa-19-2024",
+    "name": "Cử nhân ngành Khoa học máy tính - BCU (Chương trình liên kết với ĐH Birmingham City) (Khoá 19 - 2024)",
+    "he_code": "CQ",
+    "tot_code": "BCU",
+    "intake_years": [
+      2024
+    ],
+    "major": "Khoa học máy tính - BCU"
+  },
+  {
+    "id": 575,
+    "slug": "cu-nhan-nganh-cong-nghe-thong-tin-he-ltdh-khoa-18-2023",
+    "name": "Cử nhân ngành Công nghệ Thông tin (hệ LTĐH) (Khoá 18 - 2023)",
+    "he_code": "CQ",
+    "tot_code": "LTĐH",
+    "intake_years": [
+      2023
+    ],
+    "major": "Công nghệ Thông tin"
+  },
+  {
+    "id": 574,
+    "slug": "cu-nhan-nganh-khoa-hoc-may-tinh-bcu-chuong-trinh-lien-ket-voi-dh-birmingham-city-khoa-18-2023",
+    "name": "Cử nhân ngành Khoa học máy tính - BCU (Chương trình liên kết với ĐH Birmingham City) (Khoá 18 - 2023)",
+    "he_code": "CQ",
+    "tot_code": "BCU",
+    "intake_years": [
+      2023
+    ],
+    "major": "Khoa học máy tính - BCU"
+  },
+  {
+    "id": 573,
+    "slug": "cu-nhan-nganh-cong-nghe-thong-tin-hinh-thuc-dao-tao-tu-xa-qua-mang-khoa-2023",
+    "name": "Cử nhân ngành Công nghệ thông tin - Hình thức đào tạo từ xa qua mạng (Khoá 2023)",
+    "he_code": "TX",
+    "tot_code": "TX-VB1",
+    "intake_years": [
+      2023
+    ],
+    "major": "Công nghệ thông tin"
+  },
+  {
+    "id": 572,
+    "slug": "cu-nhan-nganh-cong-nghe-thong-tin-he-vb2cq-khoa-18-2023",
+    "name": "Cử nhân ngành Công nghệ Thông tin (hệ VB2CQ) (Khoá 18 - 2023)",
+    "he_code": "CQ",
+    "tot_code": "VB2CQ",
+    "intake_years": [
+      2023
+    ],
+    "major": "Công nghệ Thông tin"
+  },
+  {
+    "id": 571,
+    "slug": "cu-nhan-nganh-cong-nghe-thong-tin-khoa-18-2023",
+    "name": "Cử nhân ngành Công nghệ Thông tin (Khoá 18 - 2023)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2023
+    ],
+    "major": "Công nghệ Thông tin"
+  },
+  {
+    "id": 570,
+    "slug": "chuong-trinh-tien-tien-nganh-he-thong-thong-tin-khoa-18-2023",
+    "name": "Chương trình tiên tiến ngành Hệ thống Thông tin (Khoá 18 - 2023)",
+    "he_code": "CQ",
+    "tot_code": "CTTT",
+    "intake_years": [
+      2023
+    ],
+    "major": "Hệ thống Thông tin"
+  },
+  {
+    "id": 569,
+    "slug": "cu-nhan-tai-nang-nganh-khoa-hoc-may-tinh-khoa-18-2023",
+    "name": "Cử nhân tài năng ngành Khoa học Máy tính (Khoá 18 - 2023)",
+    "he_code": "CQ",
+    "tot_code": "CNTN",
+    "intake_years": [
+      2023
+    ],
+    "major": "Khoa học Máy tính"
+  },
+  {
+    "id": 568,
+    "slug": "cu-nhan-nganh-he-thong-thong-tin-khoa-18-2023",
+    "name": "Cử nhân ngành Hệ thống Thông tin (Khoá 18 - 2023)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2023
+    ],
+    "major": "Hệ thống Thông tin"
+  },
+  {
+    "id": 567,
+    "slug": "cu-nhan-nganh-ky-thuat-may-tinh-khoa-18-2023",
+    "name": "Cử nhân ngành Kỹ thuật Máy tính (Khoá 18 - 2023)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2023
+    ],
+    "major": "Kỹ thuật Máy tính"
+  },
+  {
+    "id": 566,
+    "slug": "cu-nhan-nganh-an-toan-thong-tin-khoa-18-2023",
+    "name": "Cử nhân ngành An toàn Thông tin (Khoá 18 - 2023)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2023
+    ],
+    "major": "An toàn Thông tin"
+  },
+  {
+    "id": 565,
+    "slug": "cu-nhan-nganh-ky-thuat-phan-mem-khoa-18-2023",
+    "name": "Cử nhân ngành Kỹ thuật Phần mềm (Khoá 18 - 2023)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2023
+    ],
+    "major": "Kỹ thuật Phần mềm"
+  },
+  {
+    "id": 564,
+    "slug": "cu-nhan-nganh-thuong-mai-dien-tu-khoa-18-2023",
+    "name": "Cử nhân ngành Thương mại điện tử (Khoá 18 - 2023)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2023
+    ],
+    "major": "Thương mại điện tử"
+  },
+  {
+    "id": 563,
+    "slug": "cu-nhan-nganh-khoa-hoc-may-tinh-khoa-18-2023",
+    "name": "Cử nhân ngành Khoa học Máy tính (Khoá 18 - 2023)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2023
+    ],
+    "major": "Khoa học Máy tính"
+  },
+  {
+    "id": 562,
+    "slug": "cu-nhan-nganh-mang-may-tinh-va-truyen-thong-du-lieu-khoa-18-2023",
+    "name": "Cử nhân ngành Mạng máy tính và Truyền thông dữ liệu (Khoá 18 - 2023)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2023
+    ],
+    "major": "Mạng máy tính và Truyền thông dữ liệu"
+  },
+  {
+    "id": 561,
+    "slug": "cu-nhan-nganh-khoa-hoc-du-lieu-khoa-18-2023",
+    "name": "Cử nhân ngành Khoa học dữ liệu (Khoá 18 - 2023)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2023
+    ],
+    "major": "Khoa học dữ liệu"
+  },
+  {
+    "id": 560,
+    "slug": "cu-nhan-tai-nang-nganh-an-toan-thong-tin-khoa-18-2023",
+    "name": "Cử nhân tài năng ngành An toàn Thông tin (Khoá 18 - 2023)",
+    "he_code": "CQ",
+    "tot_code": "CNTN",
+    "intake_years": [
+      2023
+    ],
+    "major": "An toàn Thông tin"
+  },
+  {
+    "id": 559,
+    "slug": "cu-nhan-nganh-ky-thuat-may-tinh-iot-khoa-18-2023",
+    "name": "Cử nhân ngành Kỹ thuật Máy tính - IoT (Khoá 18 - 2023)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2023
+    ],
+    "major": "Kỹ thuật Máy tính - IoT"
+  },
+  {
+    "id": 558,
+    "slug": "cu-nhan-nganh-tri-tue-nhan-tao-khoa-18-2023",
+    "name": "Cử nhân ngành Trí tuệ nhân tạo (Khoá 18 - 2023)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2023
+    ],
+    "major": "Trí tuệ nhân tạo"
+  },
+  {
+    "id": 557,
+    "slug": "cu-nhan-nganh-cong-nghe-thong-tin-van-bang-dai-hoc-thu-2-hinh-thuc-dao-tao-tu-xa-qua-mang-khoa-2023",
+    "name": "Cử nhân ngành Công nghệ thông tin Văn bằng Đại học thứ 2 - Hình thức đào tạo từ xa qua mạng (Khoá 2023)",
+    "he_code": "TX",
+    "tot_code": "TX-VB2",
+    "intake_years": [
+      2023
+    ],
+    "major": "Công nghệ thông tin"
+  },
+  {
+    "id": 556,
+    "slug": "cu-nhan-nganh-cong-nghe-thong-tin-lien-thong-dai-hoc-hinh-thuc-dao-tao-tu-xa-qua-mang-khoa-2023",
+    "name": "Cử nhân ngành Công nghệ thông tin Liên thông Đại học - Hình thức đào tạo từ xa qua mạng (Khoá 2023)",
+    "he_code": "TX",
+    "tot_code": "TX-LT",
+    "intake_years": [
+      2023
+    ],
+    "major": "Công nghệ thông tin"
+  },
+  {
+    "id": 555,
+    "slug": "cu-nhan-nganh-cong-nghe-thong-tin-viet-nhat-he-cq-vn-khoa-18-2023",
+    "name": "Cử nhân ngành Công nghệ thông tin Việt Nhật (hệ CQ-VN) (Khoá 18 - 2023)",
+    "he_code": "CQ",
+    "tot_code": "CQ-VN",
+    "intake_years": [
+      2023
+    ],
+    "major": "Công nghệ thông tin Việt Nhật"
+  },
+  {
+    "id": 554,
+    "slug": "cu-nhan-nganh-cong-nghe-thong-tin-dinh-huong-nhat-ban-khoa-18-2023",
+    "name": "Cử nhân ngành Công nghệ thông tin định hướng Nhật Bản (Khoá 18 - 2023)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2023
+    ],
+    "major": "Công nghệ thông tin định hướng Nhật Bản"
+  },
+  {
+    "id": 553,
+    "slug": "cu-nhan-nganh-tri-tue-nhan-tao-khoa-17-2022-1",
+    "name": "Cử nhân ngành Trí tuệ nhân tạo (Khoá 17 - 2022)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2022
+    ],
+    "major": "Trí tuệ nhân tạo"
+  },
+  {
+    "id": 552,
+    "slug": "cu-nhan-nganh-cong-nghe-thong-tin-dinh-huong-nhat-ban-khoa-17-2022",
+    "name": "Cử nhân ngành Công nghệ thông tin định hướng Nhật Bản (Khoá 17 - 2022)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2022
+    ],
+    "major": "Công nghệ thông tin định hướng Nhật Bản"
+  },
+  {
+    "id": 551,
+    "slug": "cu-nhan-nganh-cong-nghe-thong-tin-viet-nhat-he-cq-vn-khoa-17-2022",
+    "name": "Cử nhân ngành Công nghệ thông tin Việt Nhật (hệ CQ-VN) (Khoá 17 - 2022)",
+    "he_code": "CQ",
+    "tot_code": "CQ-VN",
+    "intake_years": [
+      2022
+    ],
+    "major": "Công nghệ thông tin Việt Nhật"
+  },
+  {
+    "id": 550,
+    "slug": "cu-nhan-nganh-cong-nghe-thong-tin-lien-thong-dai-hoc-hinh-thuc-dao-tao-tu-xa-qua-mang-khoa-2022",
+    "name": "Cử nhân ngành Công nghệ thông tin Liên thông Đại học - Hình thức đào tạo từ xa qua mạng (Khoá 2022)",
+    "he_code": "TX",
+    "tot_code": "TX-LT",
+    "intake_years": [
+      2022
+    ],
+    "major": "Công nghệ thông tin"
+  },
+  {
+    "id": 549,
+    "slug": "cu-nhan-nganh-cong-nghe-thong-tin-van-bang-dai-hoc-thu-2-hinh-thuc-dao-tao-tu-xa-qua-mang-khoa-2022",
+    "name": "Cử nhân ngành Công nghệ thông tin Văn bằng Đại học thứ 2 - Hình thức đào tạo từ xa qua mạng (Khoá 2022)",
+    "he_code": "TX",
+    "tot_code": "TX-VB2",
+    "intake_years": [
+      2022
+    ],
+    "major": "Công nghệ thông tin"
+  },
+  {
+    "id": 548,
+    "slug": "cu-nhan-nganh-tri-tue-nhan-tao-khoa-17-2022",
+    "name": "Cử nhân ngành Trí tuệ nhân tạo (Khoá 17 - 2022)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2022
+    ],
+    "major": "Trí tuệ nhân tạo"
+  },
+  {
+    "id": 547,
+    "slug": "cu-nhan-nganh-ky-thuat-may-tinh-iot-khoa-17-2022",
+    "name": "Cử nhân ngành Kỹ thuật Máy tính - IoT (Khoá 17 - 2022)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2022
+    ],
+    "major": "Kỹ thuật Máy tính - IoT"
+  },
+  {
+    "id": 546,
+    "slug": "cu-nhan-nganh-mang-may-tinh-va-an-toan-thong-tin-bcu-chuong-trinh-lien-ket-voi-dh-birmingham-city-khoa-17-2022",
+    "name": "Cử nhân ngành Mạng máy tính và An toàn thông tin - BCU (Chương trình liên kết với ĐH Birmingham City) (Khoá 17 - 2022)",
+    "he_code": "CQ",
+    "tot_code": "BCU",
+    "intake_years": [
+      2022
+    ],
+    "major": "Mạng máy tính và An toàn thông tin - BCU"
+  },
+  {
+    "id": 545,
+    "slug": "cu-nhan-tai-nang-nganh-an-toan-thong-tin-khoa-17-2022",
+    "name": "Cử nhân tài năng ngành An toàn Thông tin (Khoá 17 - 2022)",
+    "he_code": "CQ",
+    "tot_code": "CNTN",
+    "intake_years": [
+      2022
+    ],
+    "major": "An toàn Thông tin"
+  },
+  {
+    "id": 544,
+    "slug": "cu-nhan-nganh-khoa-hoc-du-lieu-khoa-17-2022",
+    "name": "Cử nhân ngành Khoa học dữ liệu (Khoá 17 - 2022)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2022
+    ],
+    "major": "Khoa học dữ liệu"
+  },
+  {
+    "id": 543,
+    "slug": "cu-nhan-nganh-mang-may-tinh-va-truyen-thong-du-lieu-khoa-17-2022",
+    "name": "Cử nhân ngành Mạng máy tính và Truyền thông dữ liệu (Khoá 17 - 2022)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2022
+    ],
+    "major": "Mạng máy tính và Truyền thông dữ liệu"
+  },
+  {
+    "id": 542,
+    "slug": "cu-nhan-nganh-khoa-hoc-may-tinh-khoa-17-2022",
+    "name": "Cử nhân ngành Khoa học Máy tính (Khoá 17 - 2022)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2022
+    ],
+    "major": "Khoa học Máy tính"
+  },
+  {
+    "id": 541,
+    "slug": "cu-nhan-nganh-thuong-mai-dien-tu-khoa-17-2022",
+    "name": "Cử nhân ngành Thương mại điện tử (Khoá 17 - 2022)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2022
+    ],
+    "major": "Thương mại điện tử"
+  },
+  {
+    "id": 540,
+    "slug": "cu-nhan-nganh-ky-thuat-phan-mem-khoa-17-2022",
+    "name": "Cử nhân ngành Kỹ thuật Phần mềm (Khoá 17 - 2022)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2022
+    ],
+    "major": "Kỹ thuật Phần mềm"
+  },
+  {
+    "id": 539,
+    "slug": "cu-nhan-nganh-an-toan-thong-tin-khoa-17-2022",
+    "name": "Cử nhân ngành An toàn Thông tin (Khoá 17 - 2022)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2022
+    ],
+    "major": "An toàn Thông tin"
+  },
+  {
+    "id": 538,
+    "slug": "cu-nhan-nganh-ky-thuat-may-tinh-khoa-17-2022",
+    "name": "Cử nhân ngành Kỹ thuật Máy tính (Khoá 17 - 2022)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2022
+    ],
+    "major": "Kỹ thuật Máy tính"
+  },
+  {
+    "id": 537,
+    "slug": "cu-nhan-nganh-he-thong-thong-tin-khoa-17-2022",
+    "name": "Cử nhân ngành Hệ thống Thông tin (Khoá 17 - 2022)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2022
+    ],
+    "major": "Hệ thống Thông tin"
+  },
+  {
+    "id": 536,
+    "slug": "cu-nhan-tai-nang-nganh-khoa-hoc-may-tinh-khoa-17-2022",
+    "name": "Cử nhân tài năng ngành Khoa học Máy tính (Khoá 17 - 2022)",
+    "he_code": "CQ",
+    "tot_code": "CNTN",
+    "intake_years": [
+      2022
+    ],
+    "major": "Khoa học Máy tính"
+  },
+  {
+    "id": 535,
+    "slug": "chuong-trinh-tien-tien-nganh-he-thong-thong-tin-khoa-17-2022",
+    "name": "Chương trình tiên tiến ngành Hệ thống Thông tin (Khoá 17 - 2022)",
+    "he_code": "CQ",
+    "tot_code": "CTTT",
+    "intake_years": [
+      2022
+    ],
+    "major": "Hệ thống Thông tin"
+  },
+  {
+    "id": 534,
+    "slug": "cu-nhan-nganh-cong-nghe-thong-tin-khoa-17-2022",
+    "name": "Cử nhân ngành Công nghệ Thông tin (Khoá 17 - 2022)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2022
+    ],
+    "major": "Công nghệ Thông tin"
+  },
+  {
+    "id": 533,
+    "slug": "cu-nhan-nganh-cong-nghe-thong-tin-he-vb2cq-khoa-17-2022",
+    "name": "Cử nhân ngành Công nghệ Thông tin (hệ VB2CQ) (Khoá 17 - 2022)",
+    "he_code": "CQ",
+    "tot_code": "VB2CQ",
+    "intake_years": [
+      2022
+    ],
+    "major": "Công nghệ Thông tin"
+  },
+  {
+    "id": 532,
+    "slug": "cu-nhan-nganh-cong-nghe-thong-tin-hinh-thuc-dao-tao-tu-xa-qua-mang-khoa-2022",
+    "name": "Cử nhân ngành Công nghệ thông tin - Hình thức đào tạo từ xa qua mạng (Khoá 2022)",
+    "he_code": "TX",
+    "tot_code": "TX-VB1",
+    "intake_years": [
+      2022
+    ],
+    "major": "Công nghệ thông tin"
+  },
+  {
+    "id": 531,
+    "slug": "cu-nhan-nganh-khoa-hoc-may-tinh-bcu-chuong-trinh-lien-ket-voi-dh-birmingham-city-khoa-17-2022",
+    "name": "Cử nhân ngành Khoa học máy tính - BCU (Chương trình liên kết với ĐH Birmingham City) (Khoá 17 - 2022)",
+    "he_code": "CQ",
+    "tot_code": "BCU",
+    "intake_years": [
+      2022
+    ],
+    "major": "Khoa học máy tính - BCU"
+  },
+  {
+    "id": 530,
+    "slug": "cu-nhan-nganh-cong-nghe-thong-tin-he-ltdh-khoa-17-2022",
+    "name": "Cử nhân ngành Công nghệ Thông tin (hệ LTĐH) (Khoá 17 - 2022)",
+    "he_code": "CQ",
+    "tot_code": "LTĐH",
+    "intake_years": [
+      2022
+    ],
+    "major": "Công nghệ Thông tin"
+  },
+  {
+    "id": 529,
+    "slug": "cu-nhan-nganh-cong-nghe-thong-tin-he-ltdh-khoa-16-2021",
+    "name": "Cử nhân ngành Công nghệ Thông tin (hệ LTĐH) (Khoá 16 - 2021)",
+    "he_code": "CQ",
+    "tot_code": "LTĐH",
+    "intake_years": [
+      2021
+    ],
+    "major": "Công nghệ Thông tin"
+  },
+  {
+    "id": 528,
+    "slug": "cu-nhan-nganh-khoa-hoc-may-tinh-bcu-chuong-trinh-lien-ket-voi-dh-birmingham-city-khoa-16-2021",
+    "name": "Cử nhân ngành Khoa học máy tính - BCU (Chương trình liên kết với ĐH Birmingham City) (Khoá 16 - 2021)",
+    "he_code": "CQ",
+    "tot_code": "BCU",
+    "intake_years": [
+      2021
+    ],
+    "major": "Khoa học máy tính - BCU"
+  },
+  {
+    "id": 527,
+    "slug": "cu-nhan-nganh-thuong-mai-dien-tu-chat-luong-cao-khoa-16-2021",
+    "name": "Cử nhân ngành Thương mại điện tử (Chất lượng cao) (Khoá 16 - 2021)",
+    "he_code": "CQ",
+    "tot_code": "CLC",
+    "intake_years": [
+      2021
+    ],
+    "major": "Thương mại điện tử"
+  },
+  {
+    "id": 526,
+    "slug": "cu-nhan-nganh-cong-nghe-thong-tin-hinh-thuc-dao-tao-tu-xa-qua-mang-khoa-2021",
+    "name": "Cử nhân ngành Công nghệ thông tin - Hình thức đào tạo từ xa qua mạng (Khoá 2021)",
+    "he_code": "TX",
+    "tot_code": "TX-VB1",
+    "intake_years": [
+      2021
+    ],
+    "major": "Công nghệ thông tin"
+  },
+  {
+    "id": 525,
+    "slug": "cu-nhan-nganh-cong-nghe-thong-tin-he-vb2cq-khoa-16-2021",
+    "name": "Cử nhân ngành Công nghệ Thông tin (hệ VB2CQ) (Khoá 16 - 2021)",
+    "he_code": "CQ",
+    "tot_code": "VB2CQ",
+    "intake_years": [
+      2021
+    ],
+    "major": "Công nghệ Thông tin"
+  },
+  {
+    "id": 524,
+    "slug": "cu-nhan-nganh-khoa-hoc-may-tinh-chat-luong-cao-khoa-16-2021",
+    "name": "Cử nhân ngành Khoa học Máy tính (Chất lượng cao) (Khoá 16 - 2021)",
+    "he_code": "CQ",
+    "tot_code": "CLC",
+    "intake_years": [
+      2021
+    ],
+    "major": "Khoa học Máy tính"
+  },
+  {
+    "id": 523,
+    "slug": "cu-nhan-nganh-an-toan-thong-tin-chat-luong-cao-khoa-16-2021",
+    "name": "Cử nhân ngành An toàn Thông tin (Chất lượng cao) (Khoá 16 - 2021)",
+    "he_code": "CQ",
+    "tot_code": "CLC",
+    "intake_years": [
+      2021
+    ],
+    "major": "An toàn Thông tin"
+  },
+  {
+    "id": 522,
+    "slug": "cu-nhan-nganh-cong-nghe-thong-tin-khoa-16-2021",
+    "name": "Cử nhân ngành Công nghệ Thông tin (Khoá 16 - 2021)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2021
+    ],
+    "major": "Công nghệ Thông tin"
+  },
+  {
+    "id": 521,
+    "slug": "cu-nhan-nganh-ky-thuat-phan-mem-chat-luong-cao-khoa-16-2021",
+    "name": "Cử nhân ngành Kỹ thuật Phần mềm (Chất lượng cao) (Khoá 16 - 2021)",
+    "he_code": "CQ",
+    "tot_code": "CLC",
+    "intake_years": [
+      2021
+    ],
+    "major": "Kỹ thuật Phần mềm"
+  },
+  {
+    "id": 520,
+    "slug": "cu-nhan-nganh-ky-thuat-may-tinh-chat-luong-cao-khoa-16-2021",
+    "name": "Cử nhân ngành Kỹ thuật Máy tính (Chất lượng cao) (Khoá 16 - 2021)",
+    "he_code": "CQ",
+    "tot_code": "CLC",
+    "intake_years": [
+      2021
+    ],
+    "major": "Kỹ thuật Máy tính"
+  },
+  {
+    "id": 519,
+    "slug": "chuong-trinh-tien-tien-nganh-he-thong-thong-tin-khoa-16-2021",
+    "name": "Chương trình tiên tiến ngành Hệ thống Thông tin (Khoá 16 - 2021)",
+    "he_code": "CQ",
+    "tot_code": "CTTT",
+    "intake_years": [
+      2021
+    ],
+    "major": "Hệ thống Thông tin"
+  },
+  {
+    "id": 518,
+    "slug": "cu-nhan-tai-nang-nganh-khoa-hoc-may-tinh-khoa-16-2021",
+    "name": "Cử nhân tài năng ngành Khoa học Máy tính (Khoá 16 - 2021)",
+    "he_code": "CQ",
+    "tot_code": "CNTN",
+    "intake_years": [
+      2021
+    ],
+    "major": "Khoa học Máy tính"
+  },
+  {
+    "id": 517,
+    "slug": "cu-nhan-nganh-he-thong-thong-tin-khoa-16-2021",
+    "name": "Cử nhân ngành Hệ thống Thông tin (Khoá 16 - 2021)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2021
+    ],
+    "major": "Hệ thống Thông tin"
+  },
+  {
+    "id": 516,
+    "slug": "cu-nhan-nganh-ky-thuat-may-tinh-khoa-16-2021",
+    "name": "Cử nhân ngành Kỹ thuật Máy tính (Khoá 16 - 2021)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2021
+    ],
+    "major": "Kỹ thuật Máy tính"
+  },
+  {
+    "id": 515,
+    "slug": "cu-nhan-nganh-an-toan-thong-tin-khoa-16-2021",
+    "name": "Cử nhân ngành An toàn Thông tin (Khoá 16 - 2021)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2021
+    ],
+    "major": "An toàn Thông tin"
+  },
+  {
+    "id": 514,
+    "slug": "cu-nhan-nganh-ky-thuat-phan-mem-khoa-16-2021",
+    "name": "Cử nhân ngành Kỹ thuật Phần mềm (Khoá 16 - 2021)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2021
+    ],
+    "major": "Kỹ thuật Phần mềm"
+  },
+  {
+    "id": 513,
+    "slug": "cu-nhan-nganh-thuong-mai-dien-tu-khoa-16-2021",
+    "name": "Cử nhân ngành Thương mại điện tử (Khoá 16 - 2021)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2021
+    ],
+    "major": "Thương mại điện tử"
+  },
+  {
+    "id": 512,
+    "slug": "cu-nhan-nganh-khoa-hoc-may-tinh-khoa-16-2021",
+    "name": "Cử nhân ngành Khoa học Máy tính (Khoá 16 - 2021)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2021
+    ],
+    "major": "Khoa học Máy tính"
+  },
+  {
+    "id": 511,
+    "slug": "cu-nhan-nganh-he-thong-thong-tin-chat-luong-cao-khoa-16-2021",
+    "name": "Cử nhân ngành Hệ thống Thông tin (Chất lượng cao) (Khoá 16 - 2021)",
+    "he_code": "CQ",
+    "tot_code": "CLC",
+    "intake_years": [
+      2021
+    ],
+    "major": "Hệ thống Thông tin"
+  },
+  {
+    "id": 510,
+    "slug": "cu-nhan-nganh-mang-may-tinh-va-truyen-thong-du-lieu-chat-luong-cao-khoa-16-2021",
+    "name": "Cử nhân ngành Mạng máy tính và Truyền thông dữ liệu (Chất lượng cao) (Khoá 16 - 2021)",
+    "he_code": "CQ",
+    "tot_code": "CLC",
+    "intake_years": [
+      2021
+    ],
+    "major": "Mạng máy tính và Truyền thông dữ liệu"
+  },
+  {
+    "id": 509,
+    "slug": "cu-nhan-nganh-cong-nghe-thong-tin-dinh-huong-nhat-ban-chat-luong-cao-khoa-16-2021",
+    "name": "Cử nhân ngành Công nghệ thông tin định hướng Nhật Bản (Chất lượng cao) (Khoá 16 - 2021)",
+    "he_code": "CQ",
+    "tot_code": "CLC",
+    "intake_years": [
+      2021
+    ],
+    "major": "Công nghệ thông tin định hướng Nhật Bản"
+  },
+  {
+    "id": 508,
+    "slug": "cu-nhan-nganh-mang-may-tinh-va-truyen-thong-du-lieu-khoa-16-2021",
+    "name": "Cử nhân ngành Mạng máy tính và Truyền thông dữ liệu (Khoá 16 - 2021)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2021
+    ],
+    "major": "Mạng máy tính và Truyền thông dữ liệu"
+  },
+  {
+    "id": 507,
+    "slug": "cu-nhan-nganh-khoa-hoc-du-lieu-khoa-16-2021",
+    "name": "Cử nhân ngành Khoa học dữ liệu (Khoá 16 - 2021)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2021
+    ],
+    "major": "Khoa học dữ liệu"
+  },
+  {
+    "id": 506,
+    "slug": "cu-nhan-tai-nang-nganh-an-toan-thong-tin-khoa-16-2021",
+    "name": "Cử nhân tài năng ngành An toàn Thông tin (Khoá 16 - 2021)",
+    "he_code": "CQ",
+    "tot_code": "CNTN",
+    "intake_years": [
+      2021
+    ],
+    "major": "An toàn Thông tin"
+  },
+  {
+    "id": 505,
+    "slug": "cu-nhan-nganh-mang-may-tinh-va-an-toan-thong-tin-bcu-chuong-trinh-lien-ket-voi-dh-birmingham-city-khoa-16-2021",
+    "name": "Cử nhân ngành Mạng máy tính và An toàn thông tin - BCU (Chương trình liên kết với ĐH Birmingham City) (Khoá 16 - 2021)",
+    "he_code": "CQ",
+    "tot_code": "BCU",
+    "intake_years": [
+      2021
+    ],
+    "major": "Mạng máy tính và An toàn thông tin - BCU"
+  },
+  {
+    "id": 504,
+    "slug": "cu-nhan-nganh-khoa-hoc-may-tinh-ai-khoa-16-2021",
+    "name": "Cử nhân ngành Khoa học Máy tính - AI (Khoá 16 - 2021)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2021
+    ],
+    "major": "Khoa học Máy tính - AI"
+  },
+  {
+    "id": 503,
+    "slug": "cu-nhan-nganh-ky-thuat-may-tinh-iot-khoa-16-2021",
+    "name": "Cử nhân ngành Kỹ thuật Máy tính - IoT (Khoá 16 - 2021)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2021
+    ],
+    "major": "Kỹ thuật Máy tính - IoT"
+  },
+  {
+    "id": 502,
+    "slug": "cu-nhan-nganh-tri-tue-nhan-tao-khoa-16-2021",
+    "name": "Cử nhân ngành Trí tuệ nhân tạo (Khoá 16 - 2021)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2021
+    ],
+    "major": "Trí tuệ nhân tạo"
+  },
+  {
+    "id": 501,
+    "slug": "cu-nhan-nganh-tri-tue-nhan-tao-khoa-15-2020",
+    "name": "Cử nhân ngành Trí tuệ nhân tạo (Khoá 15 - 2020)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2020
+    ],
+    "major": "Trí tuệ nhân tạo"
+  },
+  {
+    "id": 500,
+    "slug": "cu-nhan-nganh-ky-thuat-may-tinh-iot-khoa-15-2020",
+    "name": "Cử nhân ngành Kỹ thuật Máy tính - IoT (Khoá 15 - 2020)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2020
+    ],
+    "major": "Kỹ thuật Máy tính - IoT"
+  },
+  {
+    "id": 499,
+    "slug": "cu-nhan-nganh-khoa-hoc-may-tinh-ai-khoa-15-2020",
+    "name": "Cử nhân ngành Khoa học Máy tính - AI (Khoá 15 - 2020)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2020
+    ],
+    "major": "Khoa học Máy tính - AI"
+  },
+  {
+    "id": 498,
+    "slug": "cu-nhan-nganh-mang-may-tinh-va-an-toan-thong-tin-bcu-chuong-trinh-lien-ket-voi-dh-birmingham-city-khoa-15-2020",
+    "name": "Cử nhân ngành Mạng máy tính và An toàn thông tin - BCU (Chương trình liên kết với ĐH Birmingham City) (Khoá 15 - 2020)",
+    "he_code": "CQ",
+    "tot_code": "BCU",
+    "intake_years": [
+      2020
+    ],
+    "major": "Mạng máy tính và An toàn thông tin - BCU"
+  },
+  {
+    "id": 497,
+    "slug": "cu-nhan-tai-nang-nganh-an-toan-thong-tin-khoa-15-2020",
+    "name": "Cử nhân tài năng ngành An toàn Thông tin (Khoá 15 - 2020)",
+    "he_code": "CQ",
+    "tot_code": "CNTN",
+    "intake_years": [
+      2020
+    ],
+    "major": "An toàn Thông tin"
+  },
+  {
+    "id": 496,
+    "slug": "cu-nhan-nganh-khoa-hoc-du-lieu-khoa-15-2020",
+    "name": "Cử nhân ngành Khoa học dữ liệu (Khoá 15 - 2020)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2020
+    ],
+    "major": "Khoa học dữ liệu"
+  },
+  {
+    "id": 495,
+    "slug": "cu-nhan-nganh-mang-may-tinh-va-truyen-thong-du-lieu-khoa-15-2020",
+    "name": "Cử nhân ngành Mạng máy tính và Truyền thông dữ liệu (Khoá 15 - 2020)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2020
+    ],
+    "major": "Mạng máy tính và Truyền thông dữ liệu"
+  },
+  {
+    "id": 494,
+    "slug": "cu-nhan-nganh-cong-nghe-thong-tin-dinh-huong-nhat-ban-chat-luong-cao-khoa-15-2020",
+    "name": "Cử nhân ngành Công nghệ thông tin định hướng Nhật Bản (Chất lượng cao) (Khoá 15 - 2020)",
+    "he_code": "CQ",
+    "tot_code": "CLC",
+    "intake_years": [
+      2020
+    ],
+    "major": "Công nghệ thông tin định hướng Nhật Bản"
+  },
+  {
+    "id": 493,
+    "slug": "cu-nhan-nganh-mang-may-tinh-va-truyen-thong-du-lieu-chat-luong-cao-khoa-15-2020",
+    "name": "Cử nhân ngành Mạng máy tính và Truyền thông dữ liệu (Chất lượng cao) (Khoá 15 - 2020)",
+    "he_code": "CQ",
+    "tot_code": "CLC",
+    "intake_years": [
+      2020
+    ],
+    "major": "Mạng máy tính và Truyền thông dữ liệu"
+  },
+  {
+    "id": 492,
+    "slug": "cu-nhan-nganh-he-thong-thong-tin-chat-luong-cao-khoa-15-2020",
+    "name": "Cử nhân ngành Hệ thống Thông tin (Chất lượng cao) (Khoá 15 - 2020)",
+    "he_code": "CQ",
+    "tot_code": "CLC",
+    "intake_years": [
+      2020
+    ],
+    "major": "Hệ thống Thông tin"
+  },
+  {
+    "id": 491,
+    "slug": "cu-nhan-nganh-khoa-hoc-may-tinh-khoa-15-2020",
+    "name": "Cử nhân ngành Khoa học Máy tính (Khoá 15 - 2020)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2020
+    ],
+    "major": "Khoa học Máy tính"
+  },
+  {
+    "id": 490,
+    "slug": "cu-nhan-nganh-thuong-mai-dien-tu-khoa-15-2020",
+    "name": "Cử nhân ngành Thương mại điện tử (Khoá 15 - 2020)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2020
+    ],
+    "major": "Thương mại điện tử"
+  },
+  {
+    "id": 489,
+    "slug": "cu-nhan-nganh-ky-thuat-phan-mem-khoa-15-2020",
+    "name": "Cử nhân ngành Kỹ thuật Phần mềm (Khoá 15 - 2020)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2020
+    ],
+    "major": "Kỹ thuật Phần mềm"
+  },
+  {
+    "id": 488,
+    "slug": "cu-nhan-nganh-an-toan-thong-tin-khoa-15-2020",
+    "name": "Cử nhân ngành An toàn Thông tin (Khoá 15 - 2020)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2020
+    ],
+    "major": "An toàn Thông tin"
+  },
+  {
+    "id": 487,
+    "slug": "cu-nhan-nganh-ky-thuat-may-tinh-khoa-15-2020",
+    "name": "Cử nhân ngành Kỹ thuật Máy tính (Khoá 15 - 2020)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2020
+    ],
+    "major": "Kỹ thuật Máy tính"
+  },
+  {
+    "id": 486,
+    "slug": "cu-nhan-nganh-he-thong-thong-tin-khoa-15-2020",
+    "name": "Cử nhân ngành Hệ thống Thông tin (Khoá 15 - 2020)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2020
+    ],
+    "major": "Hệ thống Thông tin"
+  },
+  {
+    "id": 485,
+    "slug": "cu-nhan-tai-nang-nganh-khoa-hoc-may-tinh-khoa-15-2020",
+    "name": "Cử nhân tài năng ngành Khoa học Máy tính (Khoá 15 - 2020)",
+    "he_code": "CQ",
+    "tot_code": "CNTN",
+    "intake_years": [
+      2020
+    ],
+    "major": "Khoa học Máy tính"
+  },
+  {
+    "id": 484,
+    "slug": "chuong-trinh-tien-tien-nganh-he-thong-thong-tin-khoa-15-2020",
+    "name": "Chương trình tiên tiến ngành Hệ thống Thông tin (Khoá 15 - 2020)",
+    "he_code": "CQ",
+    "tot_code": "CTTT",
+    "intake_years": [
+      2020
+    ],
+    "major": "Hệ thống Thông tin"
+  },
+  {
+    "id": 483,
+    "slug": "cu-nhan-nganh-ky-thuat-may-tinh-chat-luong-cao-khoa-15-2020",
+    "name": "Cử nhân ngành Kỹ thuật Máy tính (Chất lượng cao) (Khoá 15 - 2020)",
+    "he_code": "CQ",
+    "tot_code": "CLC",
+    "intake_years": [
+      2020
+    ],
+    "major": "Kỹ thuật Máy tính"
+  },
+  {
+    "id": 482,
+    "slug": "cu-nhan-nganh-ky-thuat-phan-mem-chat-luong-cao-khoa-15-2020",
+    "name": "Cử nhân ngành Kỹ thuật Phần mềm (Chất lượng cao) (Khoá 15 - 2020)",
+    "he_code": "CQ",
+    "tot_code": "CLC",
+    "intake_years": [
+      2020
+    ],
+    "major": "Kỹ thuật Phần mềm"
+  },
+  {
+    "id": 481,
+    "slug": "cu-nhan-nganh-cong-nghe-thong-tin-khoa-15-2020",
+    "name": "Cử nhân ngành Công nghệ Thông tin (Khoá 15 - 2020)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2020
+    ],
+    "major": "Công nghệ Thông tin"
+  },
+  {
+    "id": 480,
+    "slug": "cu-nhan-nganh-an-toan-thong-tin-chat-luong-cao-khoa-15-2020",
+    "name": "Cử nhân ngành An toàn Thông tin (Chất lượng cao) (Khoá 15 - 2020)",
+    "he_code": "CQ",
+    "tot_code": "CLC",
+    "intake_years": [
+      2020
+    ],
+    "major": "An toàn Thông tin"
+  },
+  {
+    "id": 479,
+    "slug": "cu-nhan-nganh-khoa-hoc-may-tinh-chat-luong-cao-khoa-15-2020",
+    "name": "Cử nhân ngành Khoa học Máy tính (Chất lượng cao) (Khoá 15 - 2020)",
+    "he_code": "CQ",
+    "tot_code": "CLC",
+    "intake_years": [
+      2020
+    ],
+    "major": "Khoa học Máy tính"
+  },
+  {
+    "id": 478,
+    "slug": "cu-nhan-nganh-cong-nghe-thong-tin-van-bang-dai-hoc-thu-2-hinh-thuc-dao-tao-tu-xa-qua-mang-khoa-2020",
+    "name": "Cử nhân ngành Công nghệ thông tin Văn bằng Đại học thứ 2 - Hình thức đào tạo từ xa qua mạng (Khoá 2020)",
+    "he_code": "TX",
+    "tot_code": "TX-VB2",
+    "intake_years": [
+      2020
+    ],
+    "major": "Công nghệ thông tin"
+  },
+  {
+    "id": 477,
+    "slug": "cu-nhan-nganh-cong-nghe-thong-tin-lien-thong-dai-hoc-hinh-thuc-dao-tao-tu-xa-qua-mang-khoa-2020",
+    "name": "Cử nhân ngành Công nghệ thông tin Liên thông Đại học - Hình thức đào tạo từ xa qua mạng (Khoá 2020)",
+    "he_code": "TX",
+    "tot_code": "TX-LT",
+    "intake_years": [
+      2020
+    ],
+    "major": "Công nghệ thông tin"
+  },
+  {
+    "id": 476,
+    "slug": "cu-nhan-nganh-cong-nghe-thong-tin-he-vb2cq-khoa-15-2020",
+    "name": "Cử nhân ngành Công nghệ Thông tin (hệ VB2CQ) (Khoá 15 - 2020)",
+    "he_code": "CQ",
+    "tot_code": "VB2CQ",
+    "intake_years": [
+      2020
+    ],
+    "major": "Công nghệ Thông tin"
+  },
+  {
+    "id": 475,
+    "slug": "cu-nhan-nganh-cong-nghe-thong-tin-hinh-thuc-dao-tao-tu-xa-qua-mang-khoa-2020",
+    "name": "Cử nhân ngành Công nghệ thông tin - Hình thức đào tạo từ xa qua mạng (Khoá 2020)",
+    "he_code": "TX",
+    "tot_code": "TX-VB1",
+    "intake_years": [
+      2020
+    ],
+    "major": "Công nghệ thông tin"
+  },
+  {
+    "id": 474,
+    "slug": "cu-nhan-nganh-thuong-mai-dien-tu-chat-luong-cao-khoa-15-2020",
+    "name": "Cử nhân ngành Thương mại điện tử (Chất lượng cao) (Khoá 15 - 2020)",
+    "he_code": "CQ",
+    "tot_code": "CLC",
+    "intake_years": [
+      2020
+    ],
+    "major": "Thương mại điện tử"
+  },
+  {
+    "id": 473,
+    "slug": "cu-nhan-nganh-khoa-hoc-may-tinh-bcu-chuong-trinh-lien-ket-voi-dh-birmingham-city-khoa-15-2020",
+    "name": "Cử nhân ngành Khoa học máy tính - BCU (Chương trình liên kết với ĐH Birmingham City) (Khoá 15 - 2020)",
+    "he_code": "CQ",
+    "tot_code": "BCU",
+    "intake_years": [
+      2020
+    ],
+    "major": "Khoa học máy tính - BCU"
+  },
+  {
+    "id": 472,
+    "slug": "cu-nhan-nganh-khoa-hoc-may-tinh-bcu-chuong-trinh-lien-ket-voi-dh-birmingham-city-khoa-14-2019",
+    "name": "Cử nhân ngành Khoa học máy tính - BCU (Chương trình liên kết với ĐH Birmingham City) (Khoá 14 - 2019)",
+    "he_code": "CQ",
+    "tot_code": "BCU",
+    "intake_years": [
+      2019
+    ],
+    "major": "Khoa học máy tính - BCU"
+  },
+  {
+    "id": 471,
+    "slug": "cu-nhan-nganh-thuong-mai-dien-tu-chat-luong-cao-khoa-14-2019",
+    "name": "Cử nhân ngành Thương mại điện tử (Chất lượng cao) (Khoá 14 - 2019)",
+    "he_code": "CQ",
+    "tot_code": "CLC",
+    "intake_years": [
+      2019
+    ],
+    "major": "Thương mại điện tử"
+  },
+  {
+    "id": 470,
+    "slug": "cu-nhan-nganh-cong-nghe-thong-tin-hinh-thuc-dao-tao-tu-xa-qua-mang-khoa-2019",
+    "name": "Cử nhân ngành Công nghệ thông tin - Hình thức đào tạo từ xa qua mạng (Khoá 2019)",
+    "he_code": "TX",
+    "tot_code": "TX-VB1",
+    "intake_years": [
+      2019
+    ],
+    "major": "Công nghệ thông tin"
+  },
+  {
+    "id": 469,
+    "slug": "cu-nhan-nganh-cong-nghe-thong-tin-he-vb2cq-khoa-14-2019",
+    "name": "Cử nhân ngành Công nghệ Thông tin (hệ VB2CQ) (Khoá 14 - 2019)",
+    "he_code": "CQ",
+    "tot_code": "VB2CQ",
+    "intake_years": [
+      2019
+    ],
+    "major": "Công nghệ Thông tin"
+  },
+  {
+    "id": 468,
+    "slug": "cu-nhan-nganh-cong-nghe-thong-tin-lien-thong-dai-hoc-hinh-thuc-dao-tao-tu-xa-qua-mang-khoa-2019",
+    "name": "Cử nhân ngành Công nghệ thông tin Liên thông Đại học - Hình thức đào tạo từ xa qua mạng (Khoá 2019)",
+    "he_code": "TX",
+    "tot_code": "TX-LT",
+    "intake_years": [
+      2019
+    ],
+    "major": "Công nghệ thông tin"
+  },
+  {
+    "id": 467,
+    "slug": "cu-nhan-nganh-cong-nghe-thong-tin-van-bang-dai-hoc-thu-2-hinh-thuc-dao-tao-tu-xa-qua-mang-khoa-2019",
+    "name": "Cử nhân ngành Công nghệ thông tin Văn bằng Đại học thứ 2 - Hình thức đào tạo từ xa qua mạng (Khoá 2019)",
+    "he_code": "TX",
+    "tot_code": "TX-VB2",
+    "intake_years": [
+      2019
+    ],
+    "major": "Công nghệ thông tin"
+  },
+  {
+    "id": 466,
+    "slug": "cu-nhan-nganh-khoa-hoc-may-tinh-chat-luong-cao-khoa-14-2019",
+    "name": "Cử nhân ngành Khoa học Máy tính (Chất lượng cao) (Khoá 14 - 2019)",
+    "he_code": "CQ",
+    "tot_code": "CLC",
+    "intake_years": [
+      2019
+    ],
+    "major": "Khoa học Máy tính"
+  },
+  {
+    "id": 465,
+    "slug": "cu-nhan-nganh-an-toan-thong-tin-chat-luong-cao-khoa-14-2019",
+    "name": "Cử nhân ngành An toàn Thông tin (Chất lượng cao) (Khoá 14 - 2019)",
+    "he_code": "CQ",
+    "tot_code": "CLC",
+    "intake_years": [
+      2019
+    ],
+    "major": "An toàn Thông tin"
+  },
+  {
+    "id": 464,
+    "slug": "cu-nhan-nganh-cong-nghe-thong-tin-khoa-14-2019",
+    "name": "Cử nhân ngành Công nghệ Thông tin (Khoá 14 - 2019)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2019
+    ],
+    "major": "Công nghệ Thông tin"
+  },
+  {
+    "id": 463,
+    "slug": "cu-nhan-nganh-ky-thuat-phan-mem-chat-luong-cao-khoa-14-2019",
+    "name": "Cử nhân ngành Kỹ thuật Phần mềm (Chất lượng cao) (Khoá 14 - 2019)",
+    "he_code": "CQ",
+    "tot_code": "CLC",
+    "intake_years": [
+      2019
+    ],
+    "major": "Kỹ thuật Phần mềm"
+  },
+  {
+    "id": 462,
+    "slug": "cu-nhan-nganh-ky-thuat-may-tinh-chat-luong-cao-khoa-14-2019",
+    "name": "Cử nhân ngành Kỹ thuật Máy tính (Chất lượng cao) (Khoá 14 - 2019)",
+    "he_code": "CQ",
+    "tot_code": "CLC",
+    "intake_years": [
+      2019
+    ],
+    "major": "Kỹ thuật Máy tính"
+  },
+  {
+    "id": 461,
+    "slug": "chuong-trinh-tien-tien-nganh-he-thong-thong-tin-khoa-14-2019",
+    "name": "Chương trình tiên tiến ngành Hệ thống Thông tin (Khoá 14 - 2019)",
+    "he_code": "CQ",
+    "tot_code": "CTTT",
+    "intake_years": [
+      2019
+    ],
+    "major": "Hệ thống Thông tin"
+  },
+  {
+    "id": 460,
+    "slug": "cu-nhan-nganh-an-toan-thong-tin-he-kstn-khoa-14-2019",
+    "name": "Cử nhân ngành An toàn Thông tin (hệ KSTN) (Khoá 14 - 2019)",
+    "he_code": "CQ",
+    "tot_code": "KSTN",
+    "intake_years": [
+      2019
+    ],
+    "major": "An toàn Thông tin"
+  },
+  {
+    "id": 459,
+    "slug": "cu-nhan-tai-nang-nganh-khoa-hoc-may-tinh-khoa-14-2019",
+    "name": "Cử nhân tài năng ngành Khoa học Máy tính (Khoá 14 - 2019)",
+    "he_code": "CQ",
+    "tot_code": "CNTN",
+    "intake_years": [
+      2019
+    ],
+    "major": "Khoa học Máy tính"
+  },
+  {
+    "id": 458,
+    "slug": "cu-nhan-nganh-he-thong-thong-tin-khoa-14-2019",
+    "name": "Cử nhân ngành Hệ thống Thông tin (Khoá 14 - 2019)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2019
+    ],
+    "major": "Hệ thống Thông tin"
+  },
+  {
+    "id": 457,
+    "slug": "cu-nhan-nganh-ky-thuat-may-tinh-khoa-14-2019",
+    "name": "Cử nhân ngành Kỹ thuật Máy tính (Khoá 14 - 2019)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2019
+    ],
+    "major": "Kỹ thuật Máy tính"
+  },
+  {
+    "id": 456,
+    "slug": "cu-nhan-nganh-an-toan-thong-tin-khoa-14-2019",
+    "name": "Cử nhân ngành An toàn Thông tin (Khoá 14 - 2019)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2019
+    ],
+    "major": "An toàn Thông tin"
+  },
+  {
+    "id": 455,
+    "slug": "cu-nhan-nganh-ky-thuat-phan-mem-khoa-14-2019",
+    "name": "Cử nhân ngành Kỹ thuật Phần mềm (Khoá 14 - 2019)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2019
+    ],
+    "major": "Kỹ thuật Phần mềm"
+  },
+  {
+    "id": 454,
+    "slug": "cu-nhan-nganh-thuong-mai-dien-tu-khoa-14-2019",
+    "name": "Cử nhân ngành Thương mại điện tử (Khoá 14 - 2019)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2019
+    ],
+    "major": "Thương mại điện tử"
+  },
+  {
+    "id": 453,
+    "slug": "cu-nhan-nganh-khoa-hoc-may-tinh-khoa-14-2019",
+    "name": "Cử nhân ngành Khoa học Máy tính (Khoá 14 - 2019)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2019
+    ],
+    "major": "Khoa học Máy tính"
+  },
+  {
+    "id": 452,
+    "slug": "cu-nhan-nganh-he-thong-thong-tin-chat-luong-cao-khoa-14-2019",
+    "name": "Cử nhân ngành Hệ thống Thông tin (Chất lượng cao) (Khoá 14 - 2019)",
+    "he_code": "CQ",
+    "tot_code": "CLC",
+    "intake_years": [
+      2019
+    ],
+    "major": "Hệ thống Thông tin"
+  },
+  {
+    "id": 451,
+    "slug": "cu-nhan-nganh-mang-may-tinh-va-truyen-thong-du-lieu-chat-luong-cao-khoa-14-2019",
+    "name": "Cử nhân ngành Mạng máy tính và Truyền thông dữ liệu (Chất lượng cao) (Khoá 14 - 2019)",
+    "he_code": "CQ",
+    "tot_code": "CLC",
+    "intake_years": [
+      2019
+    ],
+    "major": "Mạng máy tính và Truyền thông dữ liệu"
+  },
+  {
+    "id": 450,
+    "slug": "cu-nhan-nganh-cong-nghe-thong-tin-dinh-huong-nhat-ban-chat-luong-cao-khoa-14-2019",
+    "name": "Cử nhân ngành Công nghệ thông tin định hướng Nhật Bản (Chất lượng cao) (Khoá 14 - 2019)",
+    "he_code": "CQ",
+    "tot_code": "CLC",
+    "intake_years": [
+      2019
+    ],
+    "major": "Công nghệ thông tin định hướng Nhật Bản"
+  },
+  {
+    "id": 449,
+    "slug": "cu-nhan-nganh-mang-may-tinh-va-truyen-thong-du-lieu-khoa-14-2019",
+    "name": "Cử nhân ngành Mạng máy tính và Truyền thông dữ liệu (Khoá 14 - 2019)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2019
+    ],
+    "major": "Mạng máy tính và Truyền thông dữ liệu"
+  },
+  {
+    "id": 448,
+    "slug": "cu-nhan-nganh-khoa-hoc-du-lieu-khoa-14-2019",
+    "name": "Cử nhân ngành Khoa học dữ liệu (Khoá 14 - 2019)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2019
+    ],
+    "major": "Khoa học dữ liệu"
+  },
+  {
+    "id": 447,
+    "slug": "cu-nhan-nganh-khoa-hoc-du-lieu-khoa-13-2018-1",
+    "name": "Cử nhân ngành Khoa học dữ liệu (Khoá 13 - 2018)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2018
+    ],
+    "major": "Khoa học dữ liệu"
+  },
+  {
+    "id": 446,
+    "slug": "cu-nhan-nganh-khoa-hoc-du-lieu-khoa-13-2018",
+    "name": "Cử nhân ngành Khoa học dữ liệu (Khoá 13 - 2018)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2018
+    ],
+    "major": "Khoa học dữ liệu"
+  },
+  {
+    "id": 445,
+    "slug": "cu-nhan-nganh-mang-may-tinh-va-truyen-thong-du-lieu-khoa-13-2018",
+    "name": "Cử nhân ngành Mạng máy tính và Truyền thông dữ liệu (Khoá 13 - 2018)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2018
+    ],
+    "major": "Mạng máy tính và Truyền thông dữ liệu"
+  },
+  {
+    "id": 444,
+    "slug": "cu-nhan-nganh-cong-nghe-thong-tin-dinh-huong-nhat-ban-chat-luong-cao-khoa-13-2018",
+    "name": "Cử nhân ngành Công nghệ thông tin định hướng Nhật Bản (Chất lượng cao) (Khoá 13 - 2018)",
+    "he_code": "CQ",
+    "tot_code": "CLC",
+    "intake_years": [
+      2018
+    ],
+    "major": "Công nghệ thông tin định hướng Nhật Bản"
+  },
+  {
+    "id": 443,
+    "slug": "cu-nhan-nganh-mang-may-tinh-va-truyen-thong-du-lieu-chat-luong-cao-khoa-13-2018",
+    "name": "Cử nhân ngành Mạng máy tính và Truyền thông dữ liệu (Chất lượng cao) (Khoá 13 - 2018)",
+    "he_code": "CQ",
+    "tot_code": "CLC",
+    "intake_years": [
+      2018
+    ],
+    "major": "Mạng máy tính và Truyền thông dữ liệu"
+  },
+  {
+    "id": 442,
+    "slug": "cu-nhan-nganh-he-thong-thong-tin-chat-luong-cao-khoa-13-2018",
+    "name": "Cử nhân ngành Hệ thống Thông tin (Chất lượng cao) (Khoá 13 - 2018)",
+    "he_code": "CQ",
+    "tot_code": "CLC",
+    "intake_years": [
+      2018
+    ],
+    "major": "Hệ thống Thông tin"
+  },
+  {
+    "id": 441,
+    "slug": "cu-nhan-nganh-khoa-hoc-may-tinh-khoa-13-2018",
+    "name": "Cử nhân ngành Khoa học Máy tính (Khoá 13 - 2018)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2018
+    ],
+    "major": "Khoa học Máy tính"
+  },
+  {
+    "id": 440,
+    "slug": "cu-nhan-nganh-truyen-thong-va-mang-may-tinh-khoa-13-2018",
+    "name": "Cử nhân ngành Truyền thông và Mạng máy tính (Khoá 13 - 2018)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2018
+    ],
+    "major": "Truyền thông và Mạng máy tính"
+  },
+  {
+    "id": 439,
+    "slug": "cu-nhan-nganh-thuong-mai-dien-tu-khoa-13-2018",
+    "name": "Cử nhân ngành Thương mại điện tử (Khoá 13 - 2018)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2018
+    ],
+    "major": "Thương mại điện tử"
+  },
+  {
+    "id": 438,
+    "slug": "cu-nhan-nganh-ky-thuat-phan-mem-khoa-13-2018",
+    "name": "Cử nhân ngành Kỹ thuật Phần mềm (Khoá 13 - 2018)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2018
+    ],
+    "major": "Kỹ thuật Phần mềm"
+  },
+  {
+    "id": 437,
+    "slug": "cu-nhan-nganh-an-toan-thong-tin-khoa-13-2018",
+    "name": "Cử nhân ngành An toàn Thông tin (Khoá 13 - 2018)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2018
+    ],
+    "major": "An toàn Thông tin"
+  },
+  {
+    "id": 436,
+    "slug": "cu-nhan-nganh-ky-thuat-may-tinh-khoa-13-2018",
+    "name": "Cử nhân ngành Kỹ thuật Máy tính (Khoá 13 - 2018)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2018
+    ],
+    "major": "Kỹ thuật Máy tính"
+  },
+  {
+    "id": 435,
+    "slug": "cu-nhan-nganh-he-thong-thong-tin-khoa-13-2018",
+    "name": "Cử nhân ngành Hệ thống Thông tin (Khoá 13 - 2018)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2018
+    ],
+    "major": "Hệ thống Thông tin"
+  },
+  {
+    "id": 434,
+    "slug": "cu-nhan-tai-nang-nganh-khoa-hoc-may-tinh-khoa-13-2018",
+    "name": "Cử nhân tài năng ngành Khoa học Máy tính (Khoá 13 - 2018)",
+    "he_code": "CQ",
+    "tot_code": "CNTN",
+    "intake_years": [
+      2018
+    ],
+    "major": "Khoa học Máy tính"
+  },
+  {
+    "id": 433,
+    "slug": "cu-nhan-nganh-an-toan-thong-tin-he-kstn-khoa-13-2018",
+    "name": "Cử nhân ngành An toàn Thông tin (hệ KSTN) (Khoá 13 - 2018)",
+    "he_code": "CQ",
+    "tot_code": "KSTN",
+    "intake_years": [
+      2018
+    ],
+    "major": "An toàn Thông tin"
+  },
+  {
+    "id": 432,
+    "slug": "chuong-trinh-tien-tien-nganh-he-thong-thong-tin-khoa-13-2018",
+    "name": "Chương trình tiên tiến ngành Hệ thống Thông tin (Khoá 13 - 2018)",
+    "he_code": "CQ",
+    "tot_code": "CTTT",
+    "intake_years": [
+      2018
+    ],
+    "major": "Hệ thống Thông tin"
+  },
+  {
+    "id": 431,
+    "slug": "cu-nhan-nganh-ky-thuat-may-tinh-chat-luong-cao-khoa-13-2018",
+    "name": "Cử nhân ngành Kỹ thuật Máy tính (Chất lượng cao) (Khoá 13 - 2018)",
+    "he_code": "CQ",
+    "tot_code": "CLC",
+    "intake_years": [
+      2018
+    ],
+    "major": "Kỹ thuật Máy tính"
+  },
+  {
+    "id": 430,
+    "slug": "cu-nhan-nganh-ky-thuat-phan-mem-chat-luong-cao-khoa-13-2018",
+    "name": "Cử nhân ngành Kỹ thuật Phần mềm (Chất lượng cao) (Khoá 13 - 2018)",
+    "he_code": "CQ",
+    "tot_code": "CLC",
+    "intake_years": [
+      2018
+    ],
+    "major": "Kỹ thuật Phần mềm"
+  },
+  {
+    "id": 429,
+    "slug": "cu-nhan-nganh-cong-nghe-thong-tin-khoa-13-2018",
+    "name": "Cử nhân ngành Công nghệ Thông tin (Khoá 13 - 2018)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2018
+    ],
+    "major": "Công nghệ Thông tin"
+  },
+  {
+    "id": 428,
+    "slug": "cu-nhan-nganh-an-toan-thong-tin-chat-luong-cao-khoa-13-2018",
+    "name": "Cử nhân ngành An toàn Thông tin (Chất lượng cao) (Khoá 13 - 2018)",
+    "he_code": "CQ",
+    "tot_code": "CLC",
+    "intake_years": [
+      2018
+    ],
+    "major": "An toàn Thông tin"
+  },
+  {
+    "id": 427,
+    "slug": "cu-nhan-nganh-truyen-thong-va-mang-may-tinh-chat-luong-cao-khoa-13-2018",
+    "name": "Cử nhân ngành Truyền thông và Mạng máy tính (Chất lượng cao) (Khoá 13 - 2018)",
+    "he_code": "CQ",
+    "tot_code": "CLC",
+    "intake_years": [
+      2018
+    ],
+    "major": "Truyền thông và Mạng máy tính"
+  },
+  {
+    "id": 426,
+    "slug": "cu-nhan-nganh-khoa-hoc-may-tinh-chat-luong-cao-khoa-13-2018",
+    "name": "Cử nhân ngành Khoa học Máy tính (Chất lượng cao) (Khoá 13 - 2018)",
+    "he_code": "CQ",
+    "tot_code": "CLC",
+    "intake_years": [
+      2018
+    ],
+    "major": "Khoa học Máy tính"
+  },
+  {
+    "id": 425,
+    "slug": "cu-nhan-nganh-cong-nghe-thong-tin-van-bang-dai-hoc-thu-2-hinh-thuc-dao-tao-tu-xa-qua-mang-khoa-2017",
+    "name": "Cử nhân ngành Công nghệ thông tin Văn bằng Đại học thứ 2 - Hình thức đào tạo từ xa qua mạng (Khoá 2017)",
+    "he_code": "TX",
+    "tot_code": "TX-VB2",
+    "intake_years": [
+      2017
+    ],
+    "major": "Công nghệ thông tin"
+  },
+  {
+    "id": 424,
+    "slug": "cu-nhan-nganh-khoa-hoc-may-tinh-chat-luong-cao-khoa-12-2017",
+    "name": "Cử nhân ngành Khoa học Máy tính (Chất lượng cao) (Khoá 12 - 2017)",
+    "he_code": "CQ",
+    "tot_code": "CLC",
+    "intake_years": [
+      2017
+    ],
+    "major": "Khoa học Máy tính"
+  },
+  {
+    "id": 423,
+    "slug": "cu-nhan-nganh-truyen-thong-va-mang-may-tinh-chat-luong-cao-khoa-12-2017",
+    "name": "Cử nhân ngành Truyền thông và Mạng máy tính (Chất lượng cao) (Khoá 12 - 2017)",
+    "he_code": "CQ",
+    "tot_code": "CLC",
+    "intake_years": [
+      2017
+    ],
+    "major": "Truyền thông và Mạng máy tính"
+  },
+  {
+    "id": 422,
+    "slug": "cu-nhan-nganh-an-toan-thong-tin-chat-luong-cao-khoa-12-2017",
+    "name": "Cử nhân ngành An toàn Thông tin (Chất lượng cao) (Khoá 12 - 2017)",
+    "he_code": "CQ",
+    "tot_code": "CLC",
+    "intake_years": [
+      2017
+    ],
+    "major": "An toàn Thông tin"
+  },
+  {
+    "id": 421,
+    "slug": "cu-nhan-nganh-cong-nghe-thong-tin-lien-thong-dai-hoc-hinh-thuc-dao-tao-tu-xa-qua-mang-khoa-2017",
+    "name": "Cử nhân ngành Công nghệ thông tin Liên thông Đại học - Hình thức đào tạo từ xa qua mạng (Khoá 2017)",
+    "he_code": "TX",
+    "tot_code": "TX-LT",
+    "intake_years": [
+      2017
+    ],
+    "major": "Công nghệ thông tin"
+  },
+  {
+    "id": 420,
+    "slug": "cu-nhan-nganh-cong-nghe-thong-tin-khoa-12-2017",
+    "name": "Cử nhân ngành Công nghệ Thông tin (Khoá 12 - 2017)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2017
+    ],
+    "major": "Công nghệ Thông tin"
+  },
+  {
+    "id": 419,
+    "slug": "cu-nhan-nganh-ky-thuat-phan-mem-chat-luong-cao-khoa-12-2017",
+    "name": "Cử nhân ngành Kỹ thuật Phần mềm (Chất lượng cao) (Khoá 12 - 2017)",
+    "he_code": "CQ",
+    "tot_code": "CLC",
+    "intake_years": [
+      2017
+    ],
+    "major": "Kỹ thuật Phần mềm"
+  },
+  {
+    "id": 418,
+    "slug": "cu-nhan-nganh-ky-thuat-may-tinh-chat-luong-cao-khoa-12-2017",
+    "name": "Cử nhân ngành Kỹ thuật Máy tính (Chất lượng cao) (Khoá 12 - 2017)",
+    "he_code": "CQ",
+    "tot_code": "CLC",
+    "intake_years": [
+      2017
+    ],
+    "major": "Kỹ thuật Máy tính"
+  },
+  {
+    "id": 417,
+    "slug": "chuong-trinh-tien-tien-nganh-he-thong-thong-tin-khoa-12-2017",
+    "name": "Chương trình tiên tiến ngành Hệ thống Thông tin (Khoá 12 - 2017)",
+    "he_code": "CQ",
+    "tot_code": "CTTT",
+    "intake_years": [
+      2017
+    ],
+    "major": "Hệ thống Thông tin"
+  },
+  {
+    "id": 416,
+    "slug": "cu-nhan-nganh-an-toan-thong-tin-he-kstn-khoa-12-2017",
+    "name": "Cử nhân ngành An toàn Thông tin (hệ KSTN) (Khoá 12 - 2017)",
+    "he_code": "CQ",
+    "tot_code": "KSTN",
+    "intake_years": [
+      2017
+    ],
+    "major": "An toàn Thông tin"
+  },
+  {
+    "id": 415,
+    "slug": "cu-nhan-tai-nang-nganh-khoa-hoc-may-tinh-khoa-12-2017",
+    "name": "Cử nhân tài năng ngành Khoa học Máy tính (Khoá 12 - 2017)",
+    "he_code": "CQ",
+    "tot_code": "CNTN",
+    "intake_years": [
+      2017
+    ],
+    "major": "Khoa học Máy tính"
+  },
+  {
+    "id": 414,
+    "slug": "cu-nhan-nganh-he-thong-thong-tin-khoa-12-2017",
+    "name": "Cử nhân ngành Hệ thống Thông tin (Khoá 12 - 2017)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2017
+    ],
+    "major": "Hệ thống Thông tin"
+  },
+  {
+    "id": 413,
+    "slug": "cu-nhan-nganh-ky-thuat-may-tinh-khoa-12-2017",
+    "name": "Cử nhân ngành Kỹ thuật Máy tính (Khoá 12 - 2017)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2017
+    ],
+    "major": "Kỹ thuật Máy tính"
+  },
+  {
+    "id": 412,
+    "slug": "cu-nhan-nganh-an-toan-thong-tin-khoa-12-2017",
+    "name": "Cử nhân ngành An toàn Thông tin (Khoá 12 - 2017)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2017
+    ],
+    "major": "An toàn Thông tin"
+  },
+  {
+    "id": 411,
+    "slug": "cu-nhan-nganh-ky-thuat-phan-mem-khoa-12-2017",
+    "name": "Cử nhân ngành Kỹ thuật Phần mềm (Khoá 12 - 2017)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2017
+    ],
+    "major": "Kỹ thuật Phần mềm"
+  },
+  {
+    "id": 410,
+    "slug": "cu-nhan-nganh-thuong-mai-dien-tu-khoa-12-2017",
+    "name": "Cử nhân ngành Thương mại điện tử (Khoá 12 - 2017)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2017
+    ],
+    "major": "Thương mại điện tử"
+  },
+  {
+    "id": 409,
+    "slug": "cu-nhan-nganh-truyen-thong-va-mang-may-tinh-khoa-12-2017",
+    "name": "Cử nhân ngành Truyền thông và Mạng máy tính (Khoá 12 - 2017)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2017
+    ],
+    "major": "Truyền thông và Mạng máy tính"
+  },
+  {
+    "id": 408,
+    "slug": "cu-nhan-nganh-khoa-hoc-may-tinh-khoa-12-2017",
+    "name": "Cử nhân ngành Khoa học Máy tính (Khoá 12 - 2017)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2017
+    ],
+    "major": "Khoa học Máy tính"
+  },
+  {
+    "id": 407,
+    "slug": "cu-nhan-nganh-he-thong-thong-tin-chat-luong-cao-khoa-12-2017",
+    "name": "Cử nhân ngành Hệ thống Thông tin (Chất lượng cao) (Khoá 12 - 2017)",
+    "he_code": "CQ",
+    "tot_code": "CLC",
+    "intake_years": [
+      2017
+    ],
+    "major": "Hệ thống Thông tin"
+  },
+  {
+    "id": 406,
+    "slug": "cu-nhan-nganh-he-thong-thong-tin-chat-luong-cao-khoa-11-2016",
+    "name": "Cử nhân ngành Hệ thống Thông tin (Chất lượng cao) (Khoá 11 - 2016)",
+    "he_code": "CQ",
+    "tot_code": "CLC",
+    "intake_years": [
+      2016
+    ],
+    "major": "Hệ thống Thông tin"
+  },
+  {
+    "id": 405,
+    "slug": "cu-nhan-nganh-khoa-hoc-may-tinh-khoa-11-2016",
+    "name": "Cử nhân ngành Khoa học Máy tính (Khoá 11 - 2016)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2016
+    ],
+    "major": "Khoa học Máy tính"
+  },
+  {
+    "id": 404,
+    "slug": "cu-nhan-nganh-truyen-thong-va-mang-may-tinh-khoa-11-2016",
+    "name": "Cử nhân ngành Truyền thông và Mạng máy tính (Khoá 11 - 2016)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2016
+    ],
+    "major": "Truyền thông và Mạng máy tính"
+  },
+  {
+    "id": 403,
+    "slug": "cu-nhan-nganh-thuong-mai-dien-tu-khoa-11-2016",
+    "name": "Cử nhân ngành Thương mại điện tử (Khoá 11 - 2016)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2016
+    ],
+    "major": "Thương mại điện tử"
+  },
+  {
+    "id": 402,
+    "slug": "cu-nhan-nganh-ky-thuat-phan-mem-khoa-11-2016",
+    "name": "Cử nhân ngành Kỹ thuật Phần mềm (Khoá 11 - 2016)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2016
+    ],
+    "major": "Kỹ thuật Phần mềm"
+  },
+  {
+    "id": 401,
+    "slug": "cu-nhan-nganh-an-toan-thong-tin-khoa-11-2016",
+    "name": "Cử nhân ngành An toàn Thông tin (Khoá 11 - 2016)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2016
+    ],
+    "major": "An toàn Thông tin"
+  },
+  {
+    "id": 400,
+    "slug": "cu-nhan-nganh-ky-thuat-may-tinh-khoa-11-2016",
+    "name": "Cử nhân ngành Kỹ thuật Máy tính (Khoá 11 - 2016)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2016
+    ],
+    "major": "Kỹ thuật Máy tính"
+  },
+  {
+    "id": 399,
+    "slug": "cu-nhan-nganh-he-thong-thong-tin-khoa-11-2016",
+    "name": "Cử nhân ngành Hệ thống Thông tin (Khoá 11 - 2016)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2016
+    ],
+    "major": "Hệ thống Thông tin"
+  },
+  {
+    "id": 398,
+    "slug": "cu-nhan-tai-nang-nganh-khoa-hoc-may-tinh-khoa-11-2016",
+    "name": "Cử nhân tài năng ngành Khoa học Máy tính (Khoá 11 - 2016)",
+    "he_code": "CQ",
+    "tot_code": "CNTN",
+    "intake_years": [
+      2016
+    ],
+    "major": "Khoa học Máy tính"
+  },
+  {
+    "id": 397,
+    "slug": "cu-nhan-nganh-an-toan-thong-tin-he-kstn-khoa-11-2016",
+    "name": "Cử nhân ngành An toàn Thông tin (hệ KSTN) (Khoá 11 - 2016)",
+    "he_code": "CQ",
+    "tot_code": "KSTN",
+    "intake_years": [
+      2016
+    ],
+    "major": "An toàn Thông tin"
+  },
+  {
+    "id": 396,
+    "slug": "chuong-trinh-tien-tien-nganh-he-thong-thong-tin-khoa-11-2016",
+    "name": "Chương trình tiên tiến ngành Hệ thống Thông tin (Khoá 11 - 2016)",
+    "he_code": "CQ",
+    "tot_code": "CTTT",
+    "intake_years": [
+      2016
+    ],
+    "major": "Hệ thống Thông tin"
+  },
+  {
+    "id": 395,
+    "slug": "cu-nhan-nganh-ky-thuat-may-tinh-chat-luong-cao-khoa-11-2016",
+    "name": "Cử nhân ngành Kỹ thuật Máy tính (Chất lượng cao) (Khoá 11 - 2016)",
+    "he_code": "CQ",
+    "tot_code": "CLC",
+    "intake_years": [
+      2016
+    ],
+    "major": "Kỹ thuật Máy tính"
+  },
+  {
+    "id": 394,
+    "slug": "cu-nhan-nganh-ky-thuat-phan-mem-chat-luong-cao-khoa-11-2016",
+    "name": "Cử nhân ngành Kỹ thuật Phần mềm (Chất lượng cao) (Khoá 11 - 2016)",
+    "he_code": "CQ",
+    "tot_code": "CLC",
+    "intake_years": [
+      2016
+    ],
+    "major": "Kỹ thuật Phần mềm"
+  },
+  {
+    "id": 393,
+    "slug": "cu-nhan-nganh-cong-nghe-thong-tin-khoa-11-2016",
+    "name": "Cử nhân ngành Công nghệ Thông tin (Khoá 11 - 2016)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2016
+    ],
+    "major": "Công nghệ Thông tin"
+  },
+  {
+    "id": 392,
+    "slug": "cu-nhan-nganh-truyen-thong-va-mang-may-tinh-he-kstn-khoa-10-2015",
+    "name": "Cử nhân ngành Truyền thông và Mạng máy tính (hệ KSTN) (Khoá 10 - 2015)",
+    "he_code": "CQ",
+    "tot_code": "KSTN",
+    "intake_years": [
+      2015
+    ],
+    "major": "Truyền thông và Mạng máy tính"
+  },
+  {
+    "id": 391,
+    "slug": "cu-nhan-nganh-cong-nghe-thong-tin-khoa-10-2015",
+    "name": "Cử nhân ngành Công nghệ Thông tin (Khoá 10 - 2015)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2015
+    ],
+    "major": "Công nghệ Thông tin"
+  },
+  {
+    "id": 390,
+    "slug": "cu-nhan-nganh-ky-thuat-phan-mem-chat-luong-cao-khoa-10-2015",
+    "name": "Cử nhân ngành Kỹ thuật Phần mềm (Chất lượng cao) (Khoá 10 - 2015)",
+    "he_code": "CQ",
+    "tot_code": "CLC",
+    "intake_years": [
+      2015
+    ],
+    "major": "Kỹ thuật Phần mềm"
+  },
+  {
+    "id": 389,
+    "slug": "cu-nhan-nganh-ky-thuat-may-tinh-chat-luong-cao-khoa-10-2015",
+    "name": "Cử nhân ngành Kỹ thuật Máy tính (Chất lượng cao) (Khoá 10 - 2015)",
+    "he_code": "CQ",
+    "tot_code": "CLC",
+    "intake_years": [
+      2015
+    ],
+    "major": "Kỹ thuật Máy tính"
+  },
+  {
+    "id": 388,
+    "slug": "chuong-trinh-tien-tien-nganh-he-thong-thong-tin-khoa-10-2015",
+    "name": "Chương trình tiên tiến ngành Hệ thống Thông tin (Khoá 10 - 2015)",
+    "he_code": "CQ",
+    "tot_code": "CTTT",
+    "intake_years": [
+      2015
+    ],
+    "major": "Hệ thống Thông tin"
+  },
+  {
+    "id": 387,
+    "slug": "cu-nhan-nganh-an-toan-thong-tin-he-kstn-khoa-10-2015",
+    "name": "Cử nhân ngành An toàn Thông tin (hệ KSTN) (Khoá 10 - 2015)",
+    "he_code": "CQ",
+    "tot_code": "KSTN",
+    "intake_years": [
+      2015
+    ],
+    "major": "An toàn Thông tin"
+  },
+  {
+    "id": 386,
+    "slug": "cu-nhan-tai-nang-nganh-khoa-hoc-may-tinh-khoa-10-2015",
+    "name": "Cử nhân tài năng ngành Khoa học Máy tính (Khoá 10 - 2015)",
+    "he_code": "CQ",
+    "tot_code": "CNTN",
+    "intake_years": [
+      2015
+    ],
+    "major": "Khoa học Máy tính"
+  },
+  {
+    "id": 385,
+    "slug": "cu-nhan-nganh-he-thong-thong-tin-khoa-10-2015",
+    "name": "Cử nhân ngành Hệ thống Thông tin (Khoá 10 - 2015)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2015
+    ],
+    "major": "Hệ thống Thông tin"
+  },
+  {
+    "id": 384,
+    "slug": "cu-nhan-nganh-ky-thuat-may-tinh-khoa-10-2015",
+    "name": "Cử nhân ngành Kỹ thuật Máy tính (Khoá 10 - 2015)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2015
+    ],
+    "major": "Kỹ thuật Máy tính"
+  },
+  {
+    "id": 383,
+    "slug": "cu-nhan-nganh-an-toan-thong-tin-khoa-10-2015",
+    "name": "Cử nhân ngành An toàn Thông tin (Khoá 10 - 2015)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2015
+    ],
+    "major": "An toàn Thông tin"
+  },
+  {
+    "id": 382,
+    "slug": "cu-nhan-nganh-ky-thuat-phan-mem-khoa-10-2015",
+    "name": "Cử nhân ngành Kỹ thuật Phần mềm (Khoá 10 - 2015)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2015
+    ],
+    "major": "Kỹ thuật Phần mềm"
+  },
+  {
+    "id": 381,
+    "slug": "cu-nhan-nganh-thuong-mai-dien-tu-khoa-10-2015",
+    "name": "Cử nhân ngành Thương mại điện tử (Khoá 10 - 2015)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2015
+    ],
+    "major": "Thương mại điện tử"
+  },
+  {
+    "id": 380,
+    "slug": "cu-nhan-nganh-truyen-thong-va-mang-may-tinh-khoa-10-2015",
+    "name": "Cử nhân ngành Truyền thông và Mạng máy tính (Khoá 10 - 2015)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2015
+    ],
+    "major": "Truyền thông và Mạng máy tính"
+  },
+  {
+    "id": 379,
+    "slug": "cu-nhan-nganh-khoa-hoc-may-tinh-khoa-10-2015",
+    "name": "Cử nhân ngành Khoa học Máy tính (Khoá 10 - 2015)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2015
+    ],
+    "major": "Khoa học Máy tính"
+  },
+  {
+    "id": 378,
+    "slug": "cu-nhan-nganh-he-thong-thong-tin-chat-luong-cao-khoa-10-2015",
+    "name": "Cử nhân ngành Hệ thống Thông tin (Chất lượng cao) (Khoá 10 - 2015)",
+    "he_code": "CQ",
+    "tot_code": "CLC",
+    "intake_years": [
+      2015
+    ],
+    "major": "Hệ thống Thông tin"
+  },
+  {
+    "id": 377,
+    "slug": "cu-nhan-nganh-he-thong-thong-tin-chat-luong-cao-khoa-9-2014",
+    "name": "Cử nhân ngành Hệ thống Thông tin (Chất lượng cao) (Khoá 9 - 2014)",
+    "he_code": "CQ",
+    "tot_code": "CLC",
+    "intake_years": [
+      2014
+    ],
+    "major": "Hệ thống Thông tin"
+  },
+  {
+    "id": 376,
+    "slug": "cu-nhan-nganh-khoa-hoc-may-tinh-khoa-9-2014",
+    "name": "Cử nhân ngành Khoa học Máy tính (Khoá 9 - 2014)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2014
+    ],
+    "major": "Khoa học Máy tính"
+  },
+  {
+    "id": 375,
+    "slug": "cu-nhan-nganh-truyen-thong-va-mang-may-tinh-khoa-9-2014",
+    "name": "Cử nhân ngành Truyền thông và Mạng máy tính (Khoá 9 - 2014)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2014
+    ],
+    "major": "Truyền thông và Mạng máy tính"
+  },
+  {
+    "id": 374,
+    "slug": "cu-nhan-nganh-thuong-mai-dien-tu-khoa-9-2014",
+    "name": "Cử nhân ngành Thương mại điện tử (Khoá 9 - 2014)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2014
+    ],
+    "major": "Thương mại điện tử"
+  },
+  {
+    "id": 373,
+    "slug": "cu-nhan-nganh-ky-thuat-phan-mem-khoa-9-2014",
+    "name": "Cử nhân ngành Kỹ thuật Phần mềm (Khoá 9 - 2014)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2014
+    ],
+    "major": "Kỹ thuật Phần mềm"
+  },
+  {
+    "id": 372,
+    "slug": "cu-nhan-nganh-an-toan-thong-tin-khoa-9-2014",
+    "name": "Cử nhân ngành An toàn Thông tin (Khoá 9 - 2014)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2014
+    ],
+    "major": "An toàn Thông tin"
+  },
+  {
+    "id": 371,
+    "slug": "cu-nhan-nganh-ky-thuat-may-tinh-khoa-9-2014",
+    "name": "Cử nhân ngành Kỹ thuật Máy tính (Khoá 9 - 2014)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2014
+    ],
+    "major": "Kỹ thuật Máy tính"
+  },
+  {
+    "id": 370,
+    "slug": "cu-nhan-nganh-he-thong-thong-tin-khoa-9-2014",
+    "name": "Cử nhân ngành Hệ thống Thông tin (Khoá 9 - 2014)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2014
+    ],
+    "major": "Hệ thống Thông tin"
+  },
+  {
+    "id": 369,
+    "slug": "cu-nhan-tai-nang-nganh-khoa-hoc-may-tinh-khoa-9-2014",
+    "name": "Cử nhân tài năng ngành Khoa học Máy tính (Khoá 9 - 2014)",
+    "he_code": "CQ",
+    "tot_code": "CNTN",
+    "intake_years": [
+      2014
+    ],
+    "major": "Khoa học Máy tính"
+  },
+  {
+    "id": 368,
+    "slug": "cu-nhan-nganh-an-toan-thong-tin-he-kstn-khoa-9-2014",
+    "name": "Cử nhân ngành An toàn Thông tin (hệ KSTN) (Khoá 9 - 2014)",
+    "he_code": "CQ",
+    "tot_code": "KSTN",
+    "intake_years": [
+      2014
+    ],
+    "major": "An toàn Thông tin"
+  },
+  {
+    "id": 367,
+    "slug": "chuong-trinh-tien-tien-nganh-he-thong-thong-tin-khoa-9-2014",
+    "name": "Chương trình tiên tiến ngành Hệ thống Thông tin (Khoá 9 - 2014)",
+    "he_code": "CQ",
+    "tot_code": "CTTT",
+    "intake_years": [
+      2014
+    ],
+    "major": "Hệ thống Thông tin"
+  },
+  {
+    "id": 366,
+    "slug": "cu-nhan-nganh-ky-thuat-may-tinh-chat-luong-cao-khoa-9-2014",
+    "name": "Cử nhân ngành Kỹ thuật Máy tính (Chất lượng cao) (Khoá 9 - 2014)",
+    "he_code": "CQ",
+    "tot_code": "CLC",
+    "intake_years": [
+      2014
+    ],
+    "major": "Kỹ thuật Máy tính"
+  },
+  {
+    "id": 365,
+    "slug": "cu-nhan-nganh-ky-thuat-phan-mem-chat-luong-cao-khoa-9-2014",
+    "name": "Cử nhân ngành Kỹ thuật Phần mềm (Chất lượng cao) (Khoá 9 - 2014)",
+    "he_code": "CQ",
+    "tot_code": "CLC",
+    "intake_years": [
+      2014
+    ],
+    "major": "Kỹ thuật Phần mềm"
+  },
+  {
+    "id": 364,
+    "slug": "cu-nhan-nganh-cong-nghe-thong-tin-khoa-9-2014",
+    "name": "Cử nhân ngành Công nghệ Thông tin (Khoá 9 - 2014)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2014
+    ],
+    "major": "Công nghệ Thông tin"
+  },
+  {
+    "id": 363,
+    "slug": "cu-nhan-nganh-cong-nghe-thong-tin-lien-thong-dai-hoc-hinh-thuc-dao-tao-tu-xa-qua-mang-khoa-2013",
+    "name": "Cử nhân ngành Công nghệ thông tin Liên thông Đại học - Hình thức đào tạo từ xa qua mạng (Khoá 2013)",
+    "he_code": "TX",
+    "tot_code": "TX-LT",
+    "intake_years": [
+      2013
+    ],
+    "major": "Công nghệ thông tin"
+  },
+  {
+    "id": 362,
+    "slug": "cu-nhan-nganh-cong-nghe-thong-tin-khoa-8-2013",
+    "name": "Cử nhân ngành Công nghệ Thông tin (Khoá 8 - 2013)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2013
+    ],
+    "major": "Công nghệ Thông tin"
+  },
+  {
+    "id": 361,
+    "slug": "cu-nhan-nganh-cong-nghe-thong-tin-he-vb2cq-khoa-8-2013",
+    "name": "Cử nhân ngành Công nghệ Thông tin (hệ VB2CQ) (Khoá 8 - 2013)",
+    "he_code": "CQ",
+    "tot_code": "VB2CQ",
+    "intake_years": [
+      2013
+    ],
+    "major": "Công nghệ Thông tin"
+  },
+  {
+    "id": 360,
+    "slug": "cu-nhan-nganh-ky-thuat-phan-mem-chat-luong-cao-khoa-8-2013",
+    "name": "Cử nhân ngành Kỹ thuật Phần mềm (Chất lượng cao) (Khoá 8 - 2013)",
+    "he_code": "CQ",
+    "tot_code": "CLC",
+    "intake_years": [
+      2013
+    ],
+    "major": "Kỹ thuật Phần mềm"
+  },
+  {
+    "id": 359,
+    "slug": "cu-nhan-nganh-ky-thuat-may-tinh-chat-luong-cao-khoa-8-2013",
+    "name": "Cử nhân ngành Kỹ thuật Máy tính (Chất lượng cao) (Khoá 8 - 2013)",
+    "he_code": "CQ",
+    "tot_code": "CLC",
+    "intake_years": [
+      2013
+    ],
+    "major": "Kỹ thuật Máy tính"
+  },
+  {
+    "id": 358,
+    "slug": "cu-nhan-nganh-cong-nghe-thong-tin-hinh-thuc-dao-tao-tu-xa-qua-mang-khoa-2013",
+    "name": "Cử nhân ngành Công nghệ thông tin - Hình thức đào tạo từ xa qua mạng (Khoá 2013)",
+    "he_code": "TX",
+    "tot_code": "TX-VB1",
+    "intake_years": [
+      2013
+    ],
+    "major": "Công nghệ thông tin"
+  },
+  {
+    "id": 357,
+    "slug": "chuong-trinh-tien-tien-nganh-he-thong-thong-tin-khoa-8-2013",
+    "name": "Chương trình tiên tiến ngành Hệ thống Thông tin (Khoá 8 - 2013)",
+    "he_code": "CQ",
+    "tot_code": "CTTT",
+    "intake_years": [
+      2013
+    ],
+    "major": "Hệ thống Thông tin"
+  },
+  {
+    "id": 356,
+    "slug": "cu-nhan-nganh-an-toan-thong-tin-he-kstn-khoa-8-2013",
+    "name": "Cử nhân ngành An toàn Thông tin (hệ KSTN) (Khoá 8 - 2013)",
+    "he_code": "CQ",
+    "tot_code": "KSTN",
+    "intake_years": [
+      2013
+    ],
+    "major": "An toàn Thông tin"
+  },
+  {
+    "id": 355,
+    "slug": "cu-nhan-tai-nang-nganh-khoa-hoc-may-tinh-khoa-8-2013",
+    "name": "Cử nhân tài năng ngành Khoa học Máy tính (Khoá 8 - 2013)",
+    "he_code": "CQ",
+    "tot_code": "CNTN",
+    "intake_years": [
+      2013
+    ],
+    "major": "Khoa học Máy tính"
+  },
+  {
+    "id": 354,
+    "slug": "cu-nhan-nganh-he-thong-thong-tin-khoa-8-2013",
+    "name": "Cử nhân ngành Hệ thống Thông tin (Khoá 8 - 2013)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2013
+    ],
+    "major": "Hệ thống Thông tin"
+  },
+  {
+    "id": 353,
+    "slug": "cu-nhan-nganh-ky-thuat-may-tinh-khoa-8-2013",
+    "name": "Cử nhân ngành Kỹ thuật Máy tính (Khoá 8 - 2013)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2013
+    ],
+    "major": "Kỹ thuật Máy tính"
+  },
+  {
+    "id": 352,
+    "slug": "cu-nhan-nganh-an-toan-thong-tin-khoa-8-2013",
+    "name": "Cử nhân ngành An toàn Thông tin (Khoá 8 - 2013)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2013
+    ],
+    "major": "An toàn Thông tin"
+  },
+  {
+    "id": 351,
+    "slug": "cu-nhan-nganh-ky-thuat-phan-mem-khoa-8-2013",
+    "name": "Cử nhân ngành Kỹ thuật Phần mềm (Khoá 8 - 2013)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2013
+    ],
+    "major": "Kỹ thuật Phần mềm"
+  },
+  {
+    "id": 350,
+    "slug": "cu-nhan-nganh-thuong-mai-dien-tu-khoa-8-2013",
+    "name": "Cử nhân ngành Thương mại điện tử (Khoá 8 - 2013)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2013
+    ],
+    "major": "Thương mại điện tử"
+  },
+  {
+    "id": 349,
+    "slug": "cu-nhan-nganh-truyen-thong-va-mang-may-tinh-khoa-8-2013",
+    "name": "Cử nhân ngành Truyền thông và Mạng máy tính (Khoá 8 - 2013)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2013
+    ],
+    "major": "Truyền thông và Mạng máy tính"
+  },
+  {
+    "id": 348,
+    "slug": "cu-nhan-nganh-khoa-hoc-may-tinh-khoa-8-2013",
+    "name": "Cử nhân ngành Khoa học Máy tính (Khoá 8 - 2013)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2013
+    ],
+    "major": "Khoa học Máy tính"
+  },
+  {
+    "id": 347,
+    "slug": "cu-nhan-nganh-khoa-hoc-may-tinh-khoa-7-2012",
+    "name": "Cử nhân ngành Khoa học Máy tính (Khoá 7 - 2012)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2012
+    ],
+    "major": "Khoa học Máy tính"
+  },
+  {
+    "id": 346,
+    "slug": "cu-nhan-nganh-truyen-thong-va-mang-may-tinh-khoa-7-2012",
+    "name": "Cử nhân ngành Truyền thông và Mạng máy tính (Khoá 7 - 2012)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2012
+    ],
+    "major": "Truyền thông và Mạng máy tính"
+  },
+  {
+    "id": 345,
+    "slug": "cu-nhan-nganh-thuong-mai-dien-tu-khoa-7-2012",
+    "name": "Cử nhân ngành Thương mại điện tử (Khoá 7 - 2012)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2012
+    ],
+    "major": "Thương mại điện tử"
+  },
+  {
+    "id": 344,
+    "slug": "cu-nhan-nganh-ky-thuat-phan-mem-khoa-7-2012",
+    "name": "Cử nhân ngành Kỹ thuật Phần mềm (Khoá 7 - 2012)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2012
+    ],
+    "major": "Kỹ thuật Phần mềm"
+  },
+  {
+    "id": 343,
+    "slug": "cu-nhan-nganh-an-toan-thong-tin-khoa-7-2012",
+    "name": "Cử nhân ngành An toàn Thông tin (Khoá 7 - 2012)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2012
+    ],
+    "major": "An toàn Thông tin"
+  },
+  {
+    "id": 342,
+    "slug": "cu-nhan-nganh-ky-thuat-may-tinh-khoa-7-2012",
+    "name": "Cử nhân ngành Kỹ thuật Máy tính (Khoá 7 - 2012)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2012
+    ],
+    "major": "Kỹ thuật Máy tính"
+  },
+  {
+    "id": 341,
+    "slug": "cu-nhan-nganh-he-thong-thong-tin-khoa-7-2012",
+    "name": "Cử nhân ngành Hệ thống Thông tin (Khoá 7 - 2012)",
+    "he_code": "CQ",
+    "tot_code": "CQUI",
+    "intake_years": [
+      2012
+    ],
+    "major": "Hệ thống Thông tin"
+  },
+  {
+    "id": 340,
+    "slug": "cu-nhan-tai-nang-nganh-khoa-hoc-may-tinh-khoa-7-2012",
+    "name": "Cử nhân tài năng ngành Khoa học Máy tính (Khoá 7 - 2012)",
+    "he_code": "CQ",
+    "tot_code": "CNTN",
+    "intake_years": [
+      2012
+    ],
+    "major": "Khoa học Máy tính"
+  },
+  {
+    "id": 339,
+    "slug": "cu-nhan-nganh-truyen-thong-va-mang-may-tinh-he-kstn-khoa-7-2012",
+    "name": "Cử nhân ngành Truyền thông và Mạng máy tính (hệ KSTN) (Khoá 7 - 2012)",
+    "he_code": "CQ",
+    "tot_code": "KSTN",
+    "intake_years": [
+      2012
+    ],
+    "major": "Truyền thông và Mạng máy tính"
+  },
+  {
+    "id": 338,
+    "slug": "cu-nhan-nganh-an-toan-thong-tin-he-kstn-khoa-7-2012",
+    "name": "Cử nhân ngành An toàn Thông tin (hệ KSTN) (Khoá 7 - 2012)",
+    "he_code": "CQ",
+    "tot_code": "KSTN",
+    "intake_years": [
+      2012
+    ],
+    "major": "An toàn Thông tin"
+  },
+  {
+    "id": 337,
+    "slug": "chuong-trinh-tien-tien-nganh-he-thong-thong-tin-khoa-7-2012",
+    "name": "Chương trình tiên tiến ngành Hệ thống Thông tin (Khoá 7 - 2012)",
+    "he_code": "CQ",
+    "tot_code": "CTTT",
+    "intake_years": [
+      2012
+    ],
+    "major": "Hệ thống Thông tin"
+  }
+]

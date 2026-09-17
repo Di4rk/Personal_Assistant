@@ -12,6 +12,7 @@ import { AcademicSummaryCards } from "./components/AcademicSummaryCards";
 import { SemesterTabs } from "./components/SemesterTabs";
 import { AcademicCourseTable } from "./components/AcademicCourseTable";
 import { StudentIdentityChip } from "./components/StudentIdentityChip";
+import { GraduationAuditCard } from "./components/GraduationAuditCard";
 import {
   computeCategoryRadarData,
   type CategoryAxisData,
@@ -256,6 +257,9 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
         totalCurriculumCredits={curriculumCredits}
         onSyncClick={handleSyncPortal}
       />
+
+      {/* 2.1 Degree Audit & Curriculum Progress Engine */}
+      <GraduationAuditCard onRefreshTrigger={() => { void handleRefresh(); }} />
 
       {error && (
         <div className="rounded-lg bg-rose-950/40 border border-rose-800/50 p-3 text-xs text-rose-300">

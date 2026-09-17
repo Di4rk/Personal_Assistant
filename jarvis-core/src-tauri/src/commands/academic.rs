@@ -10,6 +10,7 @@ use crate::db::{
     AcademicCourseRecord, SemesterOverview, SharedDb, UpsertCourseDto, UpsertSemesterDto,
 };
 use crate::services::uit_portal::{ingest_portal_transcript, RawPortalSemester};
+use rusqlite::params;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
@@ -1068,6 +1069,127 @@ pub fn get_resolved_curriculum(
         &curriculum_code,
         if combined_hint.trim().is_empty() { None } else { Some(&combined_hint) },
     )
+}
+
+#[derive(Debug, Clone, Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CurriculumIndexDto {
+    pub slug: String,
+    pub major_name: String,
+    pub degree_level: Option<String>,
+    pub cohort_year: Option<i32>,
+    pub cohort_num: Option<i32>,
+    pub total_credits: Option<f64>,
+    pub training_duration: Option<String>,
+    pub training_form: Option<String>,
+    pub is_cached: bool,
+    pub updated_at: Option<i64>,
+}
+
+/// Lấy danh sách các CTĐT UIT có trong danh mục để sinh viên lựa chọn
+#[tauri::command]
+pub fn get_available_curriculums(
+    db: tauri::State<'_, SharedDb>,
+) -> Result<Vec<CurriculumIndexDto>, String> {
+    let conn = db.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
+    let mut stmt = conn
+        .prepare(
+            r#"
+            SELECT slug, major_name, degree_level, cohort_year, cohort_num,
+                   total_credits, training_duration, training_form, is_cached, updated_at
+            FROM curriculum_index
+            ORDER BY is_cached DESC, cohort_year DESC, major_name ASC
+            "#,
+        )
+        .map_err(|e| format!("Lỗi query curriculum_index: {e}"))?;
+
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(CurriculumIndexDto {
+                slug: row.get(0)?,
+                major_name: row.get(1)?,
+                degree_level: row.get(2)?,
+                cohort_year: row.get(3)?,
+                cohort_num: row.get(4)?,
+                total_credits: row.get(5)?,
+                training_duration: row.get(6)?,
+                training_form: row.get(7)?,
+                is_cached: row.get::<_, i64>(8)? != 0,
+                updated_at: row.get(9)?,
+            })
+        })
+        .map_err(|e| format!("Lỗi map row curriculum_index: {e}"))?;
+
+    let mut list = Vec::new();
+    for r in rows {
+        list.push(r.map_err(|e| e.to_string())?);
+    }
+    Ok(list)
+}
+
+/// Lưu slug CTĐT mà sinh viên lựa chọn làm chuẩn kiểm toán
+#[tauri::command]
+pub fn set_student_curriculum_slug(
+    db: tauri::State<'_, SharedDb>,
+    slug: String,
+) -> Result<(), String> {
+    let conn = db.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES ('curriculum_slug', ?1)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        params![slug.trim()],
+    )
+    .map_err(|e| format!("Lỗi lưu curriculum_slug: {e}"))?;
+    Ok(())
+}
+
+/// Tải và cache CTĐT từ Portal UIT theo slug
+#[tauri::command]
+pub async fn fetch_and_cache_curriculum(
+    db: tauri::State<'_, SharedDb>,
+    slug: String,
+) -> Result<crate::services::curriculum_harvester::ParsedCurriculum, String> {
+    crate::services::curriculum_harvester::sync_curriculum_by_slug(&db, slug.trim())
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Tính toán và trả về Báo cáo Kiểm toán Tốt nghiệp (Degree Audit Report)
+#[tauri::command]
+pub async fn get_degree_audit_report(
+    db: tauri::State<'_, SharedDb>,
+    preferred_slug: Option<String>,
+) -> Result<crate::modules::academic::degree_audit::DegreeAuditReport, String> {
+    // 1. Kiểm tra xem slug mục tiêu đã được cache chưa
+    let target_slug = {
+        let conn = db.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
+        crate::modules::academic::degree_audit::run_degree_audit(&conn, preferred_slug.as_deref())
+            .map(|r| r.slug)
+            .ok()
+            .or(preferred_slug.clone())
+            .unwrap_or_else(|| "cu-nhan-nganh-khoa-hoc-may-tinh-khoa-20-2025".to_string())
+    };
+
+    let needs_fetch = {
+        let conn = db.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM curriculum_rules WHERE slug = ?1",
+                params![target_slug],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+        count == 0
+    };
+
+    if needs_fetch {
+        // Tự động fetch từ Portal UIT nếu chưa có trong DB
+        let _ = crate::services::curriculum_harvester::sync_curriculum_by_slug(&db, &target_slug).await;
+    }
+
+    let conn = db.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
+    crate::modules::academic::degree_audit::run_degree_audit(&conn, Some(&target_slug))
+        .map_err(|e| e.to_string())
 }
 
 

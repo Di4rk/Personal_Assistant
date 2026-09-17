@@ -19,6 +19,7 @@
 import React, { useCallback, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Clock, ExternalLink, FolderOpen, Target, Zap } from "lucide-react";
+import { openExternalUrl } from "../../../lib/tauri-client";
 
 // ============================================================
 //  TYPES
@@ -178,7 +179,9 @@ export const ActiveCourseDispatcher: React.FC<ActiveCourseDispatcherProps> = ({
 
   const handleOpenDeadlineLink = useCallback(() => {
     if (!nextDeadline?.source_url) return;
-    window.open(nextDeadline.source_url, "_blank", "noopener,noreferrer");
+    openExternalUrl(nextDeadline.source_url).catch((err) => {
+      console.error("[ActiveCourseDispatcher] Không thể mở deadline link:", err);
+    });
   }, [nextDeadline]);
 
   return (
