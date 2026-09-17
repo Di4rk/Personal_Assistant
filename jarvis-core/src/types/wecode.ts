@@ -85,3 +85,9 @@ export interface WecodeCourseSummary {
   totalProblems: number;
   solvedProblems: number;
 }
+
+export interface SyncTimestamps {
+  portal_last_synced_at: number;
+  wecode_last_synced_at: number;
+}
+

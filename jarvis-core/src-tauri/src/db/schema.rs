@@ -72,6 +72,7 @@ pub fn init_db(db_path: &Path) -> SqlResult<Connection> {
     crate::db::academic::init_academic_module(&conn)?;
     ensure_curriculum_schema(&conn)?;
     ensure_wecode_schema(&conn)?;
+    ensure_sync_state_schema(&conn)?;
     ensure_moodle_schema(&conn)?;
     ensure_matrix_schema(&conn)?;
     ensure_plugin_and_activity_schema(&conn)?;
@@ -93,6 +94,7 @@ pub fn create_tables(conn: &Connection) -> SqlResult<()> {
     ensure_moodle_schema(conn)?;
     ensure_matrix_schema(conn)?;
     ensure_plugin_and_activity_schema(conn)?;
+    ensure_sync_state_schema(conn)?;
     apply_legacy_compatibility_migrations(conn)?;
     crate::db::vault_schema::init_vault_tables(conn)?;
 
@@ -448,6 +450,7 @@ pub fn ensure_curriculum_schema(conn: &Connection) -> SqlResult<()> {
 
 /// Tạo schema cho Wecode submissions, assignments và problems (idempotent).
 pub fn ensure_wecode_schema(conn: &Connection) -> SqlResult<()> {
+    ensure_sync_state_schema(conn)?;
     conn.execute_batch(
         r#"
         CREATE TABLE IF NOT EXISTS wecode_assignments (
@@ -549,6 +552,20 @@ pub fn ensure_wecode_schema(conn: &Connection) -> SqlResult<()> {
         let _ = conn.execute("ALTER TABLE wecode_problems ADD COLUMN problem_url TEXT NOT NULL DEFAULT ''", []);
     }
 
+    Ok(())
+}
+
+/// Tạo bảng lưu trữ mốc thời gian đồng bộ cho các dịch vụ (Unix Epoch INTEGER).
+pub fn ensure_sync_state_schema(conn: &Connection) -> SqlResult<()> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS sync_state (
+            service        TEXT PRIMARY KEY,
+            last_synced_at INTEGER NOT NULL DEFAULT 0
+        );
+        INSERT OR IGNORE INTO sync_state (service, last_synced_at) VALUES ('portal', 0), ('wecode', 0);
+        "#,
+    )?;
     Ok(())
 }
 

@@ -9,14 +9,32 @@ import type { WecodeAssignmentGroup } from "../../../types/wecode";
 
 interface WecodeAssignmentListProps {
   assignments: WecodeAssignmentGroup[];
+  statusFilter?: string;
   onSelectAssignment: (assignmentId: number) => void;
 }
 
 export const WecodeAssignmentList: React.FC<WecodeAssignmentListProps> = ({
   assignments,
+  statusFilter,
   onSelectAssignment,
 }) => {
   if (assignments.length === 0) {
+    if (statusFilter === "urgent") {
+      return (
+        <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-8 text-center text-xs font-mono space-y-2">
+          <div className="w-10 h-10 rounded-full bg-emerald-950/60 border border-emerald-800/50 text-emerald-400 mx-auto flex items-center justify-center mb-2">
+            <CheckCircle2 className="w-5 h-5" />
+          </div>
+          <p className="font-semibold text-zinc-200">
+            Thảnh thơi! Hiện không có bài tập nào dưới 3 ngày cần chạy deadline.
+          </p>
+          <p className="text-zinc-500 text-[11px]">
+            Tất cả bài tập đều đã giải xong hoặc còn nhiều thời gian.
+          </p>
+        </div>
+      );
+    }
+
     return (
       <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-8 text-center text-xs font-mono text-zinc-500 space-y-2">
         <FolderCode className="w-8 h-8 text-zinc-600 mx-auto" />

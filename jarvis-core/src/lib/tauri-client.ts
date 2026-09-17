@@ -424,7 +424,7 @@ export async function getResolvedCurriculum(): Promise<CurriculumResolution> {
   return invoke<CurriculumResolution>("get_resolved_curriculum");
 }
 
-import type { WecodeSubmission, WecodeAssignmentMeta, WecodeProblemRecord } from "../types/wecode";
+import type { WecodeSubmission, WecodeAssignmentMeta, WecodeProblemRecord, SyncTimestamps } from "../types/wecode";
 
 export async function getWecodeSubmissions(assignmentId?: number): Promise<WecodeSubmission[]> {
   return invoke<WecodeSubmission[]>("get_wecode_submissions", { assignmentId });
@@ -440,6 +440,18 @@ export async function getWecodeAssignments(): Promise<WecodeAssignmentMeta[]> {
 
 export async function launchWecodeSsoSync(): Promise<void> {
   return invoke<void>("launch_wecode_sso_sync");
+}
+
+export async function launchPortalSilentSync(): Promise<void> {
+  return invoke<void>("launch_portal_silent_sync");
+}
+
+export async function launchWecodeSilentSync(): Promise<void> {
+  return invoke<void>("launch_wecode_silent_sync");
+}
+
+export async function getSyncTimestamps(): Promise<SyncTimestamps> {
+  return invoke<SyncTimestamps>("get_sync_timestamps");
 }
 
 export interface SystemStorageStats {

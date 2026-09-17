@@ -154,10 +154,13 @@ macro_rules! registered_commands {
             // Portal In-App SSO
             commands::portal_auth::launch_portal_sso_sync,
             commands::portal_auth::launch_wecode_sso_sync,
+            commands::portal_auth::launch_portal_silent_sync,
+            commands::portal_auth::launch_wecode_silent_sync,
             // Wecode
             commands::wecode::get_wecode_submissions,
             commands::wecode::get_wecode_problems,
             commands::wecode::get_wecode_assignments,
+            commands::wecode::get_sync_timestamps,
             commands::wecode::ingest_wecode_submissions_json,
             // Moodle & Workspace
             commands::workspace::ingest_moodle_course_html,

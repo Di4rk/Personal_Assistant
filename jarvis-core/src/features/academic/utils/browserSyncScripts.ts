@@ -412,10 +412,10 @@ export const WECODE_BROWSER_SYNC_SCRIPT = `(async () => {
                             const maxScore = parseInt(scoreTd?.innerText.trim() || "100", 10);
                             const isAc = scoreTd?.classList.contains("bg-success") || false;
 
-                            const rawHref = a.getAttribute("href") || "";
+                            const rawHref = (a as HTMLAnchorElement).href || a.getAttribute("href") || "";
                             const problemUrl = rawHref.startsWith("http")
                                 ? rawHref
-                                : window.location.origin + (rawHref.startsWith("/") ? "" : "/") + rawHref;
+                                : (rawHref ? window.location.origin + (rawHref.startsWith("/") ? "" : "/") + rawHref : "");
 
                             allProblems.push({
                                 assignment_id: assign.id,

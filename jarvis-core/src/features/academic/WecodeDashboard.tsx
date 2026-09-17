@@ -12,6 +12,8 @@ import {
   Code2,
   FolderCode,
   ListFilter,
+  AlertCircle,
+  WifiOff,
 } from "lucide-react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
@@ -25,6 +27,7 @@ import { WecodeAssignmentList } from "./components/WecodeAssignmentList";
 import { WecodeProblemList } from "./components/WecodeProblemList";
 import { SyncWecodeModal } from "./components/SyncWecodeModal";
 import { aggregateWecodeHierarchy } from "./utils/wecodeHierarchy";
+import { useSyncLifecycle } from "./hooks/useSyncLifecycle";
 import type {
   WecodeSubmission,
   WecodeAssignmentMeta,
@@ -111,6 +114,48 @@ export const WecodeDashboard: React.FC = () => {
   const hierarchy = useMemo(() => {
     return aggregateWecodeHierarchy(submissions, storedAssignments, storedProblems, studentClass);
   }, [submissions, storedAssignments, storedProblems, studentClass]);
+
+  // Hook tự động đồng bộ Dual-Tier & quản lý vòng đời
+  const {
+    serviceState,
+    activeService,
+    isOffline,
+    requestSync,
+    openInteractiveLogin,
+  } = useSyncLifecycle({
+    assignments: hierarchy.assignments,
+    onDataRefresh: fetchSubmissions,
+  });
+
+  const [refreshCooldown, setRefreshCooldown] = useState<number>(0);
+
+  useEffect(() => {
+    if (refreshCooldown <= 0) return;
+    const timer = setTimeout(() => setRefreshCooldown((prev) => prev - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [refreshCooldown]);
+
+  const handleManualRefresh = async () => {
+    if (refreshCooldown > 0 || activeService) return;
+    setRefreshCooldown(15);
+    await requestSync("wecode", { bypassTtl: true, bypassCircuitBreaker: true });
+    await fetchSubmissions();
+  };
+
+  const formatLastSynced = (epochSec: number) => {
+    if (!epochSec || epochSec <= 0) return "Chưa đồng bộ";
+    const diffSec = Math.floor(Date.now() / 1000) - epochSec;
+    if (diffSec < 60) return "Vừa xong";
+    if (diffSec < 3600) return `${Math.floor(diffSec / 60)} phút trước`;
+    if (diffSec < 86400) return `${Math.floor(diffSec / 3600)} giờ trước`;
+    const date = new Date(epochSec * 1000);
+    return date.toLocaleDateString("vi-VN", {
+      day: "2-digit",
+      month: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
 
   // Thống kê đếm trạng thái cho Status Filter Tabs
   const statusCounts = useMemo(() => {
@@ -217,7 +262,7 @@ export const WecodeDashboard: React.FC = () => {
               <Terminal className="w-5 h-5" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <h2 className="text-lg font-bold text-zinc-100">
                   UIT Wecode Tracker
                 </h2>
@@ -229,6 +274,27 @@ export const WecodeDashboard: React.FC = () => {
                     Lớp: {studentClass}
                   </span>
                 )}
+                {/* Live Sync Status Indicator */}
+                {isOffline ? (
+                  <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-zinc-800 text-zinc-400 border border-zinc-700 flex items-center gap-1">
+                    <WifiOff className="w-3 h-3" /> Offline
+                  </span>
+                ) : activeService === "wecode" ? (
+                  <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-indigo-950/80 text-indigo-300 border border-indigo-800/60 flex items-center gap-1">
+                    <RefreshCw className="w-3 h-3 animate-spin" /> Đang quét Wecode...
+                  </span>
+                ) : serviceState.wecode.authStatus === "expired" ? (
+                  <button
+                    onClick={() => openInteractiveLogin("wecode")}
+                    className="px-2 py-0.5 rounded text-[10px] font-semibold bg-rose-950/80 text-rose-300 border border-rose-800/60 hover:bg-rose-900 flex items-center gap-1 cursor-pointer transition-colors"
+                  >
+                    <AlertCircle className="w-3 h-3" /> Phiên hết hạn - Đăng nhập lại
+                  </button>
+                ) : (
+                  <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-zinc-900 text-zinc-400 border border-zinc-800 flex items-center gap-1">
+                    <Clock className="w-3 h-3 text-zinc-500" /> Đồng bộ: {formatLastSynced(serviceState.wecode.lastSyncedAt)}
+                  </span>
+                )}
               </div>
               <p className="text-xs text-zinc-500 mt-0.5">
                 Thu thập và định lượng thành tích thực hành lập trình tại wecode.uit.edu.vn
@@ -238,13 +304,13 @@ export const WecodeDashboard: React.FC = () => {
 
           <div className="flex items-center gap-2">
             <button
-              onClick={() => void fetchSubmissions()}
-              disabled={isLoading}
+              onClick={() => void handleManualRefresh()}
+              disabled={isLoading || activeService === "wecode" || refreshCooldown > 0}
               className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs flex items-center gap-1.5 transition-colors border border-zinc-700 disabled:opacity-50 cursor-pointer"
-              title="Tải lại dữ liệu"
+              title={refreshCooldown > 0 ? `Vui lòng chờ ${refreshCooldown}s` : "Ép làm mới & quét dữ liệu Wecode"}
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? "animate-spin" : ""}`} />
-              <span>Làm mới</span>
+              <RefreshCw className={`w-3.5 h-3.5 ${activeService === "wecode" || isLoading ? "animate-spin" : ""}`} />
+              <span>{refreshCooldown > 0 ? `Chờ ${refreshCooldown}s` : "Làm mới"}</span>
             </button>
 
             <button
@@ -334,10 +400,18 @@ export const WecodeDashboard: React.FC = () => {
               <span>Đồng bộ tự động</span>
             </div>
             <div className="text-2xl font-bold text-indigo-300 tracking-tight">
-              Loopback
+              {activeService === "wecode"
+                ? "Đang quét..."
+                : isOffline
+                ? "Offline"
+                : serviceState.wecode.authStatus === "expired"
+                ? "Hết hạn"
+                : "Dual-Tier"}
             </div>
-            <span className="text-[11px] text-zinc-500">
-              1-Click In-App SSO Harvester
+            <span className="text-[11px] text-zinc-500 block truncate" title={`Lần cuối: ${formatLastSynced(serviceState.wecode.lastSyncedAt)} • 120s Watchdog`}>
+              {serviceState.wecode.lastSyncedAt > 0
+                ? `Lần cuối: ${formatLastSynced(serviceState.wecode.lastSyncedAt)}`
+                : "1-Click In-App SSO Harvester"}
             </span>
           </div>
         </div>
@@ -525,6 +599,7 @@ export const WecodeDashboard: React.FC = () => {
             {activeTab === "assignments" ? (
               <WecodeAssignmentList
                 assignments={filteredAssignments}
+                statusFilter={statusFilter}
                 onSelectAssignment={(id) => setSelectedAssignmentId(id)}
               />
             ) : (

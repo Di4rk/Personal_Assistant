@@ -1455,23 +1455,339 @@ pub async fn launch_wecode_sso_sync(app: AppHandle) -> Result<(), String> {
 }
 
 
-fn close_wecode_window(app: &AppHandle) {
-    if let Some(watchdog) = app.try_state::<WatchdogRegistry>() {
-        watchdog.cancel("wecode-sso-login");
+fn close_silent_window(
+    app: &AppHandle,
+    window_label: &str,
+    partial_registry: &PartialStateRegistry,
+) {
+    let harvester_reg = get_portal_harvester_registry_static();
+    if let Ok(mut sessions) = harvester_reg.sessions.lock() {
+        sessions.remove(window_label);
     }
     let wecode_reg = get_wecode_harvester_registry_static();
     if let Ok(mut sessions) = wecode_reg.sessions.lock() {
-        sessions.remove("wecode-sso-login");
+        sessions.remove(window_label);
     }
-    if let Some(reg) = app.try_state::<PartialStateRegistry>() {
-        if let Ok(mut states) = reg.states.lock() {
-            states.remove("wecode-sso-login");
-        }
+    if let Ok(mut states) = partial_registry.states.lock() {
+        states.remove(window_label);
     }
-    if let Some(window) = app.get_webview_window("wecode-sso-login") {
+    if let Some(window) = app.get_webview_window(window_label) {
         let _ = window.destroy();
     }
 }
+
+fn close_wecode_window(app: &AppHandle) {
+    let partial_state_registry = if let Some(reg) = app.try_state::<PartialStateRegistry>() {
+        reg.inner().clone()
+    } else {
+        PartialStateRegistry::default()
+    };
+    if let Some(watchdog) = app.try_state::<WatchdogRegistry>() {
+        watchdog.cancel("wecode-sso-login");
+    }
+    close_silent_window(app, "wecode-sso-login", &partial_state_registry);
+}
+
+#[tauri::command]
+pub async fn launch_portal_silent_sync(app: AppHandle) -> Result<(), String> {
+    let window_label = "portal-silent-sync".to_string();
+
+    let partial_state_registry = if let Some(reg) = app.try_state::<PartialStateRegistry>() {
+        reg.inner().clone()
+    } else {
+        PartialStateRegistry::default()
+    };
+
+    close_silent_window(&app, &window_label, &partial_state_registry);
+
+    let auth_url = WebviewUrl::External(
+        "https://portal.uit.edu.vn/sinh-vien/bang-diem"
+            .parse()
+            .map_err(|e| format!("Invalid auth URL: {e}"))?,
+    );
+
+    let (tx, rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
+    let tx_arc = Arc::new(StdMutex::new(Some(tx)));
+
+    // 120s Watchdog
+    let tx_watchdog = tx_arc.clone();
+    let app_watchdog = app.clone();
+    let label_watchdog = window_label.clone();
+    let partial_watchdog = partial_state_registry.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(120)).await;
+        if let Ok(mut lock) = tx_watchdog.lock() {
+            if let Some(sender) = lock.take() {
+                close_silent_window(&app_watchdog, &label_watchdog, &partial_watchdog);
+                let _ = sender.send(Err("TIMEOUT".to_string()));
+            }
+        }
+    });
+
+    let tx_nav = tx_arc.clone();
+    let app_nav = app.clone();
+    let label_nav = window_label.clone();
+    let partial_for_nav = partial_state_registry.clone();
+
+    let window = WebviewWindowBuilder::new(&app, &window_label, auth_url)
+        .title("Diark Portal Silent Sync")
+        .visible(false)
+        .initialization_script(PORTAL_HARVESTER_SCRIPT)
+        .on_navigation(move |url| {
+            let url_str = url.as_str();
+
+            // Detect expired auth / login redirect
+            if url_str.contains("login.microsoftonline.com")
+                || url_str.contains("/login")
+                || url_str.contains("/dang-nhap")
+                || (url_str.contains("microsoft") && !url_str.contains("diark-sso"))
+            {
+                if let Ok(mut lock) = tx_nav.lock() {
+                    if let Some(sender) = lock.take() {
+                        let _ = sender.send(Err("AUTH_EXPIRED".to_string()));
+                    }
+                }
+                close_silent_window(&app_nav, &label_nav, &partial_for_nav);
+                return false;
+            }
+
+            // 1. Intercept Final Callback (Atomic Persist)
+            if url_str.starts_with("diark-sso://callback") {
+                let callback_fragment = url.fragment().or_else(|| url_str.strip_prefix("diark-sso://callback#"));
+                let mut outcome = Ok(());
+                if let Some(fragment) = callback_fragment {
+                    match parse_callback_fragment(fragment) {
+                        Ok((target, data_str)) => {
+                            if target == "portal" {
+                                let status = extract_query_param(fragment, "status");
+                                if status == "success" {
+                                    println!("[Portal Silent] Portal auto-sync completed via background API engine!");
+                                    let _ = app_nav.emit("academic-data-synced", ());
+                                } else {
+                                    let harvester_reg = get_portal_harvester_registry_static();
+                                    let db_state = app_nav.state::<SharedDb>();
+                                    let db_arc = db_state.inner().clone();
+                                    match harvester_reg.commit_session(&label_nav, db_arc) {
+                                        Ok(total_courses) => {
+                                            println!("[Portal Silent] Portal Harvester committed {total_courses} courses successfully!");
+                                            let _ = app_nav.emit("academic-data-synced", ());
+                                        }
+                                        Err(err) => {
+                                            eprintln!("[Portal Silent] ERROR in Portal Harvester commit: {err}");
+                                            outcome = Err(format!("SERVER_ERROR: {err}"));
+                                        }
+                                    }
+                                }
+                            } else {
+                                let final_payload = merge_with_partial_state(&partial_for_nav, &label_nav, &data_str);
+                                match crate::commands::academic::ingest_full_academic_payload_sync(&app_nav, final_payload) {
+                                    Ok(_) => {
+                                        println!("[Portal Silent] Academic sync successfully committed to SQLite!");
+                                        let _ = app_nav.emit("academic-data-synced", ());
+                                    }
+                                    Err(err) => {
+                                        eprintln!("[Portal Silent] ERROR ingesting academic payload: {err}");
+                                        outcome = Err(format!("SERVER_ERROR: {err}"));
+                                    }
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            eprintln!("[Portal Silent] ERROR parsing callback fragment: {err}");
+                            outcome = Err(format!("SERVER_ERROR: {err}"));
+                        }
+                    }
+                }
+
+                if let Ok(mut lock) = tx_nav.lock() {
+                    if let Some(sender) = lock.take() {
+                        let _ = sender.send(outcome);
+                    }
+                }
+                close_silent_window(&app_nav, &label_nav, &partial_for_nav);
+                return false;
+            }
+
+            // 2. Intercept Partial Checkpoints
+            if url_str.starts_with("diark-sso://partial") {
+                let partial_fragment = url.fragment().or_else(|| url_str.strip_prefix("diark-sso://partial#"));
+                if let Some(fragment) = partial_fragment {
+                    let _ = handle_partial_checkpoint_sync(&partial_for_nav, &label_nav, fragment);
+                }
+                return false;
+            }
+
+            // 3. Intercept Failure
+            if url_str.starts_with("diark-sso://failed") {
+                let reason = extract_query_param(url_str, "reason");
+                if let Ok(mut lock) = tx_nav.lock() {
+                    if let Some(sender) = lock.take() {
+                        let _ = sender.send(Err(format!("SERVER_ERROR: {reason}")));
+                    }
+                }
+                close_silent_window(&app_nav, &label_nav, &partial_for_nav);
+                return false;
+            }
+
+            if url_str.starts_with("diark-sso://") {
+                return false;
+            }
+
+            true
+        })
+        .build();
+
+    if let Err(e) = window {
+        return Err(format!("Failed to build silent portal webview: {e}"));
+    }
+
+    match rx.await {
+        Ok(result) => result,
+        Err(_) => Err("CANCELLED".to_string()),
+    }
+}
+
+#[tauri::command]
+pub async fn launch_wecode_silent_sync(app: AppHandle) -> Result<(), String> {
+    let window_label = "wecode-silent-sync".to_string();
+
+    let partial_state_registry = if let Some(reg) = app.try_state::<PartialStateRegistry>() {
+        reg.inner().clone()
+    } else {
+        PartialStateRegistry::default()
+    };
+
+    close_silent_window(&app, &window_label, &partial_state_registry);
+
+    let auth_url = WebviewUrl::External(
+        WECODE_LOGIN_URL
+            .parse()
+            .map_err(|e| format!("Invalid Wecode URL: {e}"))?,
+    );
+
+    let (tx, rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
+    let tx_arc = Arc::new(StdMutex::new(Some(tx)));
+
+    // 120s Watchdog
+    let tx_watchdog = tx_arc.clone();
+    let app_watchdog = app.clone();
+    let label_watchdog = window_label.clone();
+    let partial_watchdog = partial_state_registry.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(120)).await;
+        if let Ok(mut lock) = tx_watchdog.lock() {
+            if let Some(sender) = lock.take() {
+                close_silent_window(&app_watchdog, &label_watchdog, &partial_watchdog);
+                let _ = sender.send(Err("TIMEOUT".to_string()));
+            }
+        }
+    });
+
+    let tx_nav = tx_arc.clone();
+    let app_nav = app.clone();
+    let label_nav = window_label.clone();
+    let partial_for_nav = partial_state_registry.clone();
+
+    let window = WebviewWindowBuilder::new(&app, &window_label, auth_url)
+        .title("Diark Wecode Silent Sync")
+        .visible(false)
+        .initialization_script(WECODE_HARVESTER_SCRIPT)
+        .on_navigation(move |url| {
+            let url_str = url.as_str();
+
+            // Detect expired auth: redirecting to login page
+            if url_str.contains(WECODE_LOGIN_MARKER) || (url_str.contains("/login") && !url_str.contains("diark-sso")) {
+                if let Ok(mut lock) = tx_nav.lock() {
+                    if let Some(sender) = lock.take() {
+                        let _ = sender.send(Err("AUTH_EXPIRED".to_string()));
+                    }
+                }
+                close_silent_window(&app_nav, &label_nav, &partial_for_nav);
+                return false;
+            }
+
+            // Intercept Partial Submissions Checkpoint
+            if url_str.starts_with("diark-sso://partial") {
+                let partial_fragment = url.fragment().or_else(|| url_str.strip_prefix("diark-sso://partial#"));
+                if let Some(fragment) = partial_fragment {
+                    let _ = handle_partial_checkpoint_sync(&partial_for_nav, &label_nav, fragment);
+                }
+                return false;
+            }
+
+            // Intercept Callback (Atomic Commit)
+            if url_str.starts_with(CALLBACK_SCHEME) {
+                let fragment_opt = url.fragment().or_else(|| url_str.strip_prefix("diark-sso://callback#"));
+                let mut outcome = Ok(());
+                if let Some(fragment) = fragment_opt {
+                    let target = extract_query_param(fragment, "target");
+                    if target == "wecode" {
+                        let status = extract_query_param(fragment, "status");
+                        if status == "success" {
+                            println!("[Wecode Silent] Wecode auto-sync completed via background API engine!");
+                            let _ = app_nav.emit("wecode-submissions-synced", ());
+                        } else {
+                            let wecode_reg = get_wecode_harvester_registry_static();
+                            let db_state = app_nav.state::<SharedDb>();
+                            let db_arc = db_state.inner().clone();
+                            match wecode_reg.commit_session(&label_nav, db_arc) {
+                                Ok(count) => {
+                                    println!("[Wecode Silent] Wecode Harvester committed {count} submissions successfully!");
+                                    let _ = app_nav.emit("wecode-submissions-synced", ());
+                                }
+                                Err(err) => {
+                                    eprintln!("[Wecode Silent] ERROR in Wecode Harvester commit: {err}");
+                                    outcome = Err(format!("SERVER_ERROR: {err}"));
+                                }
+                            }
+                        }
+                    } else {
+                        if let Ok((t, data_str)) = parse_callback_fragment(fragment) {
+                            let _ = handle_callback_payload_sync(&app_nav, &t, &data_str);
+                        }
+                    }
+                }
+
+                if let Ok(mut lock) = tx_nav.lock() {
+                    if let Some(sender) = lock.take() {
+                        let _ = sender.send(outcome);
+                    }
+                }
+                close_silent_window(&app_nav, &label_nav, &partial_for_nav);
+                return false;
+            }
+
+            // Intercept Callback Failed
+            if url_str.starts_with(CALLBACK_FAIL_SCHEME) {
+                let reason = extract_query_param(url_str, "reason");
+                if let Ok(mut lock) = tx_nav.lock() {
+                    if let Some(sender) = lock.take() {
+                        let _ = sender.send(Err(format!("SERVER_ERROR: {reason}")));
+                    }
+                }
+                close_silent_window(&app_nav, &label_nav, &partial_for_nav);
+                return false;
+            }
+
+            // Prevent custom scheme leaks
+            if url_str.starts_with("diark-sso://") {
+                return false;
+            }
+
+            true
+        })
+        .build();
+
+    if let Err(e) = window {
+        return Err(format!("Failed to build silent wecode webview: {e}"));
+    }
+
+    match rx.await {
+        Ok(result) => result,
+        Err(_) => Err("CANCELLED".to_string()),
+    }
+}
+
 
 #[cfg(test)]
 mod tests {

@@ -910,6 +910,20 @@ impl PortalIngestionEngine {
             }
         }
 
+        let _ = tx.execute(
+            "CREATE TABLE IF NOT EXISTS sync_state (
+                service TEXT PRIMARY KEY,
+                last_synced_at INTEGER NOT NULL DEFAULT 0
+            )",
+            [],
+        );
+
+        tx.execute(
+            "INSERT INTO sync_state (service, last_synced_at) VALUES ('portal', strftime('%s', 'now'))
+             ON CONFLICT(service) DO UPDATE SET last_synced_at = excluded.last_synced_at",
+            [],
+        ).map_err(|e| format!("Failed to update portal sync_state: {e}"))?;
+
         tx.commit().map_err(|e| format!("Failed to commit transaction: {}", e))?;
         println!("[Diark DB] Portal Academic Ingestion committed successfully with dynamic major: {}.", resolved_major.major_code);
         Ok(())
@@ -993,6 +1007,20 @@ impl PortalIngestionEngine {
             );
         }
 
+        let _ = tx.execute(
+            "CREATE TABLE IF NOT EXISTS sync_state (
+                service TEXT PRIMARY KEY,
+                last_synced_at INTEGER NOT NULL DEFAULT 0
+            )",
+            [],
+        );
+
+        tx.execute(
+            "INSERT INTO sync_state (service, last_synced_at) VALUES ('portal', strftime('%s', 'now'))
+             ON CONFLICT(service) DO UPDATE SET last_synced_at = excluded.last_synced_at",
+            [],
+        ).map_err(|e| format!("Failed to update portal sync_state: {e}"))?;
+
         tx.commit().map_err(|e| format!("Commit error: {e}"))?;
         Ok(count)
     }
@@ -1004,6 +1032,7 @@ mod tests {
 
     fn setup_test_db() -> Arc<Mutex<Connection>> {
         let conn = Connection::open_in_memory().unwrap();
+        crate::db::schema::ensure_sync_state_schema(&conn).unwrap();
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS settings (
                 key TEXT PRIMARY KEY,

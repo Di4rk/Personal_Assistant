@@ -312,6 +312,42 @@ pub fn ingest_wecode_submissions_json(
     Ok(count)
 }
 
+#[derive(serde::Deserialize, serde::Serialize, Clone, Debug, Default, PartialEq)]
+pub struct SyncTimestampsDto {
+    pub portal_last_synced_at: i64,
+    pub wecode_last_synced_at: i64,
+}
+
+#[tauri::command]
+pub fn get_sync_timestamps(state: State<AppState>) -> Result<SyncTimestampsDto, String> {
+    let conn = state.db.lock().map_err(|e| format!("DB lock error: {e}"))?;
+    let mut dto = SyncTimestampsDto::default();
+
+    let mut stmt = conn
+        .prepare("SELECT service, last_synced_at FROM sync_state")
+        .map_err(|e| format!("Prepare query error: {e}"))?;
+
+    let rows = stmt
+        .query_map([], |row| {
+            let service: String = row.get(0)?;
+            let last_synced_at: i64 = row.get(1)?;
+            Ok((service, last_synced_at))
+        })
+        .map_err(|e| format!("Query error: {e}"))?;
+
+    for item in rows {
+        if let Ok((service, ts)) = item {
+            match service.as_str() {
+                "portal" => dto.portal_last_synced_at = ts,
+                "wecode" => dto.wecode_last_synced_at = ts,
+                _ => {}
+            }
+        }
+    }
+
+    Ok(dto)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -410,5 +446,42 @@ mod tests {
             assert_eq!(xp_events[0].0, "wecode_problem_ac");
             assert_eq!(xp_events[0].1, 15);
         }
+    }
+
+    #[test]
+    fn test_get_sync_timestamps_query() {
+        let conn = Connection::open_in_memory().unwrap();
+        crate::db::schema::ensure_sync_state_schema(&conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO sync_state (service, last_synced_at) VALUES ('portal', 1700000000)
+             ON CONFLICT(service) DO UPDATE SET last_synced_at = excluded.last_synced_at",
+            [],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO sync_state (service, last_synced_at) VALUES ('wecode', 1700001234)
+             ON CONFLICT(service) DO UPDATE SET last_synced_at = excluded.last_synced_at",
+            [],
+        ).unwrap();
+
+        let mut stmt = conn.prepare("SELECT service, last_synced_at FROM sync_state").unwrap();
+        let mut dto = SyncTimestampsDto::default();
+        let rows = stmt.query_map([], |row| {
+            let service: String = row.get(0)?;
+            let last_synced_at: i64 = row.get(1)?;
+            Ok((service, last_synced_at))
+        }).unwrap();
+
+        for item in rows {
+            let (service, ts) = item.unwrap();
+            match service.as_str() {
+                "portal" => dto.portal_last_synced_at = ts,
+                "wecode" => dto.wecode_last_synced_at = ts,
+                _ => {}
+            }
+        }
+
+        assert_eq!(dto.portal_last_synced_at, 1700000000);
+        assert_eq!(dto.wecode_last_synced_at, 1700001234);
     }
 }

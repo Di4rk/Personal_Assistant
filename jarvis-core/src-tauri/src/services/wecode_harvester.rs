@@ -213,6 +213,20 @@ impl WecodeIngestionEngine {
             }
         }
 
+        let _ = tx.execute(
+            "CREATE TABLE IF NOT EXISTS sync_state (
+                service TEXT PRIMARY KEY,
+                last_synced_at INTEGER NOT NULL DEFAULT 0
+            )",
+            [],
+        );
+
+        tx.execute(
+            "INSERT INTO sync_state (service, last_synced_at) VALUES ('wecode', strftime('%s', 'now'))
+             ON CONFLICT(service) DO UPDATE SET last_synced_at = excluded.last_synced_at",
+            [],
+        ).map_err(|e| format!("Failed to update wecode sync_state: {e}"))?;
+
         tx.commit().map_err(|e| format!("Failed to commit wecode transaction: {e}"))?;
 
         for date in &affected_dates {
