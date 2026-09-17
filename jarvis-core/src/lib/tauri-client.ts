@@ -10,6 +10,8 @@ import type {
   AcademicMacroMetricSSOT,
   AcademicRadarMetrics,
   FullPortalIngestionRequest,
+  DegreeAuditReport,
+  CurriculumIndexDto,
 } from "../features/academic/types";
 import type { LifeMatrixEntryDto } from "../features/life-matrix/types";
 import type { CreateStructuredNoteDto, VaultSearchResultDto, VaultStatsDto } from "../features/vault/types";
@@ -273,6 +275,40 @@ export async function ingestDynamicAcademicData(
 }
 
 /**
+ * Lấy Báo cáo Kiểm toán Tốt nghiệp (Degree Audit Report) đối soát toàn diện.
+ */
+export async function getDegreeAuditReport(
+  preferredSlug?: string | null
+): Promise<DegreeAuditReport> {
+  return invoke<DegreeAuditReport>("get_degree_audit_report", {
+    preferredSlug: preferredSlug ?? null,
+  });
+}
+
+/**
+ * Tải và lưu cache CTĐT từ Portal UIT theo slug.
+ */
+export async function fetchAndCacheCurriculum(
+  slug: string
+): Promise<any> {
+  return invoke<any>("fetch_and_cache_curriculum", { slug });
+}
+
+/**
+ * Lấy danh sách các CTĐT UIT trong catalog.
+ */
+export async function getAvailableCurriculums(): Promise<CurriculumIndexDto[]> {
+  return invoke<CurriculumIndexDto[]>("get_available_curriculums");
+}
+
+/**
+ * Lưu slug CTĐT sinh viên chọn làm chuẩn kiểm toán vào settings.
+ */
+export async function setStudentCurriculumSlug(slug: string): Promise<void> {
+  return invoke<void>("set_student_curriculum_slug", { slug });
+}
+
+/**
  * Lấy dải dữ liệu Life Matrix liên tục 364 ngày qua SQLite CTE.
  */
 export async function getLifeMatrixRange(
@@ -483,5 +519,12 @@ export async function ingestPortalSyncPayloadJson(payloadJson: string): Promise<
  */
 export async function ingestWecodeSubmissionsJson(payloadJson: string): Promise<number> {
   return invoke<number>("ingest_wecode_submissions_json", { payloadJson });
+}
+
+/**
+ * Mở URL an toàn trong trình duyệt web mặc định của hệ thống thông qua native Rust backend.
+ */
+export async function openExternalUrl(url: string): Promise<void> {
+  return invoke<void>("open_external_url", { url });
 }
 

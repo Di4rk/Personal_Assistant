@@ -278,3 +278,65 @@ export interface UitWorkloadEvaluation {
   scholarshipEligible: boolean;
   isInvalid: boolean;
 }
+
+// ============================================================
+//  Degree Audit & Curriculum Engine Types
+// ============================================================
+
+export interface AuditCourseItem {
+  courseCode: string;
+  courseName: string;
+  credits: number;
+  grade10: number | null;
+  gradeChar: string | null;
+  semesterId: string;
+  isCompulsory: boolean;
+  knowledgeBlock: string;
+}
+
+export interface BlockAuditResult {
+  knowledgeBlock: string;
+  blockNameDisplay: string;
+  requiredCredits: number;
+  completedCredits: number;
+  isFulfilled: boolean;
+  compulsoryFulfilled: boolean;
+  missingCompulsoryCodes: string[];
+  passedCourses: AuditCourseItem[];
+  overflowCredits: number;
+}
+
+export interface NonCreditPrerequisites {
+  hasGdtc: boolean;
+  hasGdqp: boolean;
+  hasEnglish: boolean;
+  hasDrl65: boolean;
+  details: string[];
+}
+
+export interface DegreeAuditReport {
+  slug: string;
+  majorName: string;
+  cohortYear: number | null;
+  totalDegreeCredits: number;
+  totalEarnedCredits: number;
+  totalRequiredCredits: number;
+  completionPercent: number;
+  isGraduationReady: boolean;
+  blockAudits: BlockAuditResult[];
+  nonCreditPrerequisites: NonCreditPrerequisites;
+  unmatchedPassedCourses: AuditCourseItem[];
+}
+
+export interface CurriculumIndexDto {
+  slug: string;
+  majorName: string;
+  degreeLevel: string | null;
+  cohortYear: number | null;
+  cohortNum: number | null;
+  totalCredits: number | null;
+  trainingDuration: string | null;
+  trainingForm: string | null;
+  isCached: boolean;
+  updatedAt: number | null;
+}

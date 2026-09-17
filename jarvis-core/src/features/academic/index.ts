@@ -7,5 +7,6 @@ export * from "./components/GpaSimulatorCard";
 export * from "./components/AcademicSummaryCards";
 export * from "./components/SemesterTabs";
 export * from "./components/AcademicCourseTable";
+export * from "./components/GraduationAuditCard";
 export * from "./AcademicDashboard";
 export * from "./utils/forecastEngine";

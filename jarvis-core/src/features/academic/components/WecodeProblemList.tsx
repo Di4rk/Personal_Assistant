@@ -13,7 +13,7 @@ import {
   Star,
   ExternalLink,
 } from "lucide-react";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { openExternalUrl } from "../../../lib/tauri-client";
 import type { WecodeAssignmentGroup, WecodeSubmission } from "../../../types/wecode";
 import { formatVerdictLabel } from "../utils/wecodeHierarchy";
 
@@ -53,10 +53,27 @@ export const WecodeProblemList: React.FC<WecodeProblemListProps> = ({
 
   const handleOpenProblemUrl = async (url: string) => {
     try {
-      await openUrl(url);
-    } catch {
-      window.open(url, "_blank");
+      await openExternalUrl(url);
+    } catch (err) {
+      console.error("[WecodeProblemList] Không thể mở URL ngoài trình duyệt:", url, err);
     }
+  };
+
+  const assignmentUrl = useMemo(() => {
+    const base = assignment.base_url?.trim().replace(/\/+$/, "") || "https://khmt.uit.edu.vn/wecode25/it00x";
+    return `${base}/assignment/${assignment.id}/0`;
+  }, [assignment.base_url, assignment.id]);
+
+  const getProblemUrl = (prob: { problem_id: number; problem_url?: string }): string => {
+    const raw = prob.problem_url?.trim();
+    if (raw && (raw.startsWith("http://") || raw.startsWith("https://"))) {
+      return raw;
+    }
+    const base = assignment.base_url?.trim().replace(/\/+$/, "") || "https://khmt.uit.edu.vn/wecode25/it00x";
+    if (raw && raw.startsWith("/")) {
+      return `${base}${raw}`;
+    }
+    return `${base}/assignment/${assignment.id}/${prob.problem_id}`;
   };
 
   const solvedCount = useMemo(() => {
@@ -154,6 +171,15 @@ export const WecodeProblemList: React.FC<WecodeProblemListProps> = ({
             <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-zinc-800 text-emerald-400 border border-zinc-700">
               ID #{assignment.id}
             </span>
+            <button
+              type="button"
+              onClick={() => void handleOpenProblemUrl(assignmentUrl)}
+              className="px-2 py-0.5 rounded text-[10px] font-semibold bg-zinc-800 hover:bg-emerald-950 text-zinc-300 hover:text-emerald-300 border border-zinc-700 hover:border-emerald-700/60 transition-colors cursor-pointer inline-flex items-center gap-1"
+              title={`Mở bài tập #${assignment.id} trên Wecode`}
+            >
+              <ExternalLink className="w-2.5 h-2.5" />
+              <span>Mở bài tập trên web</span>
+            </button>
             <span className={`px-2 py-0.5 rounded text-[10px] font-semibold border ${assignment.deadlineBadgeColor}`}>
               {assignment.deadlineLabel}
             </span>
@@ -275,7 +301,7 @@ export const WecodeProblemList: React.FC<WecodeProblemListProps> = ({
               const best = prob.bestSubmission;
               const isAc = prob.isSolved;
               const displayOrder = prob.order && prob.order > 0 ? prob.order : idx + 1;
-              const probUrl = prob.problem_url || (assignment.base_url ? `${assignment.base_url}/assignment/${assignment.id}/${prob.problem_id}` : undefined);
+              const probUrl = getProblemUrl(prob);
 
               return (
                 <div

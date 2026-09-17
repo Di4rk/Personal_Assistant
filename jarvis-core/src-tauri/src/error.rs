@@ -45,6 +45,9 @@ pub enum AppError {
     #[error("Lỗi phân giải bảng điểm UIT: {0}")]
     TranscriptParse(String),
 
+    #[error("Lỗi phân giải chương trình đào tạo UIT: {0}")]
+    CurriculumParse(String),
+
     #[error("Lỗi I/O: {0}")]
     Io(#[from] std::io::Error),
 

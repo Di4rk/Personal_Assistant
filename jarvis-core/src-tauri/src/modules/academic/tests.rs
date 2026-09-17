@@ -302,4 +302,97 @@ mod tests {
         assert_eq!(semesters[0].id, "2025_2026_HK1");
         assert_eq!(semesters[0].actual_gpa_10, Some(8.5));
     }
+
+    #[test]
+    fn test_degree_audit_full_flow_with_seeded_catalog() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::schema::create_tables(&conn).unwrap();
+
+        // 1. Kiểm tra catalog seeding (ít nhất 200 chương trình đào tạo UIT)
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM curriculum_index", [], |r| r.get(0))
+            .unwrap();
+        assert!(count >= 200, "Catalog must be seeded with at least 200 curricula, found {}", count);
+
+        // 2. Parse và lưu trữ CTĐT mẫu KHMT K2025
+        let fixture_path = std::path::Path::new("tests/fixtures/uit_curriculum_sample.rsc");
+        let content = std::fs::read_to_string(fixture_path).unwrap();
+        let parsed = crate::services::curriculum_harvester::parse_curriculum_stream(
+            &content,
+            "cu-nhan-nganh-khoa-hoc-may-tinh-khoa-20-2025",
+        ).unwrap();
+        crate::services::curriculum_harvester::save_parsed_curriculum(&conn, &parsed).unwrap();
+
+        // 3. Giả lập sinh viên nạp môn học
+        conn.execute(
+            "INSERT INTO academic_semesters (id, academic_year, semester_term, is_completed, created_at, updated_at)
+             VALUES ('2025_2026_HK1', '2025-2026', 1, 1, 0, 0)",
+            [],
+        ).unwrap();
+
+        // Bắt buộc CSN: IT001, IT002, IT003, IT012, IT004, IT005, IT007, CS115, CS112, CS005
+        let courses = [
+            ("IT001", "Nhập môn lập trình", 4.0, 9.0),
+            ("IT002", "Lập trình hướng đối tượng", 4.0, 8.5),
+            ("IT003", "Cấu trúc dữ liệu và giải thuật", 4.0, 8.0),
+            ("IT012", "Tổ chức và cấu trúc máy tính 2", 4.0, 8.0),
+            ("IT004", "Cơ sở dữ liệu", 4.0, 8.5),
+            ("IT005", "Nhập môn mạng máy tính", 4.0, 8.0),
+            ("IT007", "Hệ điều hành", 4.0, 8.0),
+            ("CS115", "Toán cho khoa học máy tính", 4.0, 8.0),
+            ("CS112", "Phân tích và thiết kế thuật toán", 4.0, 7.5),
+            ("CS005", "Giới thiệu ngành KHMT", 1.0, 9.0),
+            // Non-credit
+            ("ME001", "Giáo dục quốc phòng", 0.0, 8.0),
+            ("PE231", "Giáo dục thể chất 1", 0.0, 8.0),
+            ("PE232", "Giáo dục thể chất 2", 0.0, 8.0),
+            ("ENG03", "Anh văn 3", 4.0, 8.0),
+            // Tự chọn CN (5 môn = 20 TC, vượt chỉ tiêu 16 TC để test spillover)
+            ("CS106", "Trí tuệ nhân tạo", 4.0, 9.0),
+            ("CS114", "Máy học", 4.0, 8.5),
+            ("CS232", "Tính toán đa phương tiện", 4.0, 8.0),
+            ("CS105", "Đồ họa máy tính", 4.0, 8.5),
+            ("CS211", "Trí tuệ nhân tạo nâng cao", 4.0, 9.0),
+        ];
+
+        for (i, (code, name, credits, score)) in courses.iter().enumerate() {
+            conn.execute(
+                r#"
+                INSERT INTO academic_courses (
+                    id, semester_id, course_code, course_name, credits, summary_score_10, is_passed, created_at, updated_at
+                ) VALUES (?1, '2025_2026_HK1', ?2, ?3, ?4, ?5, 1, 0, 0)
+                "#,
+                rusqlite::params![format!("id_{}", i), code, name, credits, score],
+            ).unwrap();
+        }
+
+        conn.execute(
+            "INSERT INTO academic_macro_metrics (semester_id, term_gpa, cumulative_gpa, drl, updated_at) VALUES ('2025_2026_HK1', 8.5, 8.5, 88, 0)",
+            [],
+        ).unwrap();
+
+        // 4. Chạy kiểm toán tốt nghiệp
+        let report = crate::modules::academic::degree_audit::run_degree_audit(
+            &conn,
+            Some("cu-nhan-nganh-khoa-hoc-may-tinh-khoa-20-2025"),
+        ).unwrap();
+
+        assert_eq!(report.slug, "cu-nhan-nganh-khoa-hoc-may-tinh-khoa-20-2025");
+        assert_eq!(report.total_degree_credits, 126.0);
+
+        // Kiểm tra non-credit
+        assert!(report.non_credit_prerequisites.has_gdtc);
+        assert!(report.non_credit_prerequisites.has_gdqp);
+        assert!(report.non_credit_prerequisites.has_english);
+        assert!(report.non_credit_prerequisites.has_drl_65);
+
+        // Kiểm tra khối CN: chỉ nhận tối đa 16 TC
+        let cn_block = report.block_audits.iter().find(|b| b.knowledge_block == "CN").unwrap();
+        assert_eq!(cn_block.completed_credits, 16.0);
+        assert!(cn_block.is_fulfilled);
+
+        // Kiểm tra khối Tự do: nhận 4 TC tràn từ CN
+        let tu_do_block = report.block_audits.iter().find(|b| b.knowledge_block.contains("tu do") || b.knowledge_block == "Tự chọn tự do").unwrap();
+        assert_eq!(tu_do_block.completed_credits, 4.0);
+    }
 }
