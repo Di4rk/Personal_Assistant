@@ -21,6 +21,20 @@ target/
 target*/
 target_*/
 
+# SQLite Databases & WAL files — NEVER commit user data
+*.db
+*.sqlite
+*.sqlite3
+*.db-wal
+*.db-shm
+*.sqlite3-wal
+*.sqlite3-shm
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

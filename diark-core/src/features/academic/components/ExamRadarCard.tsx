@@ -125,30 +125,44 @@ export const ExamRadarCard: React.FC<ExamRadarCardProps> = ({ className = "" }) 
     loadExams();
   }, [loadExams]);
 
-  // Cập nhật đồng hồ đếm ngược mỗi giây
+  // 1. Phân loại ca thi sắp tới và đã qua (không chạy lại mỗi giây, giảm tải CPU)
+  const { upcomingExams, pastExams } = useMemo(() => {
+    const currentEpoch = Math.floor(Date.now() / 1000);
+    const upcoming: AcademicExamRecord[] = [];
+    const past: AcademicExamRecord[] = [];
+    for (const e of exams) {
+      if (e.exam_timestamp >= currentEpoch) {
+        upcoming.push(e);
+      } else {
+        past.push(e);
+      }
+    }
+    return { upcomingExams: upcoming, pastExams: past };
+  }, [exams, nowTs >= (exams[0]?.exam_timestamp ?? 0)]);
+
+  const nextExam = upcomingExams[0] || null;
+
+  // 2. Chỉ kích hoạt timer 1s khi THỰC SỰ có ca thi sắp tới — idle footprint tối thiểu
   useEffect(() => {
+    if (!nextExam) return;
     const timer = setInterval(() => {
       setNowTs(Math.floor(Date.now() / 1000));
     }, 1000);
     return () => clearInterval(timer);
-  }, []);
+  }, [nextExam?.exam_timestamp]);
 
-  // Xác định ca thi sắp tới gần nhất
-  const upcomingExams = useMemo(() => {
-    return exams.filter((e) => e.exam_timestamp >= nowTs);
-  }, [exams, nowTs]);
-
-  const pastExams = useMemo(() => {
-    return exams.filter((e) => e.exam_timestamp < nowTs);
-  }, [exams, nowTs]);
-
-  const nextExam = upcomingExams[0] || null;
-
-  // Countdown của ca thi gần nhất
+  // 3. Countdown của ca thi gần nhất
   const countdown = useMemo(() => {
     if (!nextExam) return null;
     return calculateCountdown(nextExam.exam_timestamp);
   }, [nextExam, nowTs]);
+
+  // 4. Khi ca thi vừa kết thúc, tự động refresh danh sách
+  useEffect(() => {
+    if (countdown?.isPast && nextExam) {
+      loadExams();
+    }
+  }, [countdown?.isPast, nextExam, loadExams]);
 
   // Checkbox toggle handler
   const handleToggleChecklist = async (exam: AcademicExamRecord, itemId: string) => {

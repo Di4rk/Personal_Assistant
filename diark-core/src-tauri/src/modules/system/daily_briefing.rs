@@ -145,11 +145,36 @@ pub fn generate_daily_briefing_content(conn: &Connection) -> Result<DailyBriefin
     })
 }
 
-/// Phát thông báo Windows Native và emit sự kiện qua Tauri
+/// Phát thông báo Windows Native và emit sự kiện qua Tauri.
+/// Có cooldown 30 phút: nếu đã bắn gần đây thì bỏ qua tránh spam.
 pub fn dispatch_daily_briefing(
     app: &AppHandle,
     conn: &Connection,
 ) -> Result<DailyBriefingDto, String> {
+    // Cooldown check: không bắn nếu đã bắn trong vòng 30 phút qua
+    let now_ts = Utc::now().timestamp();
+    let last_ts: i64 = conn
+        .query_row(
+            "SELECT CAST(value AS INTEGER) FROM settings WHERE key = 'last_briefing_ts'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+
+    if now_ts - last_ts < 1800 {
+        // Dưới 30 phút — trả về briefing content nhưng không bắn notification
+        let briefing = generate_daily_briefing_content(conn)
+            .map_err(|e| format!("Lỗi tạo Daily Briefing: {e}"))?;
+        return Ok(briefing);
+    }
+
+    // Ghi timestamp trước để race condition không gây double-fire
+    let _ = conn.execute(
+        "INSERT INTO settings (key, value) VALUES ('last_briefing_ts', ?1)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        rusqlite::params![now_ts.to_string()],
+    );
+
     let briefing = generate_daily_briefing_content(conn)
         .map_err(|e| format!("Lỗi tạo Daily Briefing: {e}"))?;
 

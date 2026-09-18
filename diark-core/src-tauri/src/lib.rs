@@ -26,7 +26,11 @@ pub struct AppState {
 /// sau này nếu muốn user tự chỉnh.
 const DEFAULT_SYNC_INTERVAL_SECS: u64 = 60;
 
-#[cfg(debug_assertions)]
+// Macro duy nhất cho cả debug & release.
+// Dev tools commands (seed_mock_academic_data, clear_cf_cache) chỉ tồn tại
+// trong debug build vì bản thân commands/dev_tools.rs được guard bởi
+// #[cfg(debug_assertions)] ở commands/mod.rs. Ta đăng ký chúng riêng vào
+// .invoke_handler trong setup() dưới đây qua cfg conditional.
 macro_rules! registered_commands {
     () => {
         tauri::generate_handler![
@@ -115,129 +119,6 @@ macro_rules! registered_commands {
             commands::open_external_url,
             commands::hide_hud,
             // Settings & Identity
-            commands::settings::get_user_profile,
-            commands::settings::save_user_profile,
-            commands::settings::save_setting,
-            commands::settings::get_system_storage_stats,
-            commands::settings::reset_identity_state,
-            commands::settings::reset_user_data_to_genesis,
-            // Plugin Engine
-            commands::plugins::list_installed_plugins,
-            commands::plugins::toggle_plugin,
-            commands::plugins::plugin_storage_get,
-            commands::plugins::plugin_storage_set,
-            commands::plugins::record_activity_event,
-            commands::plugins::trigger_recompute_daily_matrix,
-            commands::plugins::fetch_remote_registry,
-            commands::plugins::install_remote_plugin,
-            // Exam Radar & Automation
-            commands::exam::get_exam_schedules,
-            commands::exam::sync_exam_schedules,
-            commands::exam::update_exam_checklist,
-            commands::exam::trigger_daily_briefing,
-            // Gemini AI Copilot
-            commands::gemini::get_gemini_config,
-            commands::gemini::save_gemini_config,
-            commands::gemini::test_gemini_key,
-            commands::gemini::trigger_socratic_debug,
-            commands::gemini::extract_moodle_tasks,
-            commands::gemini::save_extracted_moodle_tasks,
-            // Dev Tools (Debug Only)
-            commands::dev_tools::seed_mock_academic_data,
-            commands::dev_tools::clear_cf_cache,
-        ]
-    };
-}
-
-#[cfg(not(debug_assertions))]
-macro_rules! registered_commands {
-    () => {
-        tauri::generate_handler![
-            // Core CP & Stats
-            commands::get_today_stats,
-            commands::get_recent_submissions,
-            commands::get_level_info,
-            commands::get_yearly_heatmap,
-            commands::set_cf_handle,
-            commands::get_cf_handle,
-            commands::trigger_cf_sync,
-            commands::purge_cf_data,
-            // Post Mortem
-            commands::post_mortem::save_post_mortem,
-            commands::post_mortem::get_post_mortem,
-            commands::post_mortem::delete_post_mortem,
-            commands::post_mortem::search_post_mortems,
-            // Academic
-            commands::academic::get_academic_overview,
-            commands::academic::get_semester_courses,
-            commands::academic::upsert_academic_courses,
-            commands::academic::upsert_academic_semester,
-            commands::academic::sync_portal_uit_data,
-            commands::academic::sync_uit_portal,
-            commands::academic::submit_portal_transcript,
-            commands::academic::get_academic_macro_metrics,
-            commands::academic::get_academic_macro_metrics_ssot,
-            commands::academic::get_academic_radar_metrics,
-            commands::academic::ingest_full_academic_payload,
-            commands::academic::ingest_dynamic_academic_data,
-            commands::academic::purge_and_seed_canonical_academic_data,
-            commands::academic::get_academic_curriculum,
-            commands::academic::get_resolved_curriculum,
-            commands::academic::get_degree_audit_report,
-            commands::academic::fetch_and_cache_curriculum,
-            commands::academic::get_available_curriculums,
-            commands::academic::set_student_curriculum_slug,
-            commands::academic::get_sync_token,
-            commands::academic::get_student_profile,
-            commands::academic::ingest_portal_sync_payload_json,
-            // Portal In-App SSO
-            commands::portal_auth::launch_portal_sso_sync,
-            commands::portal_auth::launch_wecode_sso_sync,
-            commands::portal_auth::launch_moodle_sso_sync,
-            commands::portal_auth::launch_portal_silent_sync,
-            commands::portal_auth::launch_wecode_silent_sync,
-            commands::portal_auth::launch_moodle_silent_sync,
-            // Wecode
-            commands::wecode::get_wecode_submissions,
-            commands::wecode::get_wecode_problems,
-            commands::wecode::get_wecode_assignments,
-            commands::wecode::get_sync_timestamps,
-            commands::wecode::ingest_wecode_submissions_json,
-            // Moodle & Courses Engine
-            commands::moodle::get_moodle_courses,
-            commands::moodle::get_moodle_tasks,
-            commands::moodle::get_moodle_materials,
-            commands::moodle::download_course_materials,
-            commands::moodle::open_local_material,
-            commands::moodle::ingest_moodle_sync_payload_json,
-            commands::moodle::update_moodle_course_instructor,
-            commands::workspace::ingest_moodle_course_html,
-            commands::workspace::get_upcoming_deadlines,
-            commands::workspace::mark_deadline_submitted,
-            commands::workspace::upsert_workspace_config,
-            commands::workspace::get_workspace_config,
-            commands::workspace::check_and_launch_vscode,
-            // Life Matrix
-            commands::matrix::recompute_today_xp,
-            commands::matrix::get_heatmap_matrix,
-            commands::matrix::get_life_matrix_range,
-            // Vault & Window
-            commands::vault::scan_vault,
-            commands::vault::search_vault,
-            commands::vault::get_vault_stats,
-            commands::vault::create_structured_note,
-            commands::vault::open_onenote_link,
-            commands::vault::set_vault_path,
-            commands::vault::get_vault_path,
-            commands::vault::scaffold_semester_vault,
-            commands::vault::open_vault_course_folder,
-            commands::vault::start_vault_watcher,
-            commands::vault::stop_vault_watcher,
-            commands::vault::get_vault_watcher_status,
-            commands::vault::archive_semester,
-            commands::open_external_url,
-            commands::hide_hud,
-            // Settings & Identity (Always available)
             commands::settings::get_user_profile,
             commands::settings::save_user_profile,
             commands::settings::save_setting,

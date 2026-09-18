@@ -297,13 +297,33 @@ export async function getDegreeAuditReport(
   });
 }
 
+/** Kết quả parse CTĐT trả về từ Rust curriculum_harvester */
+export interface CurriculumCacheResult {
+  slug: string;
+  major_name: string;
+  cohort_year: number | null;
+  cohort_num: number | null;
+  total_credits: number;
+  rules: Array<{ knowledge_block: string; required_credits: number; percent: number | null }>;
+  courses: Array<{
+    course_code: string;
+    course_name: string;
+    credits: number;
+    theory_credits: number | null;
+    practical_credits: number | null;
+    knowledge_block: string;
+    is_compulsory: boolean;
+    recommended_semester: number | null;
+  }>;
+}
+
 /**
  * Tải và lưu cache CTĐT từ Portal UIT theo slug.
  */
 export async function fetchAndCacheCurriculum(
   slug: string
-): Promise<any> {
-  return invoke<any>("fetch_and_cache_curriculum", { slug });
+): Promise<CurriculumCacheResult> {
+  return invoke<CurriculumCacheResult>("fetch_and_cache_curriculum", { slug });
 }
 
 /**

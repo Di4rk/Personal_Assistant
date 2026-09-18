@@ -4,14 +4,15 @@
 //! - Chỉ lắng nghe trên 127.0.0.1 (loopback). Không bao giờ expose ra internet.
 //! - Không dùng axum/actix/warp — dùng tokio::net::TcpListener + httparse để giữ
 //!   binary footprint nhỏ nhất có thể.
-//! - Xác thực bắt buộc: header `X-Diark-Sync-Token` (hoặc `X-Jarvis-Sync-Token` cho backward-compat)
-//! phải khớp với token
+//! - Xác thực bắt buộc: header `X-Diark-Sync-Token` phải khớp với sync token
 //!   được lưu trong bảng `settings` của SQLite.
+//!   (`X-Jarvis-Sync-Token` vẫn được chấp nhận để backward-compat với userscript cũ).
 //! - Connection error không bao giờ panic luồng chính: toàn bộ lỗi được log
 //!   và trả HTTP error response, sau đó kết nối bị đóng gracefully.
 
 use std::sync::Arc;
-use std::time::Duration;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Emitter};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -31,7 +32,14 @@ const MAX_REQUEST_BYTES: usize = 65536;
 /// Không cần Arc<AppState> đầy đủ vì server không cần các state khác.
 pub struct SyncServerState {
     pub db: SharedDb,
+    /// Rate limiter đơn giản: đếm số request trong cửa sổ 1 giây hiện tại.
+    pub req_count: AtomicU64,
+    /// Thời điểm bắt đầu cửa sổ đếm hiện tại (protects by Mutex thông qua read access).
+    pub window_start: std::sync::Mutex<Instant>,
 }
+
+/// Số request tối đa mỗi giây trên sync_server loopback.
+const MAX_REQUESTS_PER_SECOND: u64 = 10;
 
 /// Khởi động TCP listener loopback. Hàm này chạy vĩnh viễn (loop accept).
 /// Phải được spawn qua `tauri::async_runtime::spawn`.
@@ -69,7 +77,11 @@ pub async fn start_sync_server(app: AppHandle, db: SharedDb) {
         }
     };
 
-    let state = Arc::new(SyncServerState { db });
+    let state = Arc::new(SyncServerState {
+        db,
+        req_count: AtomicU64::new(0),
+        window_start: std::sync::Mutex::new(Instant::now()),
+    });
 
     loop {
         match listener.accept().await {
@@ -82,6 +94,24 @@ pub async fn start_sync_server(app: AppHandle, db: SharedDb) {
 
                 let state_clone = Arc::clone(&state);
                 let app_clone = app.clone();
+
+                // Rate limiting: reset window mỗi giây, reject nếu vượt ngưỡng
+                let allow_request = {
+                    let mut win = state_clone.window_start.lock().unwrap_or_else(|p| p.into_inner());
+                    if win.elapsed() >= Duration::from_secs(1) {
+                        *win = Instant::now();
+                        state_clone.req_count.store(1, Ordering::Relaxed);
+                        true
+                    } else {
+                        let prev = state_clone.req_count.fetch_add(1, Ordering::Relaxed);
+                        prev < MAX_REQUESTS_PER_SECOND
+                    }
+                };
+
+                if !allow_request {
+                    eprintln!("[SyncServer] Rate limit exceeded ({}/s) — connection dropped", MAX_REQUESTS_PER_SECOND);
+                    continue;
+                }
 
                 tokio::spawn(async move {
                     let timeout_res = tokio::time::timeout(
@@ -96,6 +126,7 @@ pub async fn start_sync_server(app: AppHandle, db: SharedDb) {
                         Err(_) => eprintln!("[SyncServer] Connection timed out after 5s, dropped socket gracefully"),
                     }
                 });
+
             }
             Err(e) => {
                 // Accept error thường là tạm thời (file descriptor exhausted, etc.)
@@ -140,8 +171,8 @@ async fn handle_connection(
                             content_len = s.trim().parse::<usize>().unwrap_or(0);
                         }
                     }
-                    // Chấp nhận cả tên mới (X-Diark-Sync-Token) lẫn tên cũ (X-Jarvis-Sync-Token)
-                    // để backward-compatible với Tampermonkey userscript chưa cập nhật.
+                    // Chấp nhận cả header mới (X-Diark-Sync-Token) lẫn alias cũ (X-Jarvis-Sync-Token)
+                    // backward-compat cho browser script qua GM_xmlhttpRequest chưa cập nhật.
                     if h.name.eq_ignore_ascii_case("x-diark-sync-token")
                         || h.name.eq_ignore_ascii_case("x-jarvis-sync-token")
                     {

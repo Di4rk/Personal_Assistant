@@ -843,8 +843,12 @@ export const CoursesDashboard: React.FC = () => {
                 </div>
               </>
             ) : (
-              <div className="py-20 text-center text-xs text-zinc-500 font-mono">
-                Chọn một môn học từ danh sách bên trái để xem chi tiết.
+              <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/40 p-12 text-center space-y-3">
+                <BookOpen className="mx-auto h-10 w-10 text-zinc-600" />
+                <h3 className="text-sm font-semibold text-zinc-200">Chưa chọn môn học</h3>
+                <p className="text-xs text-zinc-400 font-mono max-w-sm mx-auto">
+                  Chọn một môn học từ danh sách bên trái để tra cứu liên hệ giảng viên, bài tập cần nộp và quản lý slide offline.
+                </p>
               </div>
             )}
           </div>

@@ -418,7 +418,24 @@ export const WecodeDashboard: React.FC = () => {
       </div>
 
       {/* Main Content Area */}
-      {activeAssignment ? (
+      {hierarchy.assignments.length === 0 && submissions.length === 0 && !isLoading ? (
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-12 text-center space-y-4">
+          <Code2 className="mx-auto h-12 w-12 text-zinc-600" />
+          <div className="space-y-1">
+            <h3 className="text-base font-semibold text-zinc-200">Chưa có dữ liệu Wecode UIT</h3>
+            <p className="text-xs text-zinc-400 max-w-md mx-auto font-mono">
+              Hệ thống chưa ghi nhận danh sách bài tập hoặc bài nộp nào. Nhấn &quot;Đồng bộ ngay bây giờ&quot; để kết nối tài khoản Wecode UIT và tự động nạp dữ liệu.
+            </p>
+          </div>
+          <button
+            onClick={() => setIsSyncModalOpen(true)}
+            className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-500 transition-colors cursor-pointer"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+            <span>Đồng bộ ngay bây giờ</span>
+          </button>
+        </div>
+      ) : activeAssignment ? (
         /* VIEW 1: Assignment Problem Drilldown */
         <WecodeProblemList
           assignment={activeAssignment}

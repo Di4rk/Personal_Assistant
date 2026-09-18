@@ -1,0 +1,65 @@
+name: Release DIARK OS
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: 'windows-latest'
+            args: ''
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: 'diark-core/src-tauri -> diark-core/src-tauri/target'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+          cache-dependency-path: 'diark-core/pnpm-lock.yaml'
+
+      - name: Install frontend dependencies
+        run: |
+          cd diark-core
+          pnpm install
+
+      - name: Build and Package Tauri App
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: './diark-core'
+          tagName: ${{ github.ref_name }}
+          releaseName: 'DIARK OS ${{ github.ref_name }}'
+          releaseBody: 'Phiên bản DIARK OS chính thức. Vui lòng tải file cài đặt (.exe) bên dưới.'
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}
