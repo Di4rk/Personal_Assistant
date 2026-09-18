@@ -1,6 +1,7 @@
 import React from "react";
-import { CheckCircle2, Clock, Cpu, FileCode2, ShieldAlert, Check } from "lucide-react";
+import { CheckCircle2, Clock, Cpu, FileCode2, ShieldAlert, Check, Zap } from "lucide-react";
 import type { WecodeSubmission } from "../../../types/wecode";
+import { useQuickCaptureStore } from "../../../stores/useQuickCaptureStore";
 
 interface WecodeSubmissionsListProps {
   submissions: WecodeSubmission[];
@@ -11,6 +12,24 @@ export const WecodeSubmissionsList: React.FC<WecodeSubmissionsListProps> = ({
   submissions,
   isLoading = false,
 }) => {
+  const handleOpenTrickFromSub = (sub: WecodeSubmission) => {
+    const probName = sub.problem_name || `Problem #${sub.problem_id}`;
+    const assignName = sub.assignment_name || `Assignment #${sub.assignment_id}`;
+    const title = `[Wecode] [${assignName}] ${probName}`;
+    const tags = ["wecode", "algo", `prob-${sub.problem_id}`];
+
+    let prose = `> **Bài tập:** ${probName} (#ID ${sub.problem_id})\n> **Assignment:** ${assignName}\n> **Lượt nộp:** #${sub.submission_id} • **Kết quả:** ${sub.verdict || "CORRECT"} (${sub.score}đ) • ${sub.execution_time.toFixed(2)}s • ${sub.memory_kib} KiB\n\n### 💡 Ý tưởng giải thuật & Tối ưu\n- `;
+
+    useQuickCaptureStore.getState().openQuickCapture({
+      mode: "algo",
+      title,
+      platformLink: `https://khmt.uit.edu.vn/wecode25/it00x/assignment/${sub.assignment_id}/${sub.problem_id}`,
+      tags,
+      codeSnippet: sub.code || "",
+      prose,
+    });
+  };
+
   if (isLoading) {
     return (
       <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-6 text-center text-xs font-mono text-zinc-400">
@@ -41,6 +60,7 @@ export const WecodeSubmissionsList: React.FC<WecodeSubmissionsListProps> = ({
               <th className="py-2.5 px-3 font-semibold text-right">Hiệu năng</th>
               <th className="py-2.5 px-3 font-semibold">Ngôn ngữ</th>
               <th className="py-2.5 px-3 font-semibold text-center">Chính thức</th>
+              <th className="py-2.5 px-3 font-semibold text-center">Ghi chú</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-800/60 text-zinc-300">
@@ -117,6 +137,17 @@ export const WecodeSubmissionsList: React.FC<WecodeSubmissionsListProps> = ({
                     ) : (
                       <span className="text-zinc-600 text-[10px]">—</span>
                     )}
+                  </td>
+                  <td className="py-2.5 px-3 text-center">
+                    <button
+                      type="button"
+                      onClick={() => handleOpenTrickFromSub(sub)}
+                      className="p-1 px-2 rounded bg-zinc-800/80 hover:bg-violet-950/80 text-zinc-300 hover:text-violet-300 border border-zinc-700/60 hover:border-violet-700/50 transition-colors cursor-pointer inline-flex items-center gap-1 text-[11px]"
+                      title="Lưu ghi chú thuật toán vào Native Vault"
+                    >
+                      <Zap className="w-3 h-3 text-amber-400" />
+                      <span>Lưu Trick</span>
+                    </button>
                   </td>
                 </tr>
               );

@@ -9,4 +9,7 @@ export * from "./components/SemesterTabs";
 export * from "./components/AcademicCourseTable";
 export * from "./components/GraduationAuditCard";
 export * from "./AcademicDashboard";
+export * from "./CoursesDashboard";
+export * from "./components/UnifiedQuestHub";
+export * from "./components/SyncMoodleModal";
 export * from "./utils/forecastEngine";

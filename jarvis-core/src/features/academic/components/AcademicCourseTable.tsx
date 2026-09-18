@@ -20,6 +20,95 @@ export interface AcademicCourseTableProps {
   className?: string;
 }
 
+interface BlockBadgeInfo {
+  label: string;
+  badgeClass: string;
+}
+
+export function resolveCourseBlockBadge(categoryRaw?: string | null, courseCode?: string): BlockBadgeInfo {
+  const norm = (categoryRaw || "").trim().toLowerCase();
+  const code = (courseCode || "").trim().toUpperCase();
+
+  // 1. Thể chất, GDQP, ngoại ngữ điều kiện
+  if (
+    code.startsWith("PE") ||
+    code.startsWith("ME") ||
+    norm.includes("bo tro") ||
+    norm === "auxiliary" ||
+    norm.includes("dieu kien")
+  ) {
+    return {
+      label: "Bổ trợ",
+      badgeClass: "bg-zinc-800 text-zinc-400 border border-zinc-700/60",
+    };
+  }
+
+  // 2. Đại cương (ĐC, dai_cuong, hoặc chứa "dai cuong")
+  if (norm === "đc" || norm === "dc" || norm.includes("dai cuong") || norm === "dai_cuong") {
+    return {
+      label: "Đ.cương",
+      badgeClass: "bg-emerald-950/60 text-emerald-400 border border-emerald-800/40",
+    };
+  }
+
+  // 3. Cơ sở ngành (CSN, co_so_nganh, hoặc chứa "co so")
+  if (norm === "csn" || norm.includes("co so") || norm === "co_so_nganh") {
+    return {
+      label: "CS ngành",
+      badgeClass: "bg-blue-950/60 text-blue-400 border border-blue-800/40",
+    };
+  }
+
+  // 4. Chuyên ngành (CN, chuyen_nganh, hoặc chứa "chuyen nganh")
+  if (norm === "cn" || norm.includes("chuyen") || norm === "chuyen_nganh") {
+    return {
+      label: "C.ngành",
+      badgeClass: "bg-violet-950/60 text-violet-400 border border-violet-800/40",
+    };
+  }
+
+  // 5. Khóa luận / Thực tập tốt nghiệp
+  if (norm === "kltn" || norm.includes("khoa luan") || norm.includes("tot nghiep")) {
+    return {
+      label: "T.nghiệp",
+      badgeClass: "bg-amber-950/60 text-amber-400 border border-amber-800/40",
+    };
+  }
+
+  // 6. Tự chọn tự do
+  if (norm.includes("tu do") || norm.includes("tu_do")) {
+    return {
+      label: "Tự do",
+      badgeClass: "bg-purple-950/60 text-purple-400 border border-purple-800/40",
+    };
+  }
+
+  // 7. Heuristic fallback theo mã môn UIT chuẩn
+  const fallbackCat = classifyCourseCategory(code);
+  if (fallbackCat === "foundational") {
+    return {
+      label: "CS ngành",
+      badgeClass: "bg-blue-950/60 text-blue-400 border border-blue-800/40",
+    };
+  }
+  if (fallbackCat === "specialized") {
+    return {
+      label: "C.ngành",
+      badgeClass: "bg-violet-950/60 text-violet-400 border border-violet-800/40",
+    };
+  }
+  if (fallbackCat === "auxiliary") {
+    return {
+      label: "Bổ trợ",
+      badgeClass: "bg-zinc-800 text-zinc-400 border border-zinc-700/60",
+    };
+  }
+  return {
+    label: "Đ.cương",
+    badgeClass: "bg-emerald-950/60 text-emerald-400 border border-emerald-800/40",
+  };
+}
+
 export const AcademicCourseTable: React.FC<AcademicCourseTableProps> = ({
   courses,
   isLoading = false,
@@ -138,16 +227,7 @@ export const AcademicCourseTable: React.FC<AcademicCourseTableProps> = ({
             </thead>
             <tbody className="divide-y divide-zinc-800/60 font-sans">
               {courses.map((course) => {
-                // Ưu tiên phân loại chuẩn mã môn UIT (IT001-IT012, CS005 là Cơ sở ngành), sau đó đối soát course.category
-                const codeClassified = classifyCourseCategory(course.courseCode);
-                const category =
-                  codeClassified === "foundational"
-                    ? "foundational"
-                    : course.category === "co_so_nganh"
-                    ? "foundational"
-                    : course.category === "specialized"
-                    ? "specialized"
-                    : codeClassified;
+                const blockInfo = resolveCourseBlockBadge(course.category, course.courseCode);
 
                 const finalPt = course.finalPoint ?? course.finalScore;
                 const tk10 = course.coursePoint ?? course.summaryScore10;
@@ -183,23 +263,9 @@ export const AcademicCourseTable: React.FC<AcademicCourseTableProps> = ({
                     </td>
                     <td className="py-2.5 px-2 text-center whitespace-nowrap">
                       <span
-                        className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
-                          category === "foundational"
-                            ? "bg-blue-950/60 text-blue-400 border border-blue-800/40"
-                            : category === "specialized"
-                            ? "bg-violet-950/60 text-violet-400 border border-violet-800/40"
-                            : category === "auxiliary"
-                            ? "bg-zinc-800 text-zinc-400 border border-zinc-700"
-                            : "bg-emerald-950/60 text-emerald-400 border border-emerald-800/40"
-                        }`}
+                        className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${blockInfo.badgeClass}`}
                       >
-                        {category === "foundational"
-                          ? "CS ngành"
-                          : category === "specialized"
-                          ? "C.ngành"
-                          : category === "auxiliary"
-                          ? "Bổ trợ"
-                          : "Đ.cương"}
+                        {blockInfo.label}
                       </span>
                     </td>
                     <td className="py-2.5 px-2 text-center font-mono text-zinc-300">

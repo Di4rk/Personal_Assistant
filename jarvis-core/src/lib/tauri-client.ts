@@ -14,7 +14,7 @@ import type {
   CurriculumIndexDto,
 } from "../features/academic/types";
 import type { LifeMatrixEntryDto } from "../features/life-matrix/types";
-import type { CreateStructuredNoteDto, VaultSearchResultDto, VaultStatsDto } from "../features/vault/types";
+import type { CreateStructuredNoteDto, ScaffoldResultDto, VaultSearchResultDto, VaultStatsDto } from "../features/vault/types";
 
 /**
  * Wrapper mỏng quanh invoke() để:
@@ -388,6 +388,26 @@ export async function getVaultPath(): Promise<string | null> {
 }
 
 /**
+ * Tự động tạo thư mục học kỳ và ghi chú môn học từ Moodle courses (idempotent 100%).
+ */
+export async function scaffoldSemesterVault(
+  vaultRoot?: string,
+  semesterName?: string
+): Promise<ScaffoldResultDto> {
+  return invoke<ScaffoldResultDto>("scaffold_semester_vault", {
+    vaultRoot,
+    semesterName,
+  });
+}
+
+/**
+ * Mở thư mục ghi chú của môn học trong File Explorer mặc định của hệ điều hành.
+ */
+export async function openVaultCourseFolder(courseCode: string): Promise<void> {
+  return invoke<void>("open_vault_course_folder", { courseCode });
+}
+
+/**
  * Ẩn cửa sổ HUD xuống khay hệ thống.
  */
 export async function hideHud(): Promise<void> {
@@ -526,5 +546,90 @@ export async function ingestWecodeSubmissionsJson(payloadJson: string): Promise<
  */
 export async function openExternalUrl(url: string): Promise<void> {
   return invoke<void>("open_external_url", { url });
+}
+
+// ============================================================
+// Moodle & Courses Engine Types & Commands
+// ============================================================
+
+export interface MoodleCourse {
+  course_id: number;
+  course_code: string;
+  fullname: string;
+  term: string;
+  instructor_name: string;
+  instructor_mail: string;
+  instructor_phone: string;
+  course_url: string;
+  updated_at: number;
+}
+
+export interface MoodleTask {
+  task_id: number;
+  course_id: number;
+  title: string;
+  task_type: string;
+  due_date: number; // Unix epoch seconds
+  is_submitted: boolean;
+  submission_status: string;
+  template_file_url: string;
+  task_url: string;
+  updated_at: number;
+  course_name?: string;
+  course_code?: string;
+}
+
+export interface MoodleMaterial {
+  id: number;
+  course_id: number;
+  section_name: string;
+  title: string;
+  file_url: string;
+  file_type: string;
+  created_at: number;
+}
+
+export interface MoodleSyncPayload {
+  courses: MoodleCourse[];
+  tasks: MoodleTask[];
+  materials: MoodleMaterial[];
+}
+
+export async function getMoodleCourses(): Promise<MoodleCourse[]> {
+  return invoke<MoodleCourse[]>("get_moodle_courses");
+}
+
+export async function getMoodleTasks(courseId?: number): Promise<MoodleTask[]> {
+  return invoke<MoodleTask[]>("get_moodle_tasks", { courseId });
+}
+
+export async function getMoodleMaterials(courseId: number): Promise<MoodleMaterial[]> {
+  return invoke<MoodleMaterial[]>("get_moodle_materials", { courseId });
+}
+
+export async function launchMoodleSilentSync(): Promise<void> {
+  return invoke<void>("launch_moodle_silent_sync");
+}
+
+export async function launchMoodleSsoSync(): Promise<void> {
+  return invoke<void>("launch_moodle_sso_sync");
+}
+
+export async function ingestMoodleSyncPayloadJson(payloadJson: string): Promise<number> {
+  return invoke<number>("ingest_moodle_sync_payload_json", { payloadJson });
+}
+
+export async function updateMoodleCourseInstructor(
+  courseId: number,
+  instructorName: string,
+  instructorMail: string,
+  instructorPhone: string
+): Promise<void> {
+  return invoke<void>("update_moodle_course_instructor", {
+    courseId,
+    instructorName,
+    instructorMail,
+    instructorPhone,
+  });
 }
 

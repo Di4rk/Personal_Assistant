@@ -316,6 +316,7 @@ pub fn ingest_wecode_submissions_json(
 pub struct SyncTimestampsDto {
     pub portal_last_synced_at: i64,
     pub wecode_last_synced_at: i64,
+    pub moodle_last_synced_at: i64,
 }
 
 #[tauri::command]
@@ -340,6 +341,7 @@ pub fn get_sync_timestamps(state: State<AppState>) -> Result<SyncTimestampsDto, 
             match service.as_str() {
                 "portal" => dto.portal_last_synced_at = ts,
                 "wecode" => dto.wecode_last_synced_at = ts,
+                "moodle" => dto.moodle_last_synced_at = ts,
                 _ => {}
             }
         }

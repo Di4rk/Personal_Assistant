@@ -5,6 +5,7 @@ pub mod moodle_parser;
 pub mod parser;
 pub mod portal_ingestion;
 pub mod sync_server;
+pub mod task_engine;
 pub mod validation;
 
 #[cfg(test)]

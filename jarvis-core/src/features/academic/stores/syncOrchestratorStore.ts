@@ -2,10 +2,11 @@ import { create } from 'zustand';
 import {
   launchPortalSilentSync,
   launchWecodeSilentSync,
+  launchMoodleSilentSync,
   getSyncTimestamps,
 } from '../../../lib/tauri-client';
 
-export type SyncService = 'portal' | 'wecode';
+export type SyncService = 'portal' | 'wecode' | 'moodle';
 export type AuthStatus = 'authenticated' | 'expired';
 
 export interface ServiceSyncState {
@@ -36,6 +37,7 @@ export interface SyncOrchestratorStore {
 const TTL_SECONDS: Record<SyncService, number> = {
   portal: 14400, // 4 hours
   wecode: 900,   // 15 minutes
+  moodle: 1800,  // 30 minutes
 };
 
 const CIRCUIT_BREAKER_MAX_FAILS = 3;
@@ -53,6 +55,13 @@ export const useSyncOrchestratorStore = create<SyncOrchestratorStore>((set, get)
       isSyncing: false,
     },
     wecode: {
+      lastSyncedAt: 0,
+      failCount: 0,
+      lastFailedAt: 0,
+      authStatus: 'authenticated',
+      isSyncing: false,
+    },
+    moodle: {
       lastSyncedAt: 0,
       failCount: 0,
       lastFailedAt: 0,
@@ -77,6 +86,10 @@ export const useSyncOrchestratorStore = create<SyncOrchestratorStore>((set, get)
             ...state.serviceState.wecode,
             lastSyncedAt: timestamps.wecode_last_synced_at || state.serviceState.wecode.lastSyncedAt,
           },
+          moodle: {
+            ...state.serviceState.moodle,
+            lastSyncedAt: timestamps.moodle_last_synced_at || state.serviceState.moodle.lastSyncedAt,
+          },
         },
       }));
     } catch (err) {
@@ -89,9 +102,12 @@ export const useSyncOrchestratorStore = create<SyncOrchestratorStore>((set, get)
       if (service === 'portal') {
         const { launchPortalSsoSync } = await import('../../../lib/tauri-client');
         await launchPortalSsoSync();
-      } else {
+      } else if (service === 'wecode') {
         const { launchWecodeSsoSync } = await import('../../../lib/tauri-client');
         await launchWecodeSsoSync();
+      } else {
+        const { launchMoodleSsoSync } = await import('../../../lib/tauri-client');
+        await launchMoodleSsoSync();
       }
     } catch (err) {
       console.error(`[SyncOrchestrator] Failed to open interactive login for ${service}:`, err);
@@ -163,8 +179,10 @@ async function executeSync(
   try {
     if (service === 'portal') {
       await launchPortalSilentSync();
-    } else {
+    } else if (service === 'wecode') {
       await launchWecodeSilentSync();
+    } else {
+      await launchMoodleSilentSync();
     }
   } catch (err: unknown) {
     const errStr = String(err);

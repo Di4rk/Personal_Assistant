@@ -183,9 +183,12 @@ pub fn execute_reset_user_data_to_genesis(conn: &mut rusqlite::Connection) -> Re
     tx.execute("DELETE FROM post_mortems;", [])?;
     tx.execute("DELETE FROM course_deadlines;", [])?;
     tx.execute("DELETE FROM course_workspace_config;", [])?;
+    tx.execute("DELETE FROM moodle_materials;", [])?;
+    tx.execute("DELETE FROM moodle_tasks;", [])?;
+    tx.execute("DELETE FROM moodle_courses;", [])?;
 
     // Xóa các bảng tùy chọn/tương thích nếu tồn tại
-    for opt_table in &["student_profile", "daily_life_matrix"] {
+    for opt_table in &["student_profile", "daily_life_matrix", "academic_curriculum", "sync_state"] {
         let exists: bool = tx
             .query_row(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
@@ -217,6 +220,11 @@ pub fn execute_reset_user_data_to_genesis(conn: &mut rusqlite::Connection) -> Re
             'specialization',
             'student_class',
             'curriculum_code',
+            'curriculum_slug',
+            'student_curriculum_slug',
+            'preferred_curriculum_slug',
+            'total_degree_credits',
+            'english_cert_verified',
             'admission_year',
             'user_major',
             'cf_handle'
@@ -376,6 +384,29 @@ mod tests {
             [],
         ).unwrap();
 
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS academic_curriculum (
+                course_code TEXT PRIMARY KEY,
+                course_name TEXT NOT NULL,
+                credits INTEGER NOT NULL,
+                course_type TEXT NOT NULL,
+                ideal_term INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                final_score REAL,
+                updated_at INTEGER NOT NULL
+            )",
+            [],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO academic_curriculum (course_code, course_name, credits, course_type, ideal_term, status, final_score, updated_at)
+             VALUES ('CS005', 'Giới thiệu ngành KHMT', 1, 'Bắt buộc', 1, 'Đã qua', 9.7, 1000)",
+            [],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('curriculum_slug', 'cu-nhan-nganh-khoa-hoc-may-tinh-khoa-20-2025')",
+            [],
+        ).unwrap();
+
         // Thêm community plugin (is_builtin = 0)
         conn.execute(
             "INSERT INTO plugin_registry (plugin_id, name, version, author, category, is_enabled, is_builtin)
@@ -387,10 +418,36 @@ mod tests {
             [],
         ).unwrap();
 
+        // Thêm dữ liệu Moodle courses, tasks, materials
+        conn.execute(
+            "INSERT INTO moodle_courses (course_id, course_code, fullname, course_url, updated_at)
+             VALUES (1073, 'CS115.R11', 'Toán cho khoa học máy tính - CS115.R11', 'https://courses.uit.edu.vn/course/view.php?id=1073', 1000)",
+            [],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO moodle_tasks (task_id, course_id, title, task_type, due_date, task_url, updated_at)
+             VALUES (9866, 1073, 'Đăng kí đồ án môn học cuối kì', 'assign', 1700000000, 'https://courses.uit.edu.vn/mod/assign/view.php?id=9866', 1000)",
+            [],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO moodle_materials (course_id, section_name, title, file_url, file_type, created_at)
+             VALUES (1073, 'Giới thiệu môn học', 'Đề cương chi tiết', 'https://courses.uit.edu.vn/mod/resource/view.php?id=9858', 'pdf', 1000)",
+            [],
+        ).unwrap();
+
         // 2. Chạy execute_reset_user_data_to_genesis
         execute_reset_user_data_to_genesis(&mut conn).unwrap();
 
         // 3. Xác thực: Dữ liệu người dùng đã được xóa sạch
+        let moodle_courses_count: i64 = conn.query_row("SELECT COUNT(*) FROM moodle_courses", [], |r| r.get(0)).unwrap();
+        assert_eq!(moodle_courses_count, 0, "Bảng moodle_courses phải bị xóa sạch khi reset genesis");
+
+        let moodle_tasks_count: i64 = conn.query_row("SELECT COUNT(*) FROM moodle_tasks", [], |r| r.get(0)).unwrap();
+        assert_eq!(moodle_tasks_count, 0, "Bảng moodle_tasks phải bị xóa sạch khi reset genesis");
+
+        let moodle_materials_count: i64 = conn.query_row("SELECT COUNT(*) FROM moodle_materials", [], |r| r.get(0)).unwrap();
+        assert_eq!(moodle_materials_count, 0, "Bảng moodle_materials phải bị xóa sạch khi reset genesis");
+
         let wecode_sub_count: i64 = conn.query_row("SELECT COUNT(*) FROM wecode_submissions", [], |r| r.get(0)).unwrap();
         assert_eq!(wecode_sub_count, 0);
 
@@ -399,6 +456,12 @@ mod tests {
 
         let courses_count: i64 = conn.query_row("SELECT COUNT(*) FROM academic_courses", [], |r| r.get(0)).unwrap();
         assert_eq!(courses_count, 0);
+
+        let curr_count: i64 = conn.query_row("SELECT COUNT(*) FROM academic_curriculum", [], |r| r.get(0)).unwrap();
+        assert_eq!(curr_count, 0, "Bảng academic_curriculum của sinh viên phải bị xóa sạch khi reset genesis");
+
+        let curr_slug_count: i64 = conn.query_row("SELECT COUNT(*) FROM settings WHERE key = 'curriculum_slug'", [], |r| r.get(0)).unwrap();
+        assert_eq!(curr_slug_count, 0, "curriculum_slug phải bị xóa khi reset genesis");
 
         let semesters_count: i64 = conn.query_row("SELECT COUNT(*) FROM academic_semesters", [], |r| r.get(0)).unwrap();
         assert_eq!(semesters_count, 0);
@@ -441,6 +504,6 @@ mod tests {
             [],
             |r| r.get(0),
         ).unwrap();
-        assert_eq!(builtin_plugins_count, 5, "5 builtin plugins phải được bảo tồn");
+        assert_eq!(builtin_plugins_count, 6, "6 builtin plugins phải được bảo tồn");
     }
 }

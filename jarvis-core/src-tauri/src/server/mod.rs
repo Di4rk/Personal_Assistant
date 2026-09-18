@@ -335,6 +335,66 @@ async fn handle_sync_wecode(
     }
 }
 
+/// Handler: POST /api/v1/sync/moodle
+async fn handle_sync_moodle(
+    State(state): State<ServerState>,
+    Json(payload): Json<crate::db::moodle::MoodleSyncPayload>,
+) -> impl IntoResponse {
+    let db_arc = state.db.clone();
+    let is_final = payload.is_final.unwrap_or(false);
+    let current_course = payload.current_course.clone().unwrap_or_default();
+    let progress_current = payload.progress_current.unwrap_or(0);
+    let progress_total = payload.progress_total.unwrap_or(0);
+    let progress_pct = payload.progress_pct.unwrap_or(0.0);
+
+    let commit_res = crate::services::moodle_harvester::MoodleIngestionEngine::commit_moodle_sync(
+        db_arc,
+        payload,
+    );
+
+    match commit_res {
+        Ok((courses, tasks, materials)) => {
+            println!("[SyncMoodle] Committed {courses} courses, {tasks} tasks, {materials} materials successfully via Browser Sync API! (is_final={is_final})");
+            let _ = state.app.emit("moodle-data-synced", courses);
+            let _ = state.app.emit(
+                "moodle-sync-progress",
+                serde_json::json!({
+                    "current": progress_current,
+                    "total": progress_total,
+                    "course_name": current_course,
+                    "percent": progress_pct,
+                    "is_final": is_final
+                }),
+            );
+            if is_final {
+                let _ = state.app.emit("sso-callback-success", "moodle");
+            }
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "status": "ok",
+                    "message": "Moodle records committed successfully",
+                    "courses": courses,
+                    "tasks": tasks,
+                    "materials": materials
+                })),
+            )
+                .into_response()
+        }
+        Err(e) => {
+            eprintln!("[SyncMoodle] Error committing moodle records: {e}");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "status": "error",
+                    "message": e
+                })),
+            )
+                .into_response()
+        }
+    }
+}
+
 /// Middleware tự động tiêm Access-Control-Allow-Private-Network cho Chrome Private Network Access
 async fn allow_private_network_middleware(request: Request<axum::body::Body>, next: Next) -> Response {
     let mut response = next.run(request).await;
@@ -352,6 +412,7 @@ fn build_router(state: ServerState) -> Router {
         .route("/api/v1/academic/drl", post(handle_academic_drl))
         .route("/api/v1/sync/portal", post(handle_sync_portal))
         .route("/api/v1/sync/wecode", post(handle_sync_wecode))
+        .route("/api/v1/sync/moodle", post(handle_sync_moodle))
         .layer(CorsLayer::permissive())
         .layer(middleware::from_fn(allow_private_network_middleware))
         .with_state(state)

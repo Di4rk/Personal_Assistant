@@ -3,7 +3,10 @@ import {
   GraduationCap,
   Layers,
   RefreshCw,
+  AlertCircle,
+  CheckCircle2,
 } from "lucide-react";
+import { useSyncOrchestratorStore } from "./stores/syncOrchestratorStore";
 import { useAcademicRadar } from "./hooks/useAcademicRadar";
 import { AcademicRadarChart } from "./components/AcademicRadarChart";
 import { GpaSimulatorCard } from "./components/GpaSimulatorCard";
@@ -174,14 +177,55 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
     await Promise.all([refetchOverview(), loadMacroMetrics()]);
   }, [refetchOverview, loadMacroMetrics]);
 
+  const isPortalSyncing = useSyncOrchestratorStore((s) => s.serviceState.portal.isSyncing);
+  const portalAuthStatus = useSyncOrchestratorStore((s) => s.serviceState.portal.authStatus);
+  const requestSync = useSyncOrchestratorStore((s) => s.requestSync);
+
+  const [scrapeFeedback, setScrapeFeedback] = useState<{
+    type: "success" | "error" | "info";
+    text: string;
+  } | null>(null);
+
+  const handleRefreshClick = useCallback(async () => {
+    setScrapeFeedback(null);
+    // 1. Nạp lại DB local ngay lập tức
+    void handleRefresh();
+
+    // 2. Kích hoạt cạo dữ liệu ngầm từ Cổng UIT
+    try {
+      const ok = await requestSync("portal", {
+        bypassTtl: true,
+        bypassCircuitBreaker: true,
+      });
+      if (ok) {
+        setScrapeFeedback({
+          type: "info",
+          text: "Đang cạo dữ liệu từ Cổng UIT ngầm...",
+        });
+      }
+    } catch (err) {
+      console.error("Lỗi cạo dữ liệu Cổng UIT:", err);
+      setScrapeFeedback({
+        type: "error",
+        text: "Không thể kết nối tới trình cạo dữ liệu.",
+      });
+    }
+  }, [handleRefresh, requestSync]);
+
   // Lắng nghe event thất bại từ SSO sync window
   useEffect(() => {
     const unlisten = listen<string>("portal-sync-failed", (event) => {
       const reason = event.payload;
       if (reason.includes("session_expired")) {
-        alert("Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.");
+        setScrapeFeedback({
+          type: "error",
+          text: "Phiên đăng nhập đã hết hạn. Vui lòng bấm 'Đồng bộ Cổng UIT' để đăng nhập lại.",
+        });
       } else {
-        alert(`Đồng bộ thất bại: ${reason}`);
+        setScrapeFeedback({
+          type: "error",
+          text: `Đồng bộ thất bại: ${reason}`,
+        });
       }
     });
     return () => {
@@ -193,11 +237,29 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
   useEffect(() => {
     const unlisten = listen("academic-data-synced", () => {
       void handleRefresh();
+      setScrapeFeedback({
+        type: "success",
+        text: "Đã cạo & đồng bộ dữ liệu mới nhất từ Cổng UIT!",
+      });
+      const timer = setTimeout(() => {
+        setScrapeFeedback(null);
+      }, 4000);
+      return () => clearTimeout(timer);
     });
     return () => {
       void unlisten.then((fn) => fn());
     };
   }, [handleRefresh]);
+
+  // Nhắc nhở nếu phiên đăng nhập hết hạn
+  useEffect(() => {
+    if (portalAuthStatus === "expired") {
+      setScrapeFeedback({
+        type: "error",
+        text: "Phiên đăng nhập đã hết hạn. Vui lòng bấm 'Đồng bộ Cổng UIT' để đăng nhập lại.",
+      });
+    }
+  }, [portalAuthStatus]);
 
   const handleSyncPortal = useCallback(() => {
     setIsSyncPortalModalOpen(true);
@@ -225,24 +287,52 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => { void handleRefresh(); }}
-            disabled={isRefreshing}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium transition-colors border border-zinc-700 focus:outline-none cursor-pointer"
-            title="Làm mới dữ liệu"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? "animate-spin text-violet-400" : ""}`} />
-            <span>Làm mới</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setIsSyncPortalModalOpen(true)}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 active:bg-sky-700 text-white text-xs font-semibold shadow-sm transition-all cursor-pointer"
-          >
-            <span className="text-white">⚡</span>
-            <span>Đồng bộ Cổng UIT</span>
-          </button>
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+          {isPortalSyncing && (
+            <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-violet-950/50 border border-violet-800/40 text-xs text-violet-300 animate-pulse">
+              <RefreshCw className="w-3.5 h-3.5 animate-spin text-violet-400" />
+              <span>Đang cạo dữ liệu Cổng UIT ngầm...</span>
+            </div>
+          )}
+          {scrapeFeedback && !isPortalSyncing && (
+            <div
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs border ${
+                scrapeFeedback.type === "success"
+                  ? "bg-emerald-950/50 border-emerald-800/40 text-emerald-300"
+                  : scrapeFeedback.type === "error"
+                  ? "bg-rose-950/50 border-rose-800/40 text-rose-300"
+                  : "bg-zinc-800 border-zinc-700 text-zinc-300"
+              }`}
+            >
+              {scrapeFeedback.type === "success" && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />}
+              {scrapeFeedback.type === "error" && <AlertCircle className="w-3.5 h-3.5 text-rose-400 shrink-0" />}
+              <span>{scrapeFeedback.text}</span>
+            </div>
+          )}
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => { void handleRefreshClick(); }}
+              disabled={isPortalSyncing || isRefreshing}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors border focus:outline-none cursor-pointer ${
+                isPortalSyncing
+                  ? "bg-violet-950/60 border-violet-600/50 text-violet-300"
+                  : "bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border-zinc-700"
+              }`}
+              title={isPortalSyncing ? "Đang cạo bảng điểm & DRL từ Cổng UIT ngầm..." : "Làm mới & cạo dữ liệu từ Cổng UIT"}
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isPortalSyncing || isRefreshing ? "animate-spin text-violet-400" : ""}`} />
+              <span>{isPortalSyncing ? "Đang cạo..." : "Làm mới"}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsSyncPortalModalOpen(true)}
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 active:bg-sky-700 text-white text-xs font-semibold shadow-sm transition-all cursor-pointer"
+            >
+              <span className="text-white">⚡</span>
+              <span>Đồng bộ Cổng UIT</span>
+            </button>
+          </div>
         </div>
       </div>
 

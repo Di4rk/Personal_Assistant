@@ -1,10 +1,16 @@
 pub mod academic;
 pub mod matrix;
+pub mod moodle;
 pub mod post_mortem;
 pub mod schema;
 pub mod settings;
 pub mod submissions;
 pub mod vault_schema;
+
+pub use moodle::{
+    commit_moodle_payload, get_all_moodle_courses, get_moodle_materials, get_moodle_tasks,
+    MoodleCourseRecord, MoodleMaterialRecord, MoodleSyncPayload, MoodleTaskRecord,
+};
 
 pub use matrix::{query_life_matrix_range, recompute_daily_matrix_for_date, LifeMatrixEntryDto};
 

@@ -736,11 +736,11 @@ impl PortalIngestionEngine {
             let (summary_score_4, grade_char) = (Some(scale.to_scale_4()), Some(scale.as_char().to_string()));
 
             let code_norm = c.course_code.trim().to_uppercase();
-            let category = if ["IT001", "IT002", "IT003", "IT012", "CS005", "MA004", "MA005"].contains(&code_norm.as_str()) {
+            let category = if ["IT002", "IT003", "IT012", "CS005"].contains(&code_norm.as_str()) {
                 "co_so_nganh"
             } else if code_norm.starts_with("PE") || code_norm.starts_with("ME") {
                 "auxiliary"
-            } else if code_norm.starts_with("MA") || code_norm.starts_with("PH") || code_norm.starts_with("SS") || code_norm.starts_with("ENG") {
+            } else if code_norm.starts_with("MA") || code_norm.starts_with("PH") || code_norm.starts_with("SS") || code_norm.starts_with("ENG") || code_norm == "IT001" {
                 "dai_cuong"
             } else {
                 "chuyen_nganh"
@@ -882,6 +882,10 @@ impl PortalIngestionEngine {
             ).map_err(|e| format!("Failed to ensure academic_curriculum table: {e}"))?;
 
             if !sum.ctdt_curriculum_courses.is_empty() {
+                // Xóa dữ liệu cũ trước khi nạp danh sách mới từ portal để không bị kẹt các môn học cũ hoặc môn từ ngành khác
+                tx.execute("DELETE FROM academic_curriculum;", [])
+                    .map_err(|e| format!("Failed to clear stale academic_curriculum: {e}"))?;
+
                 let mut stmt = tx.prepare_cached(
                     "INSERT INTO academic_curriculum (
                         course_code, course_name, credits, course_type, ideal_term, status, final_score, updated_at

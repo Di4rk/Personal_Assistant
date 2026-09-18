@@ -12,6 +12,7 @@ export interface WecodeSubmission {
   memory_kib: number;
   language: string;
   is_final: boolean;
+  code?: string;
 }
 
 export interface WecodeAssignmentMeta {
@@ -89,5 +90,6 @@ export interface WecodeCourseSummary {
 export interface SyncTimestamps {
   portal_last_synced_at: number;
   wecode_last_synced_at: number;
+  moodle_last_synced_at?: number;
 }
 

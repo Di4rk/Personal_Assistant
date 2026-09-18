@@ -10,6 +10,7 @@ interface FirstPartyProps {
 const FIRST_PARTY_COMPONENTS: Record<string, React.LazyExoticComponent<React.ComponentType<FirstPartyProps>>> = {
   "cp-codeforces": lazy(() => import("@/features/cp/CodeforcesDashboard")),
   "uit-wecode": lazy(() => import("@/features/academic/WecodeDashboard")),
+  "uit-courses": lazy(() => import("@/features/academic/CoursesDashboard")),
 };
 
 interface PluginViewportRouterProps {

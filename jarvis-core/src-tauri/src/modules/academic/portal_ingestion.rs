@@ -310,7 +310,9 @@ pub fn ingest_dynamic_academic_payload(
             let grade_s4 = grade.to_scale_4();
             let grade_char = grade.as_char();
             let result_status = if grade.is_passed() { "Đạt" } else { "Không đạt" };
-            let category = if sub.subject_code.starts_with("IT") || sub.subject_code.starts_with("CS") {
+            let category = if sub.subject_code == "IT001" {
+                "dai_cuong"
+            } else if sub.subject_code.starts_with("IT") || sub.subject_code.starts_with("CS") {
                 "co_so_nganh"
             } else {
                 "dai_cuong"

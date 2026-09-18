@@ -295,7 +295,7 @@ fn ensure_worker_schema(conn: &Connection) -> SqlResult<()> {
     Ok(())
 }
 
-/// Tạo schema cho Moodle deadline tracker và workspace config (idempotent).
+/// Tạo schema cho Moodle deadline tracker, workspace config và UIT Courses Engine (idempotent).
 pub fn ensure_moodle_schema(conn: &Connection) -> SqlResult<()> {
     conn.execute_batch(
         r#"
@@ -322,6 +322,49 @@ pub fn ensure_moodle_schema(conn: &Connection) -> SqlResult<()> {
         CREATE INDEX IF NOT EXISTS idx_deadlines_due
             ON course_deadlines(due_timestamp)
             WHERE is_submitted = 0;
+
+        -- 1. Lớp môn học Moodle kỳ hiện tại
+        CREATE TABLE IF NOT EXISTS moodle_courses (
+            course_id        INTEGER PRIMARY KEY,
+            course_code      TEXT NOT NULL,          -- 'SS009.R12', 'IT004.R19'
+            fullname         TEXT NOT NULL,          -- 'Chủ nghĩa xã hội khoa học - SS009.R12'
+            term             TEXT NOT NULL DEFAULT '',-- 'HK2 2025-2026'
+            instructor_name  TEXT NOT NULL DEFAULT '',-- 'ThS. Trịnh Bá Phương'
+            instructor_mail  TEXT NOT NULL DEFAULT '',-- 'phuongtbhcmue@gmail.com'
+            instructor_phone TEXT NOT NULL DEFAULT '',-- '0376 333 654'
+            course_url       TEXT NOT NULL,
+            updated_at       INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+        );
+
+        -- 2. Bài tập / Nhiệm vụ Moodle
+        CREATE TABLE IF NOT EXISTS moodle_tasks (
+            task_id           INTEGER PRIMARY KEY,    -- ID activity Moodle
+            course_id         INTEGER NOT NULL,
+            title             TEXT NOT NULL,          -- 'ĐĂNG KÝ ĐỀ TÀI NHÓM'
+            task_type         TEXT NOT NULL,          -- 'assign', 'quiz', 'forum'
+            due_date          INTEGER NOT NULL,       -- Unix Epoch seconds
+            is_submitted      BOOLEAN NOT NULL DEFAULT 0,
+            submission_status TEXT NOT NULL DEFAULT '',-- 'No submissions have been made yet'
+            template_file_url TEXT NOT NULL DEFAULT '',-- File docx mẫu đính kèm đề bài
+            task_url          TEXT NOT NULL,          -- Deep-link tới trang nộp bài
+            updated_at        INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+            FOREIGN KEY(course_id) REFERENCES moodle_courses(course_id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_moodle_tasks_due ON moodle_tasks(due_date, is_submitted);
+        CREATE INDEX IF NOT EXISTS idx_moodle_tasks_course ON moodle_tasks(course_id);
+
+        -- 3. Slide & Tài liệu học tập môn học
+        CREATE TABLE IF NOT EXISTS moodle_materials (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            course_id    INTEGER NOT NULL,
+            section_name TEXT NOT NULL,               -- 'Chung', 'Tuần 1', 'Tuần 2'
+            title        TEXT NOT NULL,               -- 'C1_Slide BG'
+            file_url     TEXT NOT NULL,
+            file_type    TEXT NOT NULL,               -- 'pdf', 'pptx', 'docx', 'link'
+            created_at   INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+            FOREIGN KEY(course_id) REFERENCES moodle_courses(course_id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_moodle_mat_course ON moodle_materials(course_id);
         "#,
     )?;
     Ok(())
@@ -755,12 +798,13 @@ pub fn ensure_plugin_and_activity_schema(conn: &Connection) -> SqlResult<()> {
         CREATE INDEX IF NOT EXISTS idx_activity_events_date ON activity_events(event_date);
         CREATE INDEX IF NOT EXISTS idx_activity_events_plugin_date ON activity_events(plugin_id, event_date);
 
-        -- Seed 5 First-Party Builtin Plugins
+        -- Seed First-Party Builtin Plugins
         INSERT OR IGNORE INTO plugin_registry (plugin_id, name, version, author, category, is_enabled, is_builtin)
         VALUES 
             ('cp-codeforces', 'Codeforces Engine', '1.0.0', 'Diark', 'competitive_programming', 1, 1),
             ('cp-leetcode', 'LeetCode Tracker', '1.0.0', 'Diark', 'competitive_programming', 0, 1),
             ('uit-wecode', 'Wecode UIT Tracker', '1.0.0', 'Diark', 'education', 1, 1),
+            ('uit-courses', 'Courses Engine (Moodle)', '1.0.0', 'Diark', 'education', 1, 1),
             ('sec-ctf', 'CTF Log & Writeups', '1.0.0', 'Diark', 'cyber_security', 0, 1),
             ('ai-lab', 'AI & Kaggle Hub', '1.0.0', 'Diark', 'ai_datascience', 0, 1);
         "#,
