@@ -16,14 +16,10 @@ src-tauri/target/
 **/target-*/
 **/*.rs.bk
 
-# Temporary artifacts
-temp_claude/
-.system_generated/
-
 # Tauri build outputs
 src-tauri/gen/
 
-# SQLite Databases & WAL files
+# SQLite Databases & WAL files — NEVER commit user data
 *.db
 *.sqlite
 *.sqlite3
@@ -32,20 +28,35 @@ src-tauri/gen/
 *.sqlite3-wal
 *.sqlite3-shm
 
-# IDE & OS files
-.vscode/*
-!.vscode/extensions.json
-!.vscode/settings.json
-.idea/
-.DS_Store
-Thumbs.db
-*.log
-
 # Environment variables
 .env
 .env.*
 !.env.example
 
+# IDE, OS & Editor directories
+.vscode/
 .vs/
+.idea/
+.DS_Store
+Thumbs.db
+*.log
 *.suo
 *.user
+
+# AI Assistants, Plugins & Tooling cache
+.agents/
+.claude/
+.codex/
+.cursor/
+.impeccable/
+.mcp/
+.context/
+temp_claude/
+.system_generated/
+
+# Root legacy / scratch files (actual files live inside diark-core/)
+/injected_portal_script.js
+/scripts/
+task.md
+walkthrough.md
+implementation_plan.md
