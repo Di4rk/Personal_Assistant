@@ -297,7 +297,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col">
-      <header className="flex items-center justify-between border-b border-slate-800 bg-slate-950 px-6 py-4">
+      <header className="sticky top-0 z-40 flex items-center justify-between border-b border-slate-800 bg-slate-950/90 backdrop-blur-md px-6 py-4">
         <div>
           <h1 className="text-xl font-black tracking-wider text-white">
             {profile.nickname.toUpperCase()} <span className="text-cyan-400">// OS</span>
