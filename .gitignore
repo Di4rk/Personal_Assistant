@@ -44,7 +44,7 @@ Thumbs.db
 *.suo
 *.user
 
-# AI Assistants, Plugins & Tooling cache
+# AI Assistants, Plugins, Directives & Tooling cache
 .agents/
 .claude/
 .codex/
@@ -54,6 +54,9 @@ Thumbs.db
 .context/
 temp_claude/
 .system_generated/
+AGENTS.md
+DESIGN.md
+PRODUCT.md
 
 # Root legacy / scratch files (actual files live inside diark-core/)
 /injected_portal_script.js
