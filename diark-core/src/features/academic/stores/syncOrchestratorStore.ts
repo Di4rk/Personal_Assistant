@@ -124,6 +124,12 @@ export const useSyncOrchestratorStore = create<SyncOrchestratorStore>((set, get)
 
     const currentServiceState = state.serviceState[service];
 
+    // 0. Bỏ qua silent sync nếu phiên đã hết hạn (chờ người dùng đăng nhập tương tác)
+    if (!options?.bypassCircuitBreaker && currentServiceState.authStatus === 'expired') {
+      console.log(`[SyncOrchestrator] Skipped sync for ${service}: Session is expired. Waiting for interactive login.`);
+      return false;
+    }
+
     // 1. Check Circuit Breaker
     if (!options?.bypassCircuitBreaker && currentServiceState.failCount >= CIRCUIT_BREAKER_MAX_FAILS) {
       const timeSinceLastFail = Date.now() - currentServiceState.lastFailedAt;
@@ -222,8 +228,10 @@ function onSyncSettled(
       nextAuthStatus = 'authenticated';
       nextLastSyncedAt = nowSec;
     } else if (errorType === 'AUTH_EXPIRED') {
-      // Expired session
+      // Expired session: ghi nhận thời gian để không lặp lại ngay
       nextAuthStatus = 'expired';
+      nextLastFailedAt = nowMs;
+      nextLastSyncedAt = nowSec;
     } else {
       // Server error / timeout
       nextFailCount += 1;

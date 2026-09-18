@@ -43,6 +43,20 @@ interface SettingsModalProps {
   onResetGenesis?: () => void;
 }
 
+export const PRESET_GEMINI_MODELS = [
+  { id: "gemini-2.5-flash", name: "gemini-2.5-flash (Khuyên dùng — Thế hệ mới, cực nhanh & thông minh)" },
+  { id: "gemini-2.5-pro", name: "gemini-2.5-pro (Mạnh mẽ — Suy luận chuyên sâu, giải thuật khó)" },
+  { id: "gemini-2.5-flash-lite", name: "gemini-2.5-flash-lite (Hạn mức cao 10 RPM / 250K TPM)" },
+  { id: "gemini-2.0-flash", name: "gemini-2.0-flash (Thế hệ 2.0 chuẩn)" },
+  { id: "gemini-3-flash", name: "gemini-3-flash (Thế hệ 3 Preview)" },
+  { id: "gemini-3.1-flash-lite", name: "gemini-3.1-flash-lite (Hạn mức cao 15 RPM / 500 RPD)" },
+  { id: "gemini-3.5-flash", name: "gemini-3.5-flash (Thế hệ 3.5 Flash)" },
+  { id: "gemini-3.7-flash", name: "gemini-3.7-flash (Thế hệ 3.7 Thinking)" },
+  { id: "gemini-3.8-flash", name: "gemini-3.8-flash (Thế hệ 3.8 Flash)" },
+  { id: "gemini-1.5-flash", name: "gemini-1.5-flash (Legacy — Ổn định, hạn mức cao)" },
+  { id: "gemini-1.5-pro", name: "gemini-1.5-pro (Legacy Pro — Phân tích chi tiết)" },
+];
+
 export const SettingsModal: React.FC<SettingsModalProps> = () => {
   const { isOpen, activeTab, closeSettings, setActiveTab } = useSettingsStore();
   const { isDemoMode, toggleDemoMode } = usePrivacyStore();
@@ -70,7 +84,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = () => {
 
   // Tab: AI Copilot (BYOK) state
   const [geminiApiKey, setGeminiApiKey] = useState('');
-  const [geminiModel, setGeminiModel] = useState('gemini-1.5-flash');
+  const [geminiModel, setGeminiModel] = useState('gemini-2.5-flash');
+  const [isCustomModel, setIsCustomModel] = useState(false);
   const [isSavingGemini, setIsSavingGemini] = useState(false);
   const [geminiSavedSuccess, setGeminiSavedSuccess] = useState(false);
   const [isTestingGemini, setIsTestingGemini] = useState(false);
@@ -123,7 +138,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = () => {
     getGeminiConfig()
       .then((cfg) => {
         setGeminiApiKey(cfg.api_key || '');
-        if (cfg.model) setGeminiModel(cfg.model);
+        const targetModel = cfg.model || 'gemini-2.5-flash';
+        setGeminiModel(targetModel);
+        const isPreset = PRESET_GEMINI_MODELS.some((m) => m.id === targetModel);
+        setIsCustomModel(!isPreset);
       })
       .catch((e) => console.error('Failed to get Gemini config:', e));
   }, [isOpen]);
@@ -617,18 +635,53 @@ export const SettingsModal: React.FC<SettingsModalProps> = () => {
 
                   {/* Model Selection */}
                   <div className="space-y-2">
-                    <label className="font-mono text-xs uppercase tracking-wider text-slate-400">
-                      Mô hình Gemini (Model)
-                    </label>
-                    <select
-                      value={geminiModel}
-                      onChange={(e) => setGeminiModel(e.target.value)}
-                      className="w-full rounded-xl border border-slate-800 bg-slate-950/60 px-4 py-2.5 font-mono text-xs text-slate-200 focus:border-indigo-500 focus:outline-none"
-                    >
-                      <option value="gemini-1.5-flash">gemini-1.5-flash (Khuyên dùng — Cực nhanh, phản hồi tức thì, hạn mức cao)</option>
-                      <option value="gemini-1.5-pro">gemini-1.5-pro (Mạnh mẽ — Suy luận chuyên sâu, giải thuật khó)</option>
-                      <option value="gemini-2.0-flash-exp">gemini-2.0-flash-exp (Thử nghiệm thế hệ mới 2.0)</option>
-                    </select>
+                    <div className="flex items-center justify-between">
+                      <label className="font-mono text-xs uppercase tracking-wider text-slate-400">
+                        Mô hình Gemini (Model)
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setIsCustomModel((prev) => !prev)}
+                        className="text-[11px] font-mono text-indigo-400 hover:text-indigo-300 underline cursor-pointer"
+                      >
+                        {isCustomModel ? "Chọn từ danh sách có sẵn" : "Nhập mã model tùy chỉnh (Custom ID)"}
+                      </button>
+                    </div>
+
+                    {!isCustomModel ? (
+                      <select
+                        value={geminiModel}
+                        onChange={(e) => {
+                          if (e.target.value === "__custom__") {
+                            setIsCustomModel(true);
+                          } else {
+                            setGeminiModel(e.target.value);
+                          }
+                        }}
+                        className="w-full rounded-xl border border-slate-800 bg-slate-950/60 px-4 py-2.5 font-mono text-xs text-slate-200 focus:border-indigo-500 focus:outline-none cursor-pointer"
+                      >
+                        {PRESET_GEMINI_MODELS.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.name}
+                          </option>
+                        ))}
+                        <option value="__custom__">⚙️ Tùy chỉnh (Nhập mã model bất kỳ...)</option>
+                      </select>
+                    ) : (
+                      <div className="space-y-1.5">
+                        <input
+                          type="text"
+                          value={geminiModel}
+                          onChange={(e) => setGeminiModel(e.target.value)}
+                          placeholder="Ví dụ: gemini-3.8-flash, gemini-exp-1206..."
+                          className="w-full rounded-xl border border-indigo-500/50 bg-slate-950/60 px-4 py-2.5 font-mono text-xs text-slate-200 focus:border-indigo-500 focus:outline-none"
+                          autoFocus
+                        />
+                        <p className="text-[10px] text-slate-500 font-mono">
+                          Nhập chính xác Model ID từ Google AI Studio (ví dụ: gemini-2.5-flash, gemini-3.1-flash-lite...)
+                        </p>
+                      </div>
+                    )}
                   </div>
 
                   {/* Action Buttons */}

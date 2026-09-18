@@ -67,9 +67,13 @@ export function useSyncLifecycle(options?: UseSyncLifecycleOptions) {
     };
   }, [setOffline, requestSync]);
 
-  // 3. Tier A: Window focus listener
+  // 3. Tier A: Window focus listener (debounced to avoid focus-bounce loops)
   useEffect(() => {
+    let lastFocusCheck = 0;
     const handleFocus = () => {
+      const now = Date.now();
+      if (now - lastFocusCheck < 30000) return; // ít nhất 30s giữa các lần focus
+      lastFocusCheck = now;
       void requestSync('wecode');
       void requestSync('portal');
     };
