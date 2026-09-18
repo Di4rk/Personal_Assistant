@@ -173,7 +173,7 @@ export function SyncTokenDisplay({
           <li>Cài Tampermonkey trên trình duyệt.</li>
           <li>Nhập script <code className="text-sky-400">uit_portal_sync.user.js</code>.</li>
           <li>Thay <code className="text-amber-400">YOUR_SYNC_TOKEN_HERE</code> bằng token trên.</li>
-          <li>Mở trang bảng điểm trên <code className="text-zinc-300">student.uit.edu.vn</code> — Jarvis tự nhận dữ liệu.</li>
+          <li>Mở trang bảng điểm trên <code className="text-zinc-300">student.uit.edu.vn</code> — Diark tự nhận dữ liệu.</li>
         </ol>
       </div>
 

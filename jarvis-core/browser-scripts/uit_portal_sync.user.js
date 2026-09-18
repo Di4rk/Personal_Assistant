@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Jarvis OS - UIT Portal Auto-Sync Hook
-// @namespace    https://diark.dev/jarvis
-// @version      1.1.0
-// @description  Tự động đẩy bảng điểm, DRL và hồ sơ sinh viên từ UIT Portal về Jarvis Personal OS qua loopback sync server
+// @name         Diark OS - UIT Portal Auto-Sync Hook
+// @namespace    https://diark.dev
+// @version      1.2.0
+// @description  Tự động đẩy bảng điểm, DRL và hồ sơ sinh viên từ UIT Portal về Diark Personal OS qua loopback sync server
 // @author       Diark Architect
 // @match        https://student.uit.edu.vn/*
 // @match        https://portal.uit.edu.vn/sinh-vien/ho-so*
@@ -17,9 +17,10 @@
     'use strict';
 
     // =========================================================================
-    // CẤU HÌNH — Dán sync token từ Jarvis Dashboard vào đây
+    // CẤU HÌNH — Dán sync token từ Diark Dashboard vào đây
     // =========================================================================
-    const JARVIS_SYNC_TOKEN = "YOUR_SYNC_TOKEN_HERE";
+    const DIARK_SYNC_TOKEN = "YOUR_SYNC_TOKEN_HERE";
+    const JARVIS_SYNC_TOKEN = DIARK_SYNC_TOKEN; // Backward-compat
 
     // Thứ tự thử port khớp với CANDIDATE_PORTS trong sync_server.rs
     const SYNC_PORTS = [41718, 41719, 41720];
@@ -29,19 +30,19 @@
     // Logger helper
     // =========================================================================
     const log = {
-        info:  (...a) => console.log( "[Jarvis Sync]", ...a),
-        warn:  (...a) => console.warn( "[Jarvis Sync]", ...a),
-        error: (...a) => console.error("[Jarvis Sync]", ...a),
+        info:  (...a) => console.log( "[Diark Sync]", ...a),
+        warn:  (...a) => console.warn( "[Diark Sync]", ...a),
+        error: (...a) => console.error("[Diark Sync]", ...a),
     };
 
     log.info("Hook loaded on UIT Portal.");
 
     // =========================================================================
-    // Core: gửi payload về Jarvis OS, thử lần lượt các port
+    // Core: gửi payload về Diark OS, thử lần lượt các port
     // =========================================================================
-    function syncToJarvis(payload, portIndex = 0) {
+    function syncToDiark(payload, portIndex = 0) {
         if (portIndex >= SYNC_PORTS.length) {
-            log.error("⚠️ Không kết nối được tới Jarvis sync server trên bất kỳ port nào.");
+            log.error("⚠️ Không kết nối được tới Diark sync server trên bất kỳ port nào.");
             return;
         }
 
@@ -53,14 +54,15 @@
             url:     url,
             headers: {
                 "Content-Type":       "application/json",
-                "X-Jarvis-Sync-Token": JARVIS_SYNC_TOKEN,
+                "X-Diark-Sync-Token":  DIARK_SYNC_TOKEN,
+                "X-Jarvis-Sync-Token": DIARK_SYNC_TOKEN,
             },
             data: JSON.stringify(payload),
             onload(response) {
                 if (response.status === 200) {
                     log.info(`✅ Sync thành công qua port ${port}:`, response.responseText);
                 } else if (response.status === 401) {
-                    log.error("❌ Token không hợp lệ — kiểm tra lại JARVIS_SYNC_TOKEN trong script.");
+                    log.error("❌ Token không hợp lệ — kiểm tra lại DIARK_SYNC_TOKEN trong script.");
                 } else if (response.status === 422) {
                     log.warn("⚠️ Payload trống hoặc thiếu semester_groups — không sync.");
                 } else {
@@ -70,11 +72,11 @@
             onerror() {
                 // Port này không phản hồi — thử port tiếp theo
                 log.warn(`Port ${port} không phản hồi, thử port tiếp theo…`);
-                syncToJarvis(payload, portIndex + 1);
+                syncToDiark(payload, portIndex + 1);
             },
             ontimeout() {
                 log.warn(`Port ${port} timeout, thử port tiếp theo…`);
-                syncToJarvis(payload, portIndex + 1);
+                syncToDiark(payload, portIndex + 1);
             },
             timeout: 3000,
         });
@@ -167,13 +169,13 @@
             try {
                 const clone = response.clone();
                 const data  = await clone.json();
-                console.log("[Jarvis Sync] Captured transcript payload!");
+                console.log("[Diark Sync] Captured transcript payload!");
                 log.info("🎓 Đã bắt được bảng điểm, đang sync…");
                 const payload = buildIngestionPayload(data, null);
                 payload.drl = null;
                 payload.drl_history = null;
                 if (payload.semester_groups.length > 0) {
-                    syncToJarvis(payload);
+                    syncToDiark(payload);
                 } else {
                     log.warn("Bảng điểm trống, bỏ qua sync.");
                 }
@@ -197,7 +199,7 @@
 
                 if (drlHistory.length > 0) {
                     log.info("📊 Đã bắt được DRL, đang sync…");
-                    syncToJarvis({
+                    syncToDiark({
                         semester_groups: [],
                         term_summaries:  null,
                         drl:             drlHistory,
@@ -219,25 +221,25 @@
     const _originalXHRSend = XMLHttpRequest.prototype.send;
 
     XMLHttpRequest.prototype.open = function (method, url, ...rest) {
-        this._jarvis_url = url;
+        this._req_url = url;
         return _originalXHROpen.call(this, method, url, ...rest);
     };
 
     XMLHttpRequest.prototype.send = function (...args) {
-        const url = this._jarvis_url ?? "";
+        const url = this._req_url ?? "";
 
         if (url.includes("/api/sinh-vien/bang-diem") ||
             url.includes("/api/student/transcript")) {
             this.addEventListener("load", () => {
                 try {
                     const data    = JSON.parse(this.responseText);
-                    console.log("[Jarvis Sync] Captured transcript payload!");
+                    console.log("[Diark Sync] Captured transcript payload!");
                     const payload = buildIngestionPayload(data, null);
                     payload.drl = null;
                     payload.drl_history = null;
                     if (payload.semester_groups.length > 0) {
                         log.info("🎓 [XHR] Đã bắt được bảng điểm, đang sync…");
-                        syncToJarvis(payload);
+                        syncToDiark(payload);
                     }
                 } catch (e) {
                     log.error("[XHR] Lỗi parse bảng điểm:", e);
@@ -290,13 +292,14 @@
 
         const port = SYNC_PORTS[portIndex];
         const url = `http://127.0.0.1:${port}/sync/student-profile`;
-        const token = (typeof GM_getValue === "function" ? GM_getValue("sync_token", "") : "") || JARVIS_SYNC_TOKEN;
+        const token = (typeof GM_getValue === "function" ? GM_getValue("sync_token", "") : "") || DIARK_SYNC_TOKEN;
 
         GM_xmlhttpRequest({
             method: "POST",
             url: url,
             headers: {
                 "Content-Type": "application/json",
+                "X-Diark-Sync-Token": token,
                 "X-Jarvis-Sync-Token": token,
             },
             data: JSON.stringify(payload),

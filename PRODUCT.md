@@ -46,7 +46,7 @@ A local-first competitive-programming personal OS that combines automated platfo
 
 ## Evidence on Hand
 
-- Existing implementation: `jarvis-core`, a Tauri + React + TypeScript desktop project.
+- Existing implementation: `diark-core`, a Tauri + React + TypeScript desktop project.
 - Current UI already presents Codeforces submissions, XP, level progression, activity heatmap, and local SQLite-backed data.
 - No external proof assets, testimonials, customer claims, or benchmarks are confirmed. Future surfaces must not fabricate them.
 
