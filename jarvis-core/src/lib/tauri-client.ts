@@ -14,7 +14,7 @@ import type {
   CurriculumIndexDto,
 } from "../features/academic/types";
 import type { LifeMatrixEntryDto } from "../features/life-matrix/types";
-import type { CreateStructuredNoteDto, VaultSearchResultDto, VaultStatsDto } from "../features/vault/types";
+import type { CreateStructuredNoteDto, ScaffoldResultDto, VaultSearchResultDto, VaultStatsDto } from "../features/vault/types";
 
 /**
  * Wrapper mỏng quanh invoke() để:
@@ -388,6 +388,26 @@ export async function getVaultPath(): Promise<string | null> {
 }
 
 /**
+ * Tự động tạo thư mục học kỳ và ghi chú môn học từ Moodle courses (idempotent 100%).
+ */
+export async function scaffoldSemesterVault(
+  vaultRoot?: string,
+  semesterName?: string
+): Promise<ScaffoldResultDto> {
+  return invoke<ScaffoldResultDto>("scaffold_semester_vault", {
+    vaultRoot,
+    semesterName,
+  });
+}
+
+/**
+ * Mở thư mục ghi chú của môn học trong File Explorer mặc định của hệ điều hành.
+ */
+export async function openVaultCourseFolder(courseCode: string): Promise<void> {
+  return invoke<void>("open_vault_course_folder", { courseCode });
+}
+
+/**
  * Ẩn cửa sổ HUD xuống khay hệ thống.
  */
 export async function hideHud(): Promise<void> {
@@ -597,5 +617,19 @@ export async function launchMoodleSsoSync(): Promise<void> {
 
 export async function ingestMoodleSyncPayloadJson(payloadJson: string): Promise<number> {
   return invoke<number>("ingest_moodle_sync_payload_json", { payloadJson });
+}
+
+export async function updateMoodleCourseInstructor(
+  courseId: number,
+  instructorName: string,
+  instructorMail: string,
+  instructorPhone: string
+): Promise<void> {
+  return invoke<void>("update_moodle_course_instructor", {
+    courseId,
+    instructorName,
+    instructorMail,
+    instructorPhone,
+  });
 }
 

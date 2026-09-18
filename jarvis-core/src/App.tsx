@@ -21,6 +21,8 @@ import { DevControlDock } from "./components/DevControlDock";
 import { PluginMarketplaceModal } from "./components/PluginMarketplaceModal";
 import { PluginViewportRouter } from "./features/plugins/PluginViewportRouter";
 import { SettingsModal } from "./components/SettingsModal";
+import { QuickCaptureModal } from "./features/vault/components/QuickCaptureModal";
+import { useQuickCaptureStore } from "./stores/useQuickCaptureStore";
 import { useSettingsStore } from "./stores/useSettingsStore";
 import { useAppStore } from "./stores/useAppStore";
 import { useAcademicStore } from "./stores/useAcademicStore";
@@ -414,6 +416,12 @@ export default function App() {
           </div>
         ))}
       </div>
+
+      <QuickCaptureModal
+        isOpen={useQuickCaptureStore((s) => s.isOpen)}
+        onClose={() => useQuickCaptureStore.getState().closeQuickCapture()}
+        prefill={useQuickCaptureStore((s) => s.prefill)}
+      />
 
       <SettingsModal onResetGenesis={handleResetToGenesis} />
       <DevControlDock onResetIdentity={handleResetIdentity} />

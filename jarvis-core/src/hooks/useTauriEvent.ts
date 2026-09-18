@@ -1,26 +1,19 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 /**
  * Generic, StrictMode-safe hook for subscribing to Tauri backend events.
  *
- * **Why the `cancelled` flag?**
- * React 18 StrictMode intentionally mounts → unmounts → remounts every component
- * in development to surface bugs in cleanup logic. `listen()` is async, so
- * there's a race: the component can unmount before the Promise resolves,
- * leaving an unlisten function we never called. The `cancelled` flag catches
- * that window: if cleanup runs before `listen()` resolves, we call `unlisten()`
- * immediately when the Promise finally settles.
- *
- * @param eventName - Tauri event name emitted from Rust (e.g. "cf-sync-complete")
- * @param handler   - Callback receiving the typed payload. Stable reference
- *                    recommended (wrap in useCallback if needed) — hook re-registers
- *                    whenever `eventName` or `handler` reference changes.
+ * Uses `useRef` for the handler to prevent stale closure bugs while
+ * maintaining a stable event subscription.
  */
 export function useTauriEvent<T>(
   eventName: string,
   handler: (payload: T) => void
 ): void {
+  const handlerRef = useRef(handler);
+  handlerRef.current = handler;
+
   useEffect(() => {
     let unlisten: UnlistenFn | undefined;
     let cancelled = false;
@@ -28,7 +21,7 @@ export function useTauriEvent<T>(
     const setup = async () => {
       try {
         const unlistenFn = await listen<T>(eventName, (event) => {
-          handler(event.payload);
+          handlerRef.current(event.payload);
         });
 
         if (cancelled) {

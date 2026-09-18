@@ -33,12 +33,41 @@ pub fn ingest_moodle_sync_payload_json(
     db: State<'_, SharedDb>,
     payload_json: String,
 ) -> Result<usize, String> {
-    let payload: MoodleSyncPayload = serde_json::from_str(&payload_json)
-        .map_err(|e| format!("Invalid Moodle sync payload JSON: {e}"))?;
+    let payload: MoodleSyncPayload = if let Ok(p) = serde_json::from_str::<MoodleSyncPayload>(&payload_json) {
+        p
+    } else if let Ok(courses) = serde_json::from_str::<Vec<crate::db::moodle::MoodleCourseRecord>>(&payload_json) {
+        MoodleSyncPayload {
+            courses,
+            tasks: Vec::new(),
+            materials: Vec::new(),
+            ..Default::default()
+        }
+    } else {
+        return Err("Invalid Moodle sync payload JSON (must be MoodleSyncPayload or Course array)".to_string());
+    };
 
     let mut conn = db.lock().map_err(|e| format!("DB lock error: {e}"))?;
     let (c, t, m) = crate::db::moodle::commit_moodle_payload(&mut conn, payload)?;
     Ok(c + t + m)
+}
+
+#[tauri::command]
+pub fn update_moodle_course_instructor(
+    db: State<'_, SharedDb>,
+    course_id: i64,
+    instructor_name: String,
+    instructor_mail: String,
+    instructor_phone: String,
+) -> Result<(), String> {
+    let conn = db.lock().map_err(|e| format!("DB lock error: {e}"))?;
+    crate::db::moodle::update_moodle_course_instructor(
+        &conn,
+        course_id,
+        &instructor_name,
+        &instructor_mail,
+        &instructor_phone,
+    )
+    .map_err(|e| format!("Update moodle course instructor error: {e}"))
 }
 
 #[cfg(test)]

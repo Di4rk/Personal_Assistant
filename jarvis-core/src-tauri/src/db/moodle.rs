@@ -45,9 +45,22 @@ pub struct MoodleMaterialRecord {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct MoodleSyncPayload {
+    #[serde(default)]
     pub courses: Vec<MoodleCourseRecord>,
+    #[serde(default)]
     pub tasks: Vec<MoodleTaskRecord>,
+    #[serde(default)]
     pub materials: Vec<MoodleMaterialRecord>,
+    #[serde(default)]
+    pub is_final: Option<bool>,
+    #[serde(default)]
+    pub current_course: Option<String>,
+    #[serde(default)]
+    pub progress_current: Option<usize>,
+    #[serde(default)]
+    pub progress_total: Option<usize>,
+    #[serde(default)]
+    pub progress_pct: Option<f64>,
 }
 
 /// Atomic Transaction: commit toàn bộ payload Moodle (Courses, Tasks, Materials) vào SQLite.
@@ -335,6 +348,39 @@ pub fn get_moodle_materials(
     Ok(list)
 }
 
+pub fn update_moodle_course_instructor(
+    conn: &Connection,
+    course_id: i64,
+    instructor_name: &str,
+    instructor_mail: &str,
+    instructor_phone: &str,
+) -> SqlResult<()> {
+    let now_ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+
+    conn.execute(
+        r#"
+        UPDATE moodle_courses
+        SET instructor_name = ?1,
+            instructor_mail = ?2,
+            instructor_phone = ?3,
+            updated_at = ?4
+        WHERE course_id = ?5
+        "#,
+        params![
+            instructor_name,
+            instructor_mail,
+            instructor_phone,
+            now_ts,
+            course_id
+        ],
+    )?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -372,8 +418,8 @@ mod tests {
                     task_type: "assign".to_string(),
                     due_date: 1789750740,
                     is_submitted: false,
-                    submission_status: "No submissions have been made yet".to_string(),
-                    template_file_url: "https://courses.uit.edu.vn/mau_dang_ky.docx".to_string(),
+                    submission_status: "Chưa nộp".to_string(),
+                    template_file_url: "https://courses.uit.edu.vn/mau.docx".to_string(),
                     task_url: "https://courses.uit.edu.vn/mod/assign/view.php?id=11792".to_string(),
                     updated_at: 1789663457,
                     course_name: None,
@@ -386,11 +432,12 @@ mod tests {
                     course_id: 1289,
                     section_name: "Tuần 2".to_string(),
                     title: "C1_Slide BG".to_string(),
-                    file_url: "https://courses.uit.edu.vn/mod/resource/view.php?id=16726".to_string(),
+                    file_url: "https://courses.uit.edu.vn/slide.pdf".to_string(),
                     file_type: "pdf".to_string(),
                     created_at: 1789662966,
                 },
             ],
+            ..Default::default()
         };
 
         let res = commit_moodle_payload(&mut conn, payload);
@@ -427,5 +474,74 @@ mod tests {
             )
             .unwrap();
         assert!(synced_at > 0);
+    }
+
+    #[test]
+    fn test_manual_update_moodle_instructor_preserves_on_future_sync() {
+        let mut conn = setup_test_db();
+
+        // 1. Initial course with empty instructor
+        let payload = MoodleSyncPayload {
+            courses: vec![
+                MoodleCourseRecord {
+                    course_id: 1073,
+                    course_code: "CS115.R11".to_string(),
+                    fullname: "Toán cho khoa học máy tính".to_string(),
+                    term: "HK2 2025-2026".to_string(),
+                    instructor_name: "".to_string(),
+                    instructor_mail: "".to_string(),
+                    instructor_phone: "".to_string(),
+                    course_url: "https://courses.uit.edu.vn/course/view.php?id=1073".to_string(),
+                    updated_at: 100,
+                },
+            ],
+            tasks: vec![],
+            materials: vec![],
+            ..Default::default()
+        };
+        commit_moodle_payload(&mut conn, payload).unwrap();
+
+        // 2. User manually customizes instructor info
+        update_moodle_course_instructor(
+            &conn,
+            1073,
+            "TS. Nguyễn Văn A",
+            "anguyen@uit.edu.vn",
+            "0909123456",
+        )
+        .unwrap();
+
+        let updated = get_all_moodle_courses(&conn).unwrap();
+        assert_eq!(updated[0].instructor_name, "TS. Nguyễn Văn A");
+        assert_eq!(updated[0].instructor_mail, "anguyen@uit.edu.vn");
+        assert_eq!(updated[0].instructor_phone, "0909123456");
+
+        // 3. Subsequent Moodle sync where instructor info is still empty
+        let sync_payload_2 = MoodleSyncPayload {
+            courses: vec![
+                MoodleCourseRecord {
+                    course_id: 1073,
+                    course_code: "CS115.R11".to_string(),
+                    fullname: "Toán cho khoa học máy tính - Updated".to_string(),
+                    term: "HK2 2025-2026".to_string(),
+                    instructor_name: "".to_string(),
+                    instructor_mail: "".to_string(),
+                    instructor_phone: "".to_string(),
+                    course_url: "https://courses.uit.edu.vn/course/view.php?id=1073".to_string(),
+                    updated_at: 200,
+                },
+            ],
+            tasks: vec![],
+            materials: vec![],
+            ..Default::default()
+        };
+        commit_moodle_payload(&mut conn, sync_payload_2).unwrap();
+
+        // 4. Verify user custom settings are preserved!
+        let preserved = get_all_moodle_courses(&conn).unwrap();
+        assert_eq!(preserved[0].fullname, "Toán cho khoa học máy tính - Updated");
+        assert_eq!(preserved[0].instructor_name, "TS. Nguyễn Văn A");
+        assert_eq!(preserved[0].instructor_mail, "anguyen@uit.edu.vn");
+        assert_eq!(preserved[0].instructor_phone, "0909123456");
     }
 }

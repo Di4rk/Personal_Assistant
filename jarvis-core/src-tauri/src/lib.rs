@@ -85,6 +85,7 @@ macro_rules! registered_commands {
             commands::moodle::get_moodle_tasks,
             commands::moodle::get_moodle_materials,
             commands::moodle::ingest_moodle_sync_payload_json,
+            commands::moodle::update_moodle_course_instructor,
             commands::workspace::ingest_moodle_course_html,
             commands::workspace::get_upcoming_deadlines,
             commands::workspace::mark_deadline_submitted,
@@ -103,6 +104,8 @@ macro_rules! registered_commands {
             commands::vault::open_onenote_link,
             commands::vault::set_vault_path,
             commands::vault::get_vault_path,
+            commands::vault::scaffold_semester_vault,
+            commands::vault::open_vault_course_folder,
             commands::open_external_url,
             commands::hide_hud,
             // Settings & Identity
@@ -187,6 +190,7 @@ macro_rules! registered_commands {
             commands::moodle::get_moodle_tasks,
             commands::moodle::get_moodle_materials,
             commands::moodle::ingest_moodle_sync_payload_json,
+            commands::moodle::update_moodle_course_instructor,
             commands::workspace::ingest_moodle_course_html,
             commands::workspace::get_upcoming_deadlines,
             commands::workspace::mark_deadline_submitted,
@@ -205,6 +209,8 @@ macro_rules! registered_commands {
             commands::vault::open_onenote_link,
             commands::vault::set_vault_path,
             commands::vault::get_vault_path,
+            commands::vault::scaffold_semester_vault,
+            commands::vault::open_vault_course_folder,
             commands::open_external_url,
             commands::hide_hud,
             // Settings & Identity (Always available)

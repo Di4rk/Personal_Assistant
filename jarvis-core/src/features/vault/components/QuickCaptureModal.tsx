@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   X,
   Zap,
@@ -12,12 +12,14 @@ import {
 } from "lucide-react";
 import { createStructuredNote, openOnenoteLink } from "@/lib/tauri-client";
 import type { CreateStructuredNoteDto, NoteType } from "../types";
+import type { QuickNotePrefill } from "@/stores/useQuickCaptureStore";
 
 interface QuickCaptureModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess?: () => void;
   vaultPath?: string;
+  prefill?: QuickNotePrefill | null;
 }
 
 type TabType = "ALGO_TRICK" | "ONENOTE_LINK" | "TEACHING_SHEET";
@@ -27,6 +29,7 @@ export const QuickCaptureModal: React.FC<QuickCaptureModalProps> = ({
   onClose,
   onSuccess,
   vaultPath,
+  prefill,
 }) => {
   const [activeTab, setActiveTab] = useState<TabType>("ALGO_TRICK");
 
@@ -56,6 +59,26 @@ export const QuickCaptureModal: React.FC<QuickCaptureModalProps> = ({
   // Form submission state
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isOpen && prefill) {
+      if (prefill.mode === "algo") {
+        setActiveTab("ALGO_TRICK");
+      } else if (prefill.mode === "onenote") {
+        setActiveTab("ONENOTE_LINK");
+      } else if (prefill.mode === "teaching") {
+        setActiveTab("TEACHING_SHEET");
+      }
+
+      if (prefill.title) setTitle(prefill.title);
+      if (prefill.platformLink) setPlatformLink(prefill.platformLink);
+      if (prefill.tags && prefill.tags.length > 0) {
+        setTagsInput(prefill.tags.map((t) => (t.startsWith("#") ? t : `#${t}`)).join(" "));
+      }
+      if (prefill.codeSnippet) setAlgoCode(prefill.codeSnippet);
+      if (prefill.prose) setAlgoInsight(prefill.prose);
+    }
+  }, [isOpen, prefill]);
 
   if (!isOpen) {
     return null;

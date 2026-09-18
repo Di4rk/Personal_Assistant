@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Clock,
   AlertTriangle,
@@ -22,6 +22,7 @@ import {
 } from '../../../lib/tauri-client';
 import type { WecodeAssignmentMeta, WecodeProblemRecord } from '../../../types/wecode';
 import { useSyncOrchestratorStore } from '../stores/syncOrchestratorStore';
+import { useTauriEvent } from '../../../hooks/useTauriEvent';
 
 export type QuestUrgency = 'critical' | 'upcoming' | 'completed';
 export type QuestPlatform = 'all' | 'moodle' | 'wecode';
@@ -44,7 +45,11 @@ export interface UnifiedQuestItem {
 }
 
 function formatRemainingTime(secondsRemaining: number): string {
-  if (secondsRemaining <= 0) return 'Đã hết hạn';
+  if (secondsRemaining < -30 * 86400) return 'Đã đóng (Lưu trữ)';
+  if (secondsRemaining <= 0) {
+    const overdueDays = Math.floor(Math.abs(secondsRemaining) / 86400);
+    return overdueDays > 0 ? `Quá hạn ${overdueDays} ngày` : 'Quá hạn hôm nay';
+  }
   const hours = Math.floor(secondsRemaining / 3600);
   const minutes = Math.floor((secondsRemaining % 3600) / 60);
 
@@ -97,8 +102,8 @@ export const UnifiedQuestHub: React.FC = () => {
     return () => clearInterval(timer);
   }, []);
 
-  const loadAllData = async () => {
-    setLoading(true);
+  const loadAllData = useCallback(async (showLoadingSpinner: boolean = true) => {
+    if (showLoadingSpinner) setLoading(true);
     try {
       const [mTasks, wAssigns, wProbs] = await Promise.all([
         getMoodleTasks().catch(() => []),
@@ -111,13 +116,17 @@ export const UnifiedQuestHub: React.FC = () => {
     } catch (err) {
       console.error('[UnifiedQuestHub] Lỗi nạp dữ liệu nhiệm vụ:', err);
     } finally {
-      setLoading(false);
+      if (showLoadingSpinner) setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    loadAllData();
-  }, []);
+    loadAllData(true);
+  }, [loadAllData]);
+
+  useTauriEvent('moodle-data-synced', () => {
+    loadAllData(false);
+  });
 
   // Compute Unified Quests
   const allQuests = useMemo<UnifiedQuestItem[]>(() => {
@@ -149,6 +158,11 @@ export const UnifiedQuestHub: React.FC = () => {
       const total = a.total_problems || assignProbs.length;
       const isCompleted = total > 0 && solved === total;
 
+      // Chuẩn hóa base_url thành link chi tiết bài tập hợp lệ của Wecode: ${base}/assignment/${id}/0
+      const rawBase = a.base_url?.trim().replace(/\/+$/, '') || 'https://khmt.uit.edu.vn/wecode25/it00x';
+      const base = rawBase.includes('/assignment') ? rawBase.split('/assignment')[0] : rawBase;
+      const actionUrl = `${base}/assignment/${a.id}/0`;
+
       list.push({
         id: `wecode-${a.id}`,
         source: 'wecode',
@@ -159,7 +173,7 @@ export const UnifiedQuestHub: React.FC = () => {
         dueDateStr: finishTs > 0 ? formatTimestamp(finishTs) : 'Không giới hạn',
         isSubmitted: isCompleted,
         statusLabel: isCompleted ? `Đã AC (${solved}/${total})` : `Đang làm (${solved}/${total})`,
-        actionUrl: a.base_url || `https://khmt.uit.edu.vn/wecode/assignment/${a.id}`,
+        actionUrl,
         taskType: 'wecode',
         solvedCount: solved,
         totalCount: total,
@@ -185,9 +199,11 @@ export const UnifiedQuestHub: React.FC = () => {
   }, [allQuests, platformFilter, searchQuery]);
 
   // Categorize by Urgency
-  const { criticalQuests, upcomingQuests, completedQuests } = useMemo(() => {
+  const { criticalQuests, upcomingQuests, futureQuests, openEndedQuests, completedQuests } = useMemo(() => {
     const critical: UnifiedQuestItem[] = [];
     const upcoming: UnifiedQuestItem[] = [];
+    const future: UnifiedQuestItem[] = [];
+    const openEnded: UnifiedQuestItem[] = [];
     const completed: UnifiedQuestItem[] = [];
 
     for (const q of filteredQuests) {
@@ -197,33 +213,45 @@ export const UnifiedQuestHub: React.FC = () => {
       }
 
       if (q.dueTimestamp <= 0) {
-        // No deadline -> put into upcoming
-        upcoming.push(q);
+        // Bài tập không giới hạn thời gian / Luyện tập tự do
+        openEnded.push(q);
         continue;
       }
 
       const diff = q.dueTimestamp - nowSec;
-      if (diff < 0) {
-        // Overdue but not submitted
-        critical.push(q);
-      } else if (diff < 86400) {
-        // Less than 24 hours
+      // Active Horizon Filter:
+      // 1. Quá hạn > 30 ngày: Bài tập xác sống (Zombie Deadline từ các năm cũ như 2021, 2023)
+      //    -> Chuyển sang Luyện tập tự do / Đã đóng, tuyệt đối KHÔNG làm tăng counter đỏ.
+      if (diff < -30 * 86400) {
+        openEnded.push({
+          ...q,
+          statusLabel: 'Đã đóng (Lưu trữ)',
+        });
+      } else if (diff < 0 || diff <= 86400) {
+        // Quá hạn gần đây (< 30 ngày) HOẶC Còn dưới 24h
         critical.push(q);
       } else if (diff <= 86400 * 7) {
-        // Next 7 days
+        // Trong 7 ngày tới
         upcoming.push(q);
       } else {
-        // Future (> 7 days)
-        upcoming.push(q);
+        // Tương lai (> 7 ngày)
+        future.push(q);
       }
     }
 
     // Sort: earliest deadline first
     critical.sort((a, b) => a.dueTimestamp - b.dueTimestamp);
     upcoming.sort((a, b) => a.dueTimestamp - b.dueTimestamp);
+    future.sort((a, b) => a.dueTimestamp - b.dueTimestamp);
     completed.sort((a, b) => b.dueTimestamp - a.dueTimestamp);
 
-    return { criticalQuests: critical, upcomingQuests: upcoming, completedQuests: completed };
+    return {
+      criticalQuests: critical,
+      upcomingQuests: upcoming,
+      futureQuests: future,
+      openEndedQuests: openEnded,
+      completedQuests: completed,
+    };
   }, [filteredQuests, nowSec]);
 
   const handleOpenLink = (url?: string) => {
@@ -323,7 +351,7 @@ export const UnifiedQuestHub: React.FC = () => {
       </div>
 
       {/* Overview Stat Badges */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <div className="flex items-center justify-between p-3.5 rounded-xl border border-rose-500/20 bg-rose-950/10 backdrop-blur-sm">
           <div className="flex items-center gap-3">
             <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-rose-500/20 text-rose-400">
@@ -351,6 +379,21 @@ export const UnifiedQuestHub: React.FC = () => {
           </div>
           <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
             KẾ HOẠCH
+          </span>
+        </div>
+
+        <div className="flex items-center justify-between p-3.5 rounded-xl border border-indigo-500/20 bg-indigo-950/10 backdrop-blur-sm">
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-500/20 text-indigo-400">
+              <Code2 className="h-5 w-5" />
+            </div>
+            <div>
+              <div className="text-xs text-indigo-300 font-medium">Luyện tập tự do</div>
+              <div className="text-lg font-black text-indigo-400 font-mono">{openEndedQuests.length}</div>
+            </div>
+          </div>
+          <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+            KHÔNG HẠN
           </span>
         </div>
 
@@ -457,18 +500,18 @@ export const UnifiedQuestHub: React.FC = () => {
             </div>
           )}
 
-          {/* SECTION 2: SẮP TỚI (7 NGÀY HOẶC KẾ HOẠCH) */}
+          {/* SECTION 2: SẮP TỚI (7 NGÀY TỚI) */}
           <div className="space-y-3">
             <div className="flex items-center gap-2 text-xs font-semibold text-amber-400 uppercase tracking-wider">
               <Calendar className="h-4 w-4" />
-              <span>Nhiệm vụ trong 7 ngày tới & Kế hoạch</span>
+              <span>Nhiệm vụ trong 7 ngày tới</span>
               <span className="ml-1 rounded-full bg-amber-500/20 px-2 py-0.2 text-[11px] font-mono">
                 {upcomingQuests.length}
               </span>
             </div>
 
             {upcomingQuests.length === 0 ? (
-              <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/40 p-8 text-center text-xs text-zinc-500 font-mono">
+              <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/40 p-6 text-center text-xs text-zinc-500 font-mono">
                 Không có bài tập nào cần nộp trong 7 ngày tới. Tuyệt vời!
               </div>
             ) : (
@@ -541,6 +584,181 @@ export const UnifiedQuestHub: React.FC = () => {
               </div>
             )}
           </div>
+
+          {/* SECTION 3: KẾ HOẠCH XA HƠN (> 7 NGÀY) */}
+          {futureQuests.length > 0 && (
+            <div className="space-y-3 pt-2">
+              <div className="flex items-center gap-2 text-xs font-semibold text-sky-400 uppercase tracking-wider">
+                <Clock className="h-4 w-4" />
+                <span>Kế hoạch xa hơn (&gt; 7 ngày)</span>
+                <span className="ml-1 rounded-full bg-sky-500/20 px-2 py-0.2 text-[11px] font-mono">
+                  {futureQuests.length}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {futureQuests.map((quest) => {
+                  const remSec = quest.dueTimestamp - nowSec;
+                  return (
+                    <div
+                      key={quest.id}
+                      className="group flex flex-col justify-between p-3.5 rounded-xl border border-zinc-800 bg-zinc-900/80 hover:border-zinc-700 transition-all space-y-3"
+                    >
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-1.5">
+                            <span
+                              className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold uppercase ${
+                                quest.source === 'moodle'
+                                  ? 'bg-sky-500/10 text-sky-400 border border-sky-500/20'
+                                  : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                              }`}
+                            >
+                              {quest.source === 'moodle' ? 'Moodle' : 'Wecode'}
+                            </span>
+                            <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] font-mono text-zinc-300">
+                              {quest.courseCode}
+                            </span>
+                          </div>
+
+                          <span className="text-[11px] font-mono text-zinc-400 font-medium">
+                            {formatRemainingTime(remSec)}
+                          </span>
+                        </div>
+
+                        <div className="font-semibold text-xs text-zinc-200 group-hover:text-sky-300 transition-colors line-clamp-2">
+                          {quest.title}
+                        </div>
+
+                        <div className="text-[11px] text-zinc-500 font-mono">
+                          Hạn chót: {quest.dueDateStr}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between border-t border-zinc-800/60 pt-2.5 text-xs">
+                        <span className="text-zinc-500 text-[11px] font-mono">{quest.statusLabel}</span>
+
+                        <div className="flex items-center gap-2">
+                          {quest.templateUrl && (
+                            <button
+                              onClick={() => handleOpenLink(quest.templateUrl)}
+                              className="text-zinc-400 hover:text-sky-400 p-1 rounded transition-colors"
+                              title="Tải template mẫu"
+                            >
+                              <Download className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                          <button
+                            onClick={() => handleOpenLink(quest.actionUrl)}
+                            className="flex items-center gap-1 text-xs text-sky-400 hover:text-sky-300 font-medium transition-colors"
+                          >
+                            <span>Chi tiết</span>
+                            <ChevronRight className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* SECTION 4: LUYỆN TẬP TỰ DO & KHÔNG GIỚI HẠN THỜI GIAN */}
+          {openEndedQuests.length > 0 && (
+            <div className="space-y-3 pt-2">
+              <div className="flex items-center gap-2 text-xs font-semibold text-indigo-400 uppercase tracking-wider">
+                <Code2 className="h-4 w-4" />
+                <span>Luyện tập tự do & Không giới hạn thời gian</span>
+                <span className="ml-1 rounded-full bg-indigo-500/20 px-2 py-0.2 text-[11px] font-mono">
+                  {openEndedQuests.length}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {openEndedQuests.map((quest) => {
+                  const solved = quest.solvedCount ?? 0;
+                  const total = quest.totalCount ?? 0;
+                  const percent = total > 0 ? Math.round((solved / total) * 100) : 0;
+
+                  return (
+                    <div
+                      key={quest.id}
+                      className="group flex flex-col justify-between p-3.5 rounded-xl border border-zinc-800 bg-zinc-900/80 hover:border-indigo-500/40 transition-all space-y-3"
+                    >
+                      <div className="space-y-2.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-1.5">
+                            <span
+                              className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold uppercase ${
+                                quest.source === 'moodle'
+                                  ? 'bg-sky-500/10 text-sky-400 border border-sky-500/20'
+                                  : 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20'
+                              }`}
+                            >
+                              {quest.source === 'moodle' ? 'Moodle' : 'Wecode'}
+                            </span>
+                            <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] font-mono text-zinc-300">
+                              {quest.courseCode}
+                            </span>
+                          </div>
+
+                          <span className="text-[10px] font-mono text-zinc-400 bg-zinc-800/80 px-2 py-0.5 rounded border border-zinc-700/60">
+                            Không giới hạn
+                          </span>
+                        </div>
+
+                        <div className="font-semibold text-xs text-zinc-200 group-hover:text-indigo-300 transition-colors line-clamp-2">
+                          {quest.title}
+                        </div>
+
+                        {/* Progress bar for Wecode / practice assignments */}
+                        {total > 0 && (
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between text-[10px] font-mono text-zinc-400">
+                              <span>Tiến độ: {solved}/{total} bài</span>
+                              <span className="text-indigo-400 font-bold">{percent}%</span>
+                            </div>
+                            <div className="h-1.5 w-full rounded-full bg-zinc-800 overflow-hidden">
+                              <div
+                                className="h-full bg-indigo-500 rounded-full transition-all duration-300"
+                                style={{ width: `${percent}%` }}
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="flex items-center justify-between border-t border-zinc-800/60 pt-2.5 text-xs">
+                        <span className="text-zinc-500 text-[11px] font-mono">
+                          {quest.statusLabel}
+                        </span>
+
+                        <div className="flex items-center gap-2">
+                          {quest.templateUrl && (
+                            <button
+                              onClick={() => handleOpenLink(quest.templateUrl)}
+                              className="text-zinc-400 hover:text-sky-400 p-1 rounded transition-colors"
+                              title="Tải template mẫu"
+                            >
+                              <Download className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                          <button
+                            onClick={() => handleOpenLink(quest.actionUrl)}
+                            className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300 font-medium transition-colors"
+                          >
+                            <span>Chi tiết</span>
+                            <ChevronRight className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* SECTION 3: ĐÃ HOÀN THÀNH / ĐÃ NỘP */}
           {completedQuests.length > 0 && (

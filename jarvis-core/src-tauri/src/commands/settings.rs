@@ -183,6 +183,9 @@ pub fn execute_reset_user_data_to_genesis(conn: &mut rusqlite::Connection) -> Re
     tx.execute("DELETE FROM post_mortems;", [])?;
     tx.execute("DELETE FROM course_deadlines;", [])?;
     tx.execute("DELETE FROM course_workspace_config;", [])?;
+    tx.execute("DELETE FROM moodle_materials;", [])?;
+    tx.execute("DELETE FROM moodle_tasks;", [])?;
+    tx.execute("DELETE FROM moodle_courses;", [])?;
 
     // Xóa các bảng tùy chọn/tương thích nếu tồn tại
     for opt_table in &["student_profile", "daily_life_matrix", "academic_curriculum", "sync_state"] {
@@ -415,10 +418,36 @@ mod tests {
             [],
         ).unwrap();
 
+        // Thêm dữ liệu Moodle courses, tasks, materials
+        conn.execute(
+            "INSERT INTO moodle_courses (course_id, course_code, fullname, course_url, updated_at)
+             VALUES (1073, 'CS115.R11', 'Toán cho khoa học máy tính - CS115.R11', 'https://courses.uit.edu.vn/course/view.php?id=1073', 1000)",
+            [],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO moodle_tasks (task_id, course_id, title, task_type, due_date, task_url, updated_at)
+             VALUES (9866, 1073, 'Đăng kí đồ án môn học cuối kì', 'assign', 1700000000, 'https://courses.uit.edu.vn/mod/assign/view.php?id=9866', 1000)",
+            [],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO moodle_materials (course_id, section_name, title, file_url, file_type, created_at)
+             VALUES (1073, 'Giới thiệu môn học', 'Đề cương chi tiết', 'https://courses.uit.edu.vn/mod/resource/view.php?id=9858', 'pdf', 1000)",
+            [],
+        ).unwrap();
+
         // 2. Chạy execute_reset_user_data_to_genesis
         execute_reset_user_data_to_genesis(&mut conn).unwrap();
 
         // 3. Xác thực: Dữ liệu người dùng đã được xóa sạch
+        let moodle_courses_count: i64 = conn.query_row("SELECT COUNT(*) FROM moodle_courses", [], |r| r.get(0)).unwrap();
+        assert_eq!(moodle_courses_count, 0, "Bảng moodle_courses phải bị xóa sạch khi reset genesis");
+
+        let moodle_tasks_count: i64 = conn.query_row("SELECT COUNT(*) FROM moodle_tasks", [], |r| r.get(0)).unwrap();
+        assert_eq!(moodle_tasks_count, 0, "Bảng moodle_tasks phải bị xóa sạch khi reset genesis");
+
+        let moodle_materials_count: i64 = conn.query_row("SELECT COUNT(*) FROM moodle_materials", [], |r| r.get(0)).unwrap();
+        assert_eq!(moodle_materials_count, 0, "Bảng moodle_materials phải bị xóa sạch khi reset genesis");
+
         let wecode_sub_count: i64 = conn.query_row("SELECT COUNT(*) FROM wecode_submissions", [], |r| r.get(0)).unwrap();
         assert_eq!(wecode_sub_count, 0);
 

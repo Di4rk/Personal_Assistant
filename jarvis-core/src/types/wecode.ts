@@ -12,6 +12,7 @@ export interface WecodeSubmission {
   memory_kib: number;
   language: string;
   is_final: boolean;
+  code?: string;
 }
 
 export interface WecodeAssignmentMeta {

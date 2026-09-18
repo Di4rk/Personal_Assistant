@@ -9,7 +9,10 @@ use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
 use crate::db::SharedDb;
-use crate::modules::vault::{scan_and_sync_vault, VaultStatsDto};
+use crate::modules::vault::{
+    find_course_folder, scaffold_semester_courses, scan_and_sync_vault, ScaffoldResultDto,
+    VaultStatsDto,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -392,6 +395,89 @@ pub async fn get_vault_stats(
     })
     .await
     .map_err(|e| format!("Lỗi runtime worker get_vault_stats: {e}"))?
+}
+
+/// Scaffolds course folders and initial notes for an active semester from Moodle courses.
+#[tauri::command]
+pub async fn scaffold_semester_vault(
+    vault_root: Option<String>,
+    semester_name: Option<String>,
+    db: tauri::State<'_, SharedDb>,
+) -> Result<ScaffoldResultDto, String> {
+    let db_arc = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut conn = db_arc
+            .lock()
+            .map_err(|_| "DB mutex bị poisoned".to_string())?;
+
+        let active_path = if let Some(ref p) = vault_root {
+            if !p.trim().is_empty() {
+                let _ = crate::db::settings::set_setting(&conn, "vault_path", p.trim());
+                p.trim().to_string()
+            } else {
+                crate::db::settings::get_setting(&conn, "vault_path")
+                    .map_err(|e| format!("Lỗi đọc cài đặt vault_path: {e}"))?
+                    .ok_or_else(|| {
+                        "Chưa cấu hình thư mục Vault. Hãy chọn thư mục Vault trước!".to_string()
+                    })?
+            }
+        } else {
+            crate::db::settings::get_setting(&conn, "vault_path")
+                .map_err(|e| format!("Lỗi đọc cài đặt vault_path: {e}"))?
+                .ok_or_else(|| {
+                    "Chưa cấu hình thư mục Vault. Hãy chọn thư mục Vault trước!".to_string()
+                })?
+        };
+
+        let path = PathBuf::from(&active_path);
+        if !path.exists() {
+            return Err(format!(
+                "Thư mục Vault không tồn tại trên đĩa: {}",
+                path.display()
+            ));
+        }
+
+        scaffold_semester_courses(&mut conn, &path, semester_name.as_deref())
+    })
+    .await
+    .map_err(|e| format!("Lỗi runtime worker scaffold_semester_vault: {e}"))?
+}
+
+/// Opens the note folder for a course in the default OS file explorer.
+#[tauri::command]
+pub async fn open_vault_course_folder(
+    course_code: String,
+    db: tauri::State<'_, SharedDb>,
+) -> Result<(), String> {
+    let db_arc = db.inner().clone();
+    let folder_to_open = tauri::async_runtime::spawn_blocking(move || {
+        let conn = db_arc
+            .lock()
+            .map_err(|_| "DB mutex bị poisoned".to_string())?;
+
+        let active_path = crate::db::settings::get_setting(&conn, "vault_path")
+            .map_err(|e| format!("Lỗi đọc cài đặt vault_path: {e}"))?
+            .ok_or_else(|| {
+                "Chưa cấu hình thư mục Vault. Hãy chọn thư mục Vault trước!".to_string()
+            })?;
+
+        let root_path = PathBuf::from(&active_path);
+        if !root_path.exists() {
+            return Err(format!(
+                "Thư mục Vault không tồn tại trên đĩa: {}",
+                root_path.display()
+            ));
+        }
+
+        let found = find_course_folder(&root_path, &course_code);
+        Ok(found.unwrap_or(root_path))
+    })
+    .await
+    .map_err(|e| format!("Lỗi runtime worker open_vault_course_folder: {e}"))??;
+
+    open::that(&folder_to_open)
+        .map_err(|e| format!("Không thể mở thư mục {}: {}", folder_to_open.display(), e))?;
+    Ok(())
 }
 
 #[cfg(test)]

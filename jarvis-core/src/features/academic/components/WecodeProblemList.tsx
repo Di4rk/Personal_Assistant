@@ -12,10 +12,12 @@ import {
   Check,
   Star,
   ExternalLink,
+  Zap,
 } from "lucide-react";
 import { openExternalUrl } from "../../../lib/tauri-client";
 import type { WecodeAssignmentGroup, WecodeSubmission } from "../../../types/wecode";
 import { formatVerdictLabel } from "../utils/wecodeHierarchy";
+import { useQuickCaptureStore } from "../../../stores/useQuickCaptureStore";
 
 interface WecodeProblemListProps {
   assignment: WecodeAssignmentGroup;
@@ -74,6 +76,35 @@ export const WecodeProblemList: React.FC<WecodeProblemListProps> = ({
       return `${base}${raw}`;
     }
     return `${base}/assignment/${assignment.id}/${prob.problem_id}`;
+  };
+
+  const handleOpenAlgoTrick = (prob: {
+    problem_id: number;
+    problem_name: string;
+    problem_url?: string;
+    bestSubmission?: WecodeSubmission;
+  }) => {
+    const probUrl = getProblemUrl(prob);
+    const courseCode = assignment.courseCode || "WECODE";
+    const assignmentName = assignment.name || `Assignment #${assignment.id}`;
+    const title = `[${courseCode}] [${assignmentName}] ${prob.problem_name}`;
+    const tagCourse = courseCode.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const tags = [tagCourse, "wecode", "algo"];
+
+    let prose = `> **Bài tập:** [${prob.problem_name}](${probUrl})\n> **Môn:** ${courseCode} • **Assignment:** ${assignmentName}\n\n`;
+    if (prob.bestSubmission) {
+      prose += `> **Kết quả nộp bài tốt nhất:** ${prob.bestSubmission.verdict || "AC"} (${prob.bestSubmission.execution_time.toFixed(2)}s, ${prob.bestSubmission.memory_kib} KiB, ${prob.bestSubmission.language})\n\n`;
+    }
+    prose += `### 💡 Ý tưởng thuật toán & Bí kíp tối ưu\n- `;
+
+    useQuickCaptureStore.getState().openQuickCapture({
+      mode: "algo",
+      title,
+      platformLink: probUrl,
+      tags,
+      codeSnippet: prob.bestSubmission?.code || "",
+      prose,
+    });
   };
 
   const solvedCount = useMemo(() => {
@@ -350,6 +381,20 @@ export const WecodeProblemList: React.FC<WecodeProblemListProps> = ({
                               <span className="hidden sm:inline">Mở đề</span>
                             </button>
                           )}
+
+                          {/* Quick Note Algo Trick Deep-Link */}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenAlgoTrick(prob);
+                            }}
+                            className="p-1 px-1.5 rounded bg-zinc-800/80 hover:bg-violet-950/80 text-zinc-300 hover:text-violet-300 border border-zinc-700/60 hover:border-violet-700/50 transition-colors cursor-pointer inline-flex items-center gap-1 text-[10px]"
+                            title="Lưu bí kíp giải thuật vào Native Vault"
+                          >
+                            <Zap className="w-3 h-3 text-amber-400" />
+                            <span>⚡ Lưu Trick</span>
+                          </button>
                         </div>
 
                         {/* Performance Details of Best Submission */}

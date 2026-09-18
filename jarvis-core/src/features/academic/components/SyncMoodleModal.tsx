@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useState, useEffect } from 'react';
 import {
   ingestMoodleSyncPayloadJson,
   launchMoodleSsoSync,
@@ -15,12 +15,23 @@ import {
   Loader2,
   ChevronDown,
   ChevronUp,
+  Minus,
+  Maximize2,
+  X,
 } from 'lucide-react';
 
 export interface SyncMoodleModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSyncSuccess?: () => void;
+}
+
+export interface MoodleSyncProgress {
+  current: number;
+  total: number;
+  course_name: string;
+  percent: number;
+  is_final: boolean;
 }
 
 export const SyncMoodleModal: React.FC<SyncMoodleModalProps> = ({
@@ -35,20 +46,55 @@ export const SyncMoodleModal: React.FC<SyncMoodleModalProps> = ({
   const [syncedCount, setSyncedCount] = useState<number | null>(null);
   const [showManualSection, setShowManualSection] = useState<boolean>(false);
   const [manualJson, setManualJson] = useState<string>('');
+  const [isMinimized, setIsMinimized] = useState<boolean>(false);
+  const [progress, setProgress] = useState<MoodleSyncProgress | null>(null);
 
-  const handleSyncComplete = useCallback(() => {
+  // Reset status khi mở modal mới
+  useEffect(() => {
+    if (isOpen) {
+      setStatus('idle');
+      setIsListening(false);
+      setErrorMessage(null);
+      setSyncedCount(null);
+      setShowManualSection(false);
+      setIsMinimized(false);
+      setProgress(null);
+    }
+  }, [isOpen]);
+
+  const handleSyncComplete = useCallback((count?: number) => {
     setStatus('completed');
     setIsListening(false);
+    if (typeof count === 'number' && count > 0) {
+      setSyncedCount(count);
+    }
     if (onSyncSuccess) {
       onSyncSuccess();
     }
   }, [onSyncSuccess]);
 
-  useTauriEvent('moodle-data-synced', handleSyncComplete);
+  // Cập nhật tiến độ streaming theo thời gian thực từ Rust backend
+  useTauriEvent<MoodleSyncProgress>('moodle-sync-progress', (p) => {
+    if (p) {
+      setProgress(p);
+      setStatus('listening');
+      setIsListening(true);
+      if (p.is_final) {
+        handleSyncComplete(p.total);
+      }
+    }
+  });
+
   useTauriEvent<string>('sso-callback-success', (target) => {
     if (target === 'moodle') {
       handleSyncComplete();
     }
+  });
+
+  useTauriEvent<string>('sso-callback-error', (reason) => {
+    setErrorMessage(`Đồng bộ Moodle thất bại: ${reason}`);
+    setStatus('error');
+    setIsListening(false);
   });
 
   if (!isOpen) return null;
@@ -57,6 +103,7 @@ export const SyncMoodleModal: React.FC<SyncMoodleModalProps> = ({
     setErrorMessage(null);
     setStatus('listening');
     setIsListening(true);
+    setProgress(null);
     try {
       await launchMoodleSsoSync();
     } catch (err) {
@@ -97,6 +144,109 @@ export const SyncMoodleModal: React.FC<SyncMoodleModalProps> = ({
     setTimeout(() => setCopied(false), 2000);
   };
 
+  // CHẾ ĐỘ THU NHỎ (MINIMIZED FLOATING DOCK):
+  // Không che màn hình, người dùng hoàn toàn có thể tương tác với bảng danh sách môn học, quest hub,...
+  if (isMinimized) {
+    return (
+      <div className="fixed bottom-6 right-6 z-50 w-96 max-w-[calc(100vw-3rem)] rounded-xl border border-zinc-800 bg-zinc-950/95 p-4 shadow-2xl backdrop-blur-md transition-all duration-200">
+        {/* Header */}
+        <div className="flex items-center justify-between gap-2 border-b border-zinc-800/80 pb-2.5">
+          <div className="flex items-center gap-2 min-w-0">
+            {status === 'listening' ? (
+              <Loader2 className="h-4 w-4 shrink-0 animate-spin text-sky-400" />
+            ) : status === 'completed' ? (
+              <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
+            ) : status === 'error' ? (
+              <AlertCircle className="h-4 w-4 shrink-0 text-rose-400" />
+            ) : (
+              <BookOpen className="h-4 w-4 shrink-0 text-sky-400" />
+            )}
+            <span className="text-xs font-semibold text-zinc-200 truncate">
+              {status === 'listening'
+                ? 'Đang đồng bộ Moodle...'
+                : status === 'completed'
+                ? 'Đồng bộ Moodle hoàn tất'
+                : status === 'error'
+                ? 'Lỗi đồng bộ Moodle'
+                : 'Đồng bộ Moodle'}
+            </span>
+          </div>
+          <div className="flex items-center gap-1 shrink-0">
+            {status === 'listening' && progress && (
+              <span className="text-[11px] font-mono font-semibold text-sky-400 mr-1.5">
+                {Math.round(progress.percent)}%
+              </span>
+            )}
+            <button
+              onClick={() => setIsMinimized(false)}
+              title="Phóng to / Mở lại cửa sổ"
+              className="rounded-lg p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors"
+            >
+              <Maximize2 className="h-3.5 w-3.5" />
+            </button>
+            <button
+              onClick={onClose}
+              title="Đóng"
+              className="rounded-lg p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
+
+        {/* Content */}
+        <div className="pt-2.5">
+          {status === 'listening' ? (
+            <div className="space-y-2">
+              <p className="text-xs text-zinc-300 truncate font-medium">
+                {progress?.course_name || 'Đang kết nối & trích xuất môn học...'}
+              </p>
+              <div className="flex items-center justify-between text-[11px] text-zinc-500">
+                <span>
+                  {progress ? `Đã nạp ${progress.current}/${progress.total} môn` : 'Đang xử lý...'}
+                </span>
+                <span className="text-sky-400/90 font-medium">Thời gian thực</span>
+              </div>
+              <div className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-800">
+                <div
+                  className="h-full bg-sky-500 transition-all duration-300 ease-out"
+                  style={{ width: `${Math.min(100, Math.max(0, progress?.percent || 8))}%` }}
+                />
+              </div>
+            </div>
+          ) : status === 'completed' ? (
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-emerald-300">
+                {syncedCount !== null
+                  ? `Đã nạp ${syncedCount} bản ghi vào SQLite.`
+                  : 'Toàn bộ dữ liệu môn học đã cập nhật!'}
+              </span>
+              <button
+                onClick={() => setIsMinimized(false)}
+                className="text-xs font-semibold text-sky-400 hover:text-sky-300 transition-colors"
+              >
+                Xem chi tiết
+              </button>
+            </div>
+          ) : status === 'error' ? (
+            <div className="space-y-1">
+              <p className="text-xs text-rose-300 truncate">{errorMessage || 'Có lỗi xảy ra'}</p>
+              <button
+                onClick={() => setIsMinimized(false)}
+                className="text-xs font-medium text-rose-400 hover:text-rose-300 underline"
+              >
+                Mở lại để thử lại
+              </button>
+            </div>
+          ) : (
+            <p className="text-xs text-zinc-400">Chưa bắt đầu đồng bộ.</p>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // CHẾ ĐỘ MODAL ĐẦY ĐỦ (FULL DIALOG):
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
       <div className="w-full max-w-lg rounded-xl border border-slate-800 bg-slate-950 p-6 shadow-2xl space-y-5">
@@ -108,15 +258,25 @@ export const SyncMoodleModal: React.FC<SyncMoodleModalProps> = ({
             </div>
             <div>
               <h3 className="text-base font-bold text-slate-100">Đồng bộ Courses UIT (Moodle)</h3>
-              <p className="text-xs text-slate-400">Thu thập môn học, thông tin giảng viên và tài liệu slide</p>
+              <p className="text-xs text-slate-400">Thu thập môn học, thông tin giảng viên và bài tập theo thời gian thực</p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="rounded-lg p-1 text-slate-500 hover:bg-slate-900 hover:text-slate-300 transition-colors"
-          >
-            ✕
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setIsMinimized(true)}
+              title="Thu nhỏ cửa sổ (tiếp tục làm việc trong lúc nạp)"
+              className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-slate-200 transition-colors"
+            >
+              <Minus className="h-4 w-4" />
+            </button>
+            <button
+              onClick={onClose}
+              title="Đóng"
+              className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-slate-200 transition-colors"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </div>
 
         {/* State Banner */}
@@ -127,7 +287,7 @@ export const SyncMoodleModal: React.FC<SyncMoodleModalProps> = ({
             <p className="text-xs text-slate-400">
               {syncedCount !== null
                 ? `Đã cập nhật ${syncedCount} bản ghi môn học và tài liệu.`
-                : 'Toàn bộ khóa học và bài tập đã được nạp vào SQLite.'}
+                : 'Toàn bộ khóa học và bài tập đã được nạp vào SQLite theo thời gian thực.'}
             </p>
             <button
               onClick={onClose}
@@ -145,7 +305,7 @@ export const SyncMoodleModal: React.FC<SyncMoodleModalProps> = ({
                 <span>Phương thức tự động (Khuyên dùng)</span>
               </div>
               <p className="text-xs text-slate-300">
-                Mở cửa sổ đăng nhập Moodle UIT. Hệ thống sẽ tự động trích xuất các môn học, bài giảng và bài tập đang diễn ra.
+                Mở cửa sổ đăng nhập Moodle UIT. Hệ thống sẽ trích xuất môn học, bài giảng và bài tập đang diễn ra theo thời gian thực.
               </p>
 
               <button
@@ -166,6 +326,44 @@ export const SyncMoodleModal: React.FC<SyncMoodleModalProps> = ({
                 )}
               </button>
             </div>
+
+            {/* Real-time Progress HUD */}
+            {status === 'listening' && (
+              <div className="rounded-xl border border-sky-500/20 bg-sky-950/20 p-4 space-y-2.5">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-semibold text-sky-300 truncate pr-2">
+                    {progress?.course_name || 'Đang trích xuất dữ liệu Moodle...'}
+                  </span>
+                  <span className="font-mono font-semibold text-sky-400 shrink-0">
+                    {progress ? `${Math.round(progress.percent)}%` : 'Đang xử lý...'}
+                  </span>
+                </div>
+                {progress && (
+                  <div className="flex items-center justify-between text-[11px] text-slate-400">
+                    <span>Đã nạp: {progress.current}/{progress.total} môn học</span>
+                    <span className="text-sky-400/80 font-medium">Cập nhật thời gian thực</span>
+                  </div>
+                )}
+                <div className="h-2 w-full overflow-hidden rounded-full bg-slate-800">
+                  <div
+                    className="h-full bg-sky-500 transition-all duration-300 ease-out"
+                    style={{ width: `${Math.min(100, Math.max(0, progress?.percent || 8))}%` }}
+                  />
+                </div>
+                <div className="flex items-center justify-between pt-1">
+                  <p className="text-[11px] text-slate-400">
+                    💡 Bạn có thể bấm nút <b>Thu nhỏ (—)</b> góc trên để tiếp tục sử dụng ứng dụng.
+                  </p>
+                  <button
+                    onClick={() => setIsMinimized(true)}
+                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-sky-400 hover:text-sky-300 transition-colors shrink-0 ml-2"
+                  >
+                    <Minus className="h-3.5 w-3.5" />
+                    <span>Thu nhỏ</span>
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Error banner */}
             {errorMessage && (

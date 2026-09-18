@@ -77,7 +77,8 @@ pub const INJECTED_PORTAL_SCRIPT: &str = include_str!("../../../injected_portal_
 pub const PORTAL_HARVESTER_SCRIPT: &str = include_str!("../../../scripts/portal_harvester.js");
 pub const WECODE_HARVESTER_SCRIPT: &str = include_str!("../../../scripts/wecode_harvester.js");
 pub const MOODLE_HARVESTER_SCRIPT: &str = include_str!("../../../scripts/moodle_harvester.js");
-pub const MOODLE_LOGIN_URL: &str = "https://courses.uit.edu.vn/my/";
+pub const MOODLE_LOGIN_URL: &str = "https://courses.uit.edu.vn/login/index.php";
+pub const MOODLE_MY_URL: &str = "https://courses.uit.edu.vn/my/";
 
 pub const UNIVERSAL_GUARDIAN_SCRIPT: &str = r#"
 (() => {
@@ -1815,7 +1816,7 @@ pub async fn launch_moodle_silent_sync(app: AppHandle) -> Result<(), String> {
     close_silent_window(&app, &window_label, &partial_state_registry);
 
     let auth_url = WebviewUrl::External(
-        MOODLE_LOGIN_URL
+        MOODLE_MY_URL
             .parse()
             .map_err(|e| format!("Invalid Moodle URL: {e}"))?,
     );
@@ -1871,7 +1872,10 @@ pub async fn launch_moodle_silent_sync(app: AppHandle) -> Result<(), String> {
                     let target = extract_query_param(fragment, "target");
                     if target == "moodle" {
                         println!("[Moodle Silent] Moodle sync completed via background API engine!");
-                        let _ = app_nav.emit("moodle-data-synced", ());
+                        let total_courses: usize = extract_query_param(fragment, "total_courses")
+                            .parse()
+                            .unwrap_or(0);
+                        let _ = app_nav.emit("moodle-data-synced", total_courses);
                         let _ = app_nav.emit("sso-callback-success", "moodle");
                     }
                 }
@@ -1924,7 +1928,7 @@ pub async fn launch_moodle_sso_sync(app: AppHandle) -> Result<(), String> {
     }
 
     let auth_url = WebviewUrl::External(
-        MOODLE_LOGIN_URL
+        MOODLE_MY_URL
             .parse()
             .map_err(|e| format!("Invalid Moodle URL: {e}"))?,
     );
@@ -1953,7 +1957,20 @@ pub async fn launch_moodle_sso_sync(app: AppHandle) -> Result<(), String> {
                     let target = extract_query_param(fragment, "target");
                     if target == "moodle" {
                         println!("[SSO Moodle] Moodle sync completed via interactive window!");
-                        let _ = app_for_nav.emit("moodle-data-synced", ());
+                        let total_courses: usize = extract_query_param(fragment, "total_courses")
+                            .parse()
+                            .unwrap_or(0);
+                        let _ = app_for_nav.emit("moodle-data-synced", total_courses);
+                        let _ = app_for_nav.emit(
+                            "moodle-sync-progress",
+                            serde_json::json!({
+                                "current": total_courses,
+                                "total": total_courses,
+                                "course_name": "Hoàn tất đồng bộ",
+                                "percent": 100.0,
+                                "is_final": true
+                            }),
+                        );
                         let _ = app_for_nav.emit("sso-callback-success", "moodle");
                     }
                 }

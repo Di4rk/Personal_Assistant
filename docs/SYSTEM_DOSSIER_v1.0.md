@@ -1,4 +1,4 @@
-# DIARK // OS (JARVIS PERSONAL OS) — MASTER ARCHITECTURAL DOSSIER (v1.1.0 BASELINE)
+# DIARK // OS (JARVIS PERSONAL OS) — MASTER ARCHITECTURAL DOSSIER (v1.3.0 BASELINE)
 
 ## 1. TỔNG QUAN HỆ THỐNG & NHÂN THỨC NGƯỜI DÙNG (PERSONA & HARDWARE)
 - **Chủ sở hữu hệ thống:** Sinh viên CS/IT năm 2 (UIT - ĐHQG-HCM), định hướng Competitive Programming (ICPC), Nghiên cứu AI và An toàn thông tin; Visual Designer thương hiệu Diark.
@@ -183,6 +183,69 @@ CREATE TABLE IF NOT EXISTS plugin_registry (
     is_builtin  BOOLEAN NOT NULL DEFAULT 0,
     installed_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
 );
+
+-- Khóa học Moodle UIT (Courses Engine)
+CREATE TABLE IF NOT EXISTS moodle_courses (
+    course_id         INTEGER PRIMARY KEY,
+    course_code       TEXT NOT NULL,
+    fullname          TEXT NOT NULL,
+    term              TEXT NOT NULL,
+    instructor_name   TEXT NOT NULL DEFAULT '',
+    instructor_mail   TEXT NOT NULL DEFAULT '',
+    instructor_phone  TEXT NOT NULL DEFAULT '',
+    course_url        TEXT NOT NULL,
+    updated_at        INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+);
+
+-- Nhiệm vụ & Bài tập Moodle UIT
+CREATE TABLE IF NOT EXISTS moodle_tasks (
+    task_id           INTEGER PRIMARY KEY,
+    course_id         INTEGER NOT NULL,
+    title             TEXT NOT NULL,
+    task_type         TEXT NOT NULL,
+    due_date          INTEGER NOT NULL,
+    is_submitted      BOOLEAN NOT NULL DEFAULT 0,
+    submission_status TEXT NOT NULL DEFAULT 'Chưa nộp',
+    template_file_url TEXT NOT NULL DEFAULT '',
+    task_url          TEXT NOT NULL,
+    updated_at        INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+    FOREIGN KEY (course_id) REFERENCES moodle_courses(course_id) ON DELETE CASCADE
+);
+
+-- Tài liệu học tập Moodle UIT
+CREATE TABLE IF NOT EXISTS moodle_materials (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    course_id         INTEGER NOT NULL,
+    section_name      TEXT NOT NULL,
+    title             TEXT NOT NULL,
+    file_url          TEXT NOT NULL,
+    file_type         TEXT NOT NULL,
+    created_at        INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+    FOREIGN KEY (course_id) REFERENCES moodle_courses(course_id) ON DELETE CASCADE
+);
+
+-- Native Vault Metadata Table
+CREATE TABLE IF NOT EXISTS vault_notes (
+    rowid_key         INTEGER PRIMARY KEY AUTOINCREMENT,
+    id                TEXT UNIQUE NOT NULL,       -- Đường dẫn tương đối (ví dụ '2025-2026_HK2/CS115_.../00_CS115_Index.md')
+    title             TEXT NOT NULL,
+    tags              TEXT,                       -- JSON string array: '["course", "uit"]'
+    frontmatter_json  TEXT,                       -- Raw metadata JSON
+    file_mtime        INTEGER NOT NULL,           -- Unix timestamp cho incremental sync
+    content_cache     TEXT NOT NULL DEFAULT '',   -- Bộ đệm nội dung phục vụ FTS5 delete
+    updated_at        INTEGER NOT NULL,
+    note_type         TEXT DEFAULT 'GENERAL',     -- 'ALGO_TRICK', 'ACADEMIC_SUMMARY', 'TEACHING_SHEET', 'ONENOTE_LINK', 'GENERAL'
+    external_uri      TEXT DEFAULT ''
+);
+
+-- Native Vault Full-Text Search Virtual Table (FTS5)
+CREATE VIRTUAL TABLE IF NOT EXISTS vault_fts USING fts5(
+    title,
+    prose,
+    code,
+    content='',
+    tokenize='porter unicode61'
+);
 ```
 
 ---
@@ -273,6 +336,20 @@ Phân giải theo thứ tự ưu tiên 5 tầng bảo đảm tính đúng đắn
 | `toggle_plugin` | `plugins.rs` | Bật/tắt trạng thái phân hệ, kích hoạt recalculate Life Matrix. |
 | `get_system_storage_stats` | `settings.rs` | Trả về dung lượng DB, file WAL và tổng số bản ghi. |
 | `save_setting` | `settings.rs` | Lưu cặp Key-Value vào bảng `settings`. |
+| `get_moodle_courses` | `moodle.rs` | Truy vấn danh sách toàn bộ các môn học Moodle đang lưu trữ trong SQLite. |
+| `get_moodle_tasks` | `moodle.rs` | Lấy danh sách nhiệm vụ/bài tập Moodle (hỗ trợ lọc theo `course_id`). |
+| `get_moodle_materials` | `moodle.rs` | Truy vấn danh mục slide bài giảng, giáo trình PDF theo môn học. |
+| `update_moodle_course_instructor` | `moodle.rs` | Tùy chỉnh thông tin liên hệ giảng viên (họ tên, email, SĐT) cho từng môn. |
+| `ingest_moodle_sync_payload_json` | `moodle.rs` | Ingest nguyên tử dữ liệu môn học, bài tập và tài liệu từ Harvester. |
+| `scan_vault` | `vault.rs` | Quét thư mục Markdown cục bộ, trích xuất wikilinks và đồng bộ FTS5 gia tăng. |
+| `search_vault` | `vault.rs` | Tìm kiếm toàn văn FTS5 tốc độ cao với thuật toán BM25 và snippet highlight. |
+| `get_vault_stats` | `vault.rs` | Lấy số liệu thống kê tổng notes, wikilinks, tags và ghi chú gần đây. |
+| `create_structured_note` | `vault.rs` | Tạo ghi chú cấu trúc mới, ghi file an toàn chống đè và cập nhật FTS5. |
+| `open_onenote_link` | `vault.rs` | Validate an toàn giao thức `onenote:` và mở qua OS shell handler. |
+| `set_vault_path` | `vault.rs` | Lưu đường dẫn thư mục Vault người dùng chọn vào bảng `settings`. |
+| `get_vault_path` | `vault.rs` | Đọc đường dẫn thư mục Vault đang kích hoạt từ bảng `settings`. |
+| `scaffold_semester_vault` | `vault.rs` | Tự động tạo cây thư mục môn học HK2 và ghi chú khởi tạo từ Moodle (Idempotent 100%). |
+| `open_vault_course_folder` | `vault.rs` | Mở trực tiếp thư mục ghi chú của môn học ngoài File Explorer hệ điều hành. |
 
 ---
 
@@ -315,4 +392,92 @@ Phân giải theo thứ tự ưu tiên 5 tầng bảo đảm tính đúng đắn
 - **Phân loại Khối Kiến thức Chính xác**: Ưu tiên phân loại theo tiền tố mã học phần thực tế của UIT (`IT001`, `IT002`, `IT003`, `IT012`, `CS005`, `MA004`, `MA005` hiển thị chính xác là `CS ngành`, không bị gán nhầm thành `Đ.cương`).
 - **Academic Radar Chart Target Baseline**: Bổ sung đa giác tham chiếu mục tiêu chuẩn (Target Baseline 8.5/10.0 nét đứt) ngăn biểu đồ bị co cụm thành một đường đơn điệu; hiển thị nhãn `(Chưa tích lũy)` đối với các khối chưa có điểm.
 - **Viewport Budget & Scrollable Course Table**: Đặt `max-h-[380px] overflow-y-auto` kèm thanh cuộn mỏng chuyên biệt và `sticky thead`, giữ trọn vẹn bố cục Dashboard không bị tràn vỡ khung nhìn.
+
+---
+
+## 7. COURSES ENGINE, NATIVE VAULT & WECODE DEEP-LINK SPECIFICATION (v1.3.0 EXTENSION)
+
+### A. Active Horizon Filter & Zombie Deadlines Elimination (`task_engine.rs` & `UnifiedQuestHub.tsx`)
+- **Bối cảnh & Vấn đề**: Giảng viên import khóa học cũ khiến các bài tập quá hạn từ năm 2021, 2023 (`IT005.R114`) bị kéo lên đầu khối "Khẩn cấp (< 24 giờ / Quá hạn)", làm tăng giả counter đỏ và gây nhiễu loạn ưu tiên học tập.
+- **Mô hình Active Horizon Filter**: Phân loại nhiệm vụ học tập theo 4 mốc thời gian chặt chẽ dựa trên khoảng cách $diff = \text{due\_date} - \text{now}$:
+  1. **Khẩn cấp (`is_urgent = true`)**: $\text{due\_date} \ge \text{now} \land diff \le 86400$ (Còn hạn trong vòng 24 giờ).
+  2. **Quá hạn gần đây (`is_recently_overdue = true`)**: $diff < 0 \land diff \ge -30 \times 86400$ (Quá hạn trong vòng 30 ngày trở lại).
+  3. **Bài tập xác sống / Hết hạn cũ (`is_stale_zombie = true`)**: $diff < -30 \times 86400$ (Quá hạn trên 30 ngày).
+  4. **Luyện tập tự do (`is_open_ended = true`)**: $\text{due\_date} \le 0$ (Bài tập không giới hạn thời gian).
+- **Quy tắc hiển thị & Bảo vệ Counter**:
+  - Khối **"Nhiệm vụ khẩn cấp (< 24 giờ / Quá hạn)"**: CHỈ CHỨA các task thỏa mãn $(is\_urgent \lor is\_recently\_overdue) \land \neg is\_submitted$. Counter đỏ chỉ đếm các task này.
+  - Các task $is\_stale\_zombie$: Tự động đẩy vào tab **"Luyện tập tự do"** / **"Đã đóng"** với nhãn `Đã đóng (Lưu trữ)`. Tuyệt đối KHÔNG làm tăng counter đỏ và KHÔNG render trong khối Khẩn cấp.
+
+### B. Native Vault Auto-Scaffolding Engine (`scaffolder.rs` & `vault.rs`)
+- **Mục tiêu**: Tự động sinh cấu trúc thư mục học kỳ chuẩn hóa và ghi chú môn học cho sinh viên dựa trên danh sách khóa học thực tế từ `moodle_courses`, sẵn sàng cho hệ thống liên kết Wikilinks và tra cứu SQLite FTS5.
+- **Hàm làm sạch tên thư mục (Path Sanitizer)**:
+  - Loại bỏ hoàn toàn các ký tự cấm trên Windows/POSIX: `< > : " / \ | ? *`.
+  - Chuẩn hóa khoảng trắng trùng lặp, trim khoảng trắng và dấu chấm ở cuối để tương thích 100% với Windows File System mà không cần regex nặng nề.
+- **Đặc tả quy trình Auto-Scaffolding**:
+  - Thư mục học kỳ: `{vault_root}/2025-2026_HK2/` (được format từ chuỗi kỳ học `HK2 2025-2026`).
+  - Thư mục môn học: `{CourseBaseCode}_{CleanFullname}` (ví dụ `CS115_Toán cho khoa học máy tính`).
+  - Tệp chỉ mục môn học: `00_{CourseBaseCode}_Index.md` (ví dụ `00_CS115_Index.md`).
+- **Template sườn Markdown chuẩn hóa**:
+  ```markdown
+  ---
+  course_code: "{course_code}"
+  course_name: "{course_name}"
+  semester: "2025-2026_HK2"
+  tags:
+    - course
+    - uit
+  ---
+
+  # {course_name} ({course_code})
+
+  > [!info] THÔNG TIN MÔN HỌC
+  > - **Giảng viên:** {instructor_name}
+  > - **Email:** {instructor_mail} | **SĐT:** {instructor_phone}
+  > - 🌐 [Moodle UIT ↗]({course_url})
+  > - 📂 [Thư mục Google Drive ↗]()
+  > - 🧠 [Không gian ôn thi NotebookLM ↗]()
+
+  ---
+
+  ## 📝 Nhật Ký Bài Giảng
+  - 
+
+  ## 💡 Công Thức & Kiến Thức Cốt Lõi
+  - 
+  ```
+- **Kỷ luật Bất biến Idempotent 100%**:
+  - Kiểm tra `if !index_file.exists()` mới tiến hành ghi file; nếu file đã tồn tại thì BỎ QUA (`skipped_notes += 1`). Tuyệt đối KHÔNG BAO GIỜ ghi đè lên nội dung người dùng đã chỉnh sửa.
+  - Tự động kích hoạt lập chỉ mục FTS5 (`scan_and_sync_vault`) ngay sau khi hoàn thành.
+- **Tích hợp OS File Explorer (`open_vault_course_folder`)**:
+  - Nút `[📂 Mở thư mục Note]` trên màn hình chi tiết môn học của Courses Engine gọi lệnh mở trực tiếp thư mục ngoài Windows Explorer hoặc trình quản lý tệp mặc định của OS qua `open::that`.
+
+### C. Real-time Streaming Sync & Minimized Floating Dock (`SyncMoodleModal.tsx` & `moodle_harvester.js`)
+- **Real-time Streaming**:
+  - Thay vì đợi nạp toàn bộ khóa học xong mới ghi một lần, script cào Moodle gửi ngay danh sách khóa học ban đầu trong vòng 1 giây, sau đó hoàn tất môn nào thì stream payload (`courses`, `tasks`, `materials`) của riêng môn đó về backend ngay lập tức.
+  - Backend phát sự kiện `moodle-data-synced` và `moodle-sync-progress` theo thời gian thực để Courses Dashboard và Unified Quest Hub cập nhật giao diện từng môn một mà không chớp nháy màn hình.
+- **Minimized Floating Dock (Thu nhỏ không che màn hình)**:
+  - Bổ sung nút **Thu nhỏ** (`Minus` icon) trên thanh tiêu đề của modal.
+  - Khi thu nhỏ: Loại bỏ hoàn toàn lớp phủ mờ (`backdrop overlay`), chuyển đổi modal thành một thanh Dock nổi nhỏ gọn ở góc dưới bên phải màn hình (`bottom-6 right-6 z-50`).
+  - Người dùng có thể tiếp tục tự do duyệt bài tập, tra cứu tài liệu trong ứng dụng trong lúc thanh dock hiển thị spinner, phần trăm và tên môn học đang nạp; có nút phóng to (`Maximize2`) để mở lại modal đầy đủ bất kỳ lúc nào.
+
+### D. Deep-Link Wecode -> Quick Note "Algo Trick" (`useQuickCaptureStore.ts` & `QuickCaptureModal.tsx`)
+- **Global Event & Store Dispatcher**:
+  - Sử dụng Zustand store `useQuickCaptureStore` quản lý trạng thái mở modal và cấu trúc dữ liệu `QuickNotePrefill`:
+    ```typescript
+    interface QuickNotePrefill {
+      mode: 'algo' | 'onenote' | 'teaching';
+      title: string;
+      platformLink: string;
+      tags: string[];
+      codeSnippet?: string;
+      prose?: string;
+    }
+    ```
+- **Điểm gắn kết trên Wecode**:
+  - Tại **Danh sách bài tập Wecode (`WecodeProblemList.tsx`)**: Bổ sung nút `[⚡ Lưu Trick]` cạnh nút "Mở đề" trên mỗi hàng bài tập.
+  - Tại **Lịch sử nộp bài Wecode (`WecodeSubmissionsList.tsx`)**: Bổ sung cột và nút `[⚡ Lưu Trick]` trên từng lượt submit.
+- **Luồng hoạt động 1-Click**:
+  - Khi người dùng bấm nút: Modal `QuickCaptureModal` (được mount toàn cục tại `App.tsx`) lập tức mở ra, tự động chuyển tab sang `</> Algo Trick`, điền sẵn tiêu đề bài tập (theo cú pháp chuẩn `[CourseCode] [Assignment] ProblemName`), URL bài tập trên Wecode, tags (`wecode, algo, ...`) và mã nguồn bài nộp tốt nhất.
+  - Người dùng chỉ cần ghi nhận ý tưởng thuật toán và bấm lưu; ghi chú được lưu vào thư mục `vault/algo/` và lập chỉ mục FTS5 ngay lập tức.
+
 

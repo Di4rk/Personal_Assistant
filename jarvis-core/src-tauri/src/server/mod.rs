@@ -341,6 +341,12 @@ async fn handle_sync_moodle(
     Json(payload): Json<crate::db::moodle::MoodleSyncPayload>,
 ) -> impl IntoResponse {
     let db_arc = state.db.clone();
+    let is_final = payload.is_final.unwrap_or(false);
+    let current_course = payload.current_course.clone().unwrap_or_default();
+    let progress_current = payload.progress_current.unwrap_or(0);
+    let progress_total = payload.progress_total.unwrap_or(0);
+    let progress_pct = payload.progress_pct.unwrap_or(0.0);
+
     let commit_res = crate::services::moodle_harvester::MoodleIngestionEngine::commit_moodle_sync(
         db_arc,
         payload,
@@ -348,9 +354,21 @@ async fn handle_sync_moodle(
 
     match commit_res {
         Ok((courses, tasks, materials)) => {
-            println!("[SyncMoodle] Committed {courses} courses, {tasks} tasks, {materials} materials successfully via Browser Sync API!");
-            let _ = state.app.emit("moodle-data-synced", ());
-            let _ = state.app.emit("sso-callback-success", "moodle");
+            println!("[SyncMoodle] Committed {courses} courses, {tasks} tasks, {materials} materials successfully via Browser Sync API! (is_final={is_final})");
+            let _ = state.app.emit("moodle-data-synced", courses);
+            let _ = state.app.emit(
+                "moodle-sync-progress",
+                serde_json::json!({
+                    "current": progress_current,
+                    "total": progress_total,
+                    "course_name": current_course,
+                    "percent": progress_pct,
+                    "is_final": is_final
+                }),
+            );
+            if is_final {
+                let _ = state.app.emit("sso-callback-success", "moodle");
+            }
             (
                 StatusCode::OK,
                 Json(serde_json::json!({

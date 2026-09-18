@@ -10,6 +10,7 @@ import {
   Loader2,
   Plus,
   ExternalLink,
+  Zap,
 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
@@ -19,6 +20,8 @@ import {
   openOnenoteLink,
   getVaultPath,
   setVaultPath as setVaultPathBackend,
+  scaffoldSemesterVault,
+  getMoodleCourses,
 } from "@/lib/tauri-client";
 import type { VaultStatsDto, VaultSearchResultDto, NoteType } from "../types";
 import { QuickCaptureModal } from "./QuickCaptureModal";
@@ -30,6 +33,8 @@ export const VaultDashboard: React.FC = () => {
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [isQuickCaptureOpen, setIsQuickCaptureOpen] = useState<boolean>(false);
+  const [coursesCount, setCoursesCount] = useState<number>(0);
+  const [isScaffolding, setIsScaffolding] = useState<boolean>(false);
 
   // Search state
   const [searchQuery, setSearchQuery] = useState<string>("");
@@ -50,15 +55,43 @@ export const VaultDashboard: React.FC = () => {
     void loadStats();
     void (async () => {
       try {
-        const saved = await getVaultPath();
+        const [saved, moodleCourses] = await Promise.all([
+          getVaultPath().catch(() => null),
+          getMoodleCourses().catch(() => []),
+        ]);
         if (saved) {
           setVaultPath(saved);
         }
+        if (moodleCourses && moodleCourses.length > 0) {
+          setCoursesCount(moodleCourses.length);
+        }
       } catch (err) {
-        console.error("Failed to load vault path:", err);
+        console.error("Failed to load initial vault context:", err);
       }
     })();
   }, [loadStats]);
+
+  const handleScaffoldVault = async () => {
+    if (!vaultPath || !vaultPath.trim()) {
+      setSyncError("Vui lòng chọn thư mục Vault trước khi khởi tạo cấu trúc!");
+      return;
+    }
+    setIsScaffolding(true);
+    setSyncError(null);
+    setSyncMessage(null);
+    try {
+      const res = await scaffoldSemesterVault(vaultPath, "HK2 2025-2026");
+      setSyncMessage(
+        `Khởi tạo HK2 thành công: Đã tạo ${res.createdFolders} thư mục, ${res.createdNotes} ghi chú môn học mới (Bỏ qua ${res.skippedNotes} ghi chú đã tồn tại để tránh ghi đè).`
+      );
+      await loadStats();
+      await triggerScanVault(vaultPath);
+    } catch (err) {
+      setSyncError(typeof err === "string" ? err : "Lỗi khi khởi tạo cấu trúc Vault");
+    } finally {
+      setIsScaffolding(false);
+    }
+  };
 
   const renderNoteTypeBadge = (type?: NoteType | string) => {
     switch (type) {
@@ -215,7 +248,7 @@ export const VaultDashboard: React.FC = () => {
             <button
               onClick={() => triggerScanVault(vaultPath)}
               disabled={isSyncing || !vaultPath.trim()}
-              className="flex items-center justify-center gap-2 px-4 py-1.5 bg-zinc-800 hover:bg-zinc-700 disabled:bg-zinc-900/50 disabled:opacity-50 text-zinc-200 text-xs font-medium rounded-lg transition-colors border border-zinc-700 shadow-sm whitespace-nowrap"
+              className="flex items-center justify-center gap-2 px-4 py-1.5 bg-zinc-800 hover:bg-zinc-700 disabled:bg-zinc-900/50 disabled:opacity-50 text-zinc-200 text-xs font-medium rounded-lg transition-colors border border-zinc-700 shadow-sm whitespace-nowrap cursor-pointer"
             >
               {isSyncing ? (
                 <>
@@ -229,6 +262,27 @@ export const VaultDashboard: React.FC = () => {
                 </>
               )}
             </button>
+            {vaultPath && (
+              <button
+                type="button"
+                onClick={handleScaffoldVault}
+                disabled={isScaffolding || isSyncing}
+                className="flex items-center justify-center gap-1.5 px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-semibold rounded-lg transition-colors shadow-sm whitespace-nowrap border border-indigo-500/40 cursor-pointer"
+                title="Tự động tạo cây thư mục môn học HK2 và ghi chú khởi tạo từ Moodle"
+              >
+                {isScaffolding ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Đang tạo cấu trúc...</span>
+                  </>
+                ) : (
+                  <>
+                    <Zap className="w-3.5 h-3.5 text-amber-300" />
+                    <span>Khởi tạo cấu trúc HK2 ({coursesCount > 0 ? `${coursesCount} môn` : "8 môn"})</span>
+                  </>
+                )}
+              </button>
+            )}
           </div>
         </div>
 

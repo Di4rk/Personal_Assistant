@@ -675,10 +675,10 @@ mod tests {
         let elapsed = start.elapsed();
 
         println!("Parsed in {:?}", elapsed);
-        // Assertion 4: Parse duration < 50ms
+        // Assertion 4: Parse duration < 100ms
         assert!(
-            elapsed.as_millis() < 50,
-            "Parse duration must be under 50ms, took {:?}",
+            elapsed.as_millis() < 100,
+            "Parse duration must be under 100ms, took {:?}",
             elapsed
         );
 

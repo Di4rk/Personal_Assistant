@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useState, useEffect } from "react";
 import { ingestWecodeSubmissionsJson, launchWecodeSsoSync } from "../../../lib/tauri-client";
 import { useTauriEvent } from "../../../hooks/useTauriEvent";
 import { WECODE_BROWSER_SYNC_SCRIPT } from "../utils/browserSyncScripts";
@@ -13,6 +13,9 @@ import {
   Loader2,
   ChevronDown,
   ChevronUp,
+  Minus,
+  Maximize2,
+  X,
 } from "lucide-react";
 
 export interface SyncWecodeModalProps {
@@ -34,6 +37,19 @@ export const SyncWecodeModal: React.FC<SyncWecodeModalProps> = ({
   const [showManualSection, setShowManualSection] = useState<boolean>(false);
   const [showManualInput, setShowManualInput] = useState<boolean>(false);
   const [manualJson, setManualJson] = useState<string>("");
+  const [isMinimized, setIsMinimized] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (isOpen) {
+      setStatus("idle");
+      setIsListening(false);
+      setErrorMessage(null);
+      setSyncedCount(null);
+      setShowManualSection(false);
+      setShowManualInput(false);
+      setIsMinimized(false);
+    }
+  }, [isOpen]);
 
   const handleSyncComplete = useCallback(() => {
     setStatus("completed");
@@ -54,6 +70,8 @@ export const SyncWecodeModal: React.FC<SyncWecodeModalProps> = ({
     setStatus("error");
     setIsListening(false);
   });
+
+  if (!isOpen) return null;
 
   const handleLaunchAutoSync = async () => {
     setErrorMessage(null);
@@ -114,8 +132,98 @@ export const SyncWecodeModal: React.FC<SyncWecodeModalProps> = ({
     setSyncedCount(null);
   };
 
-  if (!isOpen) return null;
+  // CHẾ ĐỘ THU NHỎ (MINIMIZED FLOATING DOCK):
+  if (isMinimized) {
+    return (
+      <div className="fixed bottom-6 right-6 z-50 w-96 max-w-[calc(100vw-3rem)] rounded-xl border border-emerald-800/50 bg-zinc-950/95 p-4 shadow-2xl backdrop-blur-md font-mono text-zinc-100 transition-all duration-200">
+        {/* Header */}
+        <div className="flex items-center justify-between gap-2 border-b border-zinc-800/80 pb-2.5">
+          <div className="flex items-center gap-2 min-w-0">
+            {status === "listening" ? (
+              <Loader2 className="w-4 h-4 shrink-0 animate-spin text-emerald-400" />
+            ) : status === "completed" ? (
+              <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+            ) : status === "error" ? (
+              <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
+            ) : (
+              <Code2 className="w-4 h-4 shrink-0 text-emerald-400" />
+            )}
+            <span className="text-xs font-semibold text-zinc-200 truncate">
+              {status === "listening"
+                ? "Đang đồng bộ Wecode UIT..."
+                : status === "completed"
+                ? "Đồng bộ Wecode hoàn tất"
+                : status === "error"
+                ? "Lỗi đồng bộ Wecode"
+                : "Đồng bộ Wecode UIT"}
+            </span>
+          </div>
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              onClick={() => setIsMinimized(false)}
+              title="Phóng to / Mở lại cửa sổ"
+              className="rounded-lg p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors"
+            >
+              <Maximize2 className="h-3.5 w-3.5" />
+            </button>
+            <button
+              onClick={onClose}
+              title="Đóng"
+              className="rounded-lg p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
 
+        {/* Content */}
+        <div className="pt-2.5">
+          {status === "listening" ? (
+            <div className="space-y-2">
+              <p className="text-xs text-zinc-300 truncate font-medium">
+                Đang chờ bạn đăng nhập & bóc tách bài nộp, điểm số, XP...
+              </p>
+              <div className="flex items-center justify-between text-[11px] text-zinc-500">
+                <span className="flex items-center gap-1.5 text-emerald-400 font-medium">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+                  Đang chạy ngầm
+                </span>
+                <span className="text-zinc-400">Tự động nạp</span>
+              </div>
+            </div>
+          ) : status === "completed" ? (
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-emerald-300">
+                {syncedCount !== null
+                  ? `Đã nạp ${syncedCount} bài nộp.`
+                  : "Toàn bộ bài nộp và XP đã nạp xong!"}
+              </span>
+              <button
+                onClick={() => setIsMinimized(false)}
+                className="text-xs font-semibold text-emerald-400 hover:text-emerald-300 transition-colors"
+              >
+                Xem chi tiết
+              </button>
+            </div>
+          ) : status === "error" ? (
+            <div className="space-y-1">
+              <p className="text-xs text-rose-300 truncate">{errorMessage || "Có lỗi xảy ra"}</p>
+              <button
+                onClick={() => setIsMinimized(false)}
+                className="text-xs font-medium text-rose-400 hover:text-rose-300 underline"
+              >
+                Mở lại để thử lại
+              </button>
+            </div>
+          ) : (
+            <p className="text-xs text-zinc-400">Chưa bắt đầu đồng bộ.</p>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // CHẾ ĐỘ MODAL ĐẦY ĐỦ (FULL DIALOG):
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
       <div className="relative w-full max-w-lg rounded-xl border border-zinc-800 bg-zinc-900 text-zinc-100 shadow-2xl p-6 font-mono">
@@ -134,13 +242,24 @@ export const SyncWecodeModal: React.FC<SyncWecodeModalProps> = ({
               </p>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="text-zinc-400 hover:text-zinc-200 transition-colors p-1.5 rounded-lg hover:bg-zinc-800 text-xs"
-          >
-            ✕
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => setIsMinimized(true)}
+              title="Thu nhỏ cửa sổ (tiếp tục làm việc trong lúc nạp)"
+              className="text-zinc-400 hover:text-zinc-200 transition-colors p-1.5 rounded-lg hover:bg-zinc-800 text-xs"
+            >
+              <Minus className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              title="Đóng"
+              className="text-zinc-400 hover:text-zinc-200 transition-colors p-1.5 rounded-lg hover:bg-zinc-800 text-xs"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
         {/* Content Body */}
@@ -194,7 +313,7 @@ export const SyncWecodeModal: React.FC<SyncWecodeModalProps> = ({
                 </button>
 
                 {isListening && (
-                  <div className="p-3 rounded-lg bg-zinc-950/90 border border-zinc-800 space-y-1.5 text-[11px]">
+                  <div className="p-3 rounded-lg bg-zinc-950/90 border border-zinc-800 space-y-2 text-[11px]">
                     <div className="flex items-center gap-2 text-emerald-400 font-medium">
                       <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping shrink-0" />
                       <span>Cửa sổ Wecode đã mở — Hãy đăng nhập tài khoản UIT</span>
@@ -202,6 +321,19 @@ export const SyncWecodeModal: React.FC<SyncWecodeModalProps> = ({
                     <p className="text-zinc-400 text-[10px] pl-4">
                       Ngay khi đăng nhập xong, hệ thống sẽ tự động bóc tách dữ liệu và đóng cửa sổ.
                     </p>
+                    <div className="flex items-center justify-between pt-1 border-t border-zinc-800/80">
+                      <span className="text-[10px] text-zinc-400">
+                        💡 Bạn có thể thu nhỏ để làm việc khác trong lúc chờ.
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setIsMinimized(true)}
+                        className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-400 hover:text-emerald-300 transition-colors"
+                      >
+                        <Minus className="w-3.5 h-3.5" />
+                        <span>Thu nhỏ</span>
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>

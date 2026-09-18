@@ -36,3 +36,10 @@ export interface VaultSearchResultDto {
   title: string;
   snippet: string;
 }
+
+export interface ScaffoldResultDto {
+  createdFolders: number;
+  createdNotes: number;
+  skippedNotes: number;
+  semesterFolder: string;
+}

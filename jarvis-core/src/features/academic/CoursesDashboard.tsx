@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   BookOpen,
   User,
@@ -15,12 +15,17 @@ import {
   AlertCircle,
   Layers,
   ChevronRight,
+  Edit3,
+  X,
+  Folder,
 } from 'lucide-react';
 import {
   getMoodleCourses,
   getMoodleTasks,
   getMoodleMaterials,
   openExternalUrl,
+  updateMoodleCourseInstructor,
+  openVaultCourseFolder,
   MoodleCourse,
   MoodleTask,
   MoodleMaterial,
@@ -38,39 +43,65 @@ export const CoursesDashboard: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(true);
   const [activeTab, setActiveTab] = useState<'courses' | 'quests'>('courses');
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
+  const [editingCourse, setEditingCourse] = useState<MoodleCourse | null>(null);
   const [copiedField, setCopiedField] = useState<string | null>(null);
 
   const { requestSync, serviceState } = useSyncOrchestratorStore();
   const moodleSync = serviceState.moodle;
   const isSyncing = moodleSync.isSyncing;
+  const [vaultFolderError, setVaultFolderError] = useState<string | null>(null);
 
-  const loadData = async () => {
-    setLoading(true);
+  const handleOpenVaultFolder = async (courseCode: string) => {
+    try {
+      setVaultFolderError(null);
+      await openVaultCourseFolder(courseCode);
+    } catch (err) {
+      console.error('[CoursesDashboard] Lỗi mở thư mục note:', err);
+      setVaultFolderError(typeof err === 'string' ? err : 'Không thể mở thư mục ghi chú môn học');
+      setTimeout(() => setVaultFolderError(null), 4000);
+    }
+  };
+
+  const refreshCourseDetails = useCallback(async (courseId: number) => {
+    try {
+      const [taskList, materialList] = await Promise.all([
+        getMoodleTasks(courseId).catch(() => []),
+        getMoodleMaterials(courseId).catch(() => []),
+      ]);
+      setTasks(taskList);
+      setMaterials(materialList);
+    } catch (err) {
+      console.error('[CoursesDashboard] Lỗi tải chi tiết môn học:', err);
+    }
+  }, []);
+
+  const loadData = useCallback(async (showLoadingSpinner: boolean = true) => {
+    if (showLoadingSpinner) setLoading(true);
     try {
       const courseList = await getMoodleCourses();
       setCourses(courseList);
       if (courseList.length > 0) {
-        // Keep current selected course or default to first
         setSelectedCourseId((prev) => {
-          if (prev && courseList.some((c) => c.course_id === prev)) {
-            return prev;
-          }
-          return courseList[0].course_id;
+          const targetId = (prev && courseList.some((c) => c.course_id === prev))
+            ? prev
+            : courseList[0].course_id;
+          refreshCourseDetails(targetId);
+          return targetId;
         });
       }
     } catch (err) {
       console.error('[CoursesDashboard] Lỗi tải môn học Moodle:', err);
     } finally {
-      setLoading(false);
+      if (showLoadingSpinner) setLoading(false);
     }
-  };
+  }, [refreshCourseDetails]);
 
   useEffect(() => {
-    loadData();
-  }, []);
+    loadData(true);
+  }, [loadData]);
 
   useTauriEvent('moodle-data-synced', () => {
-    loadData();
+    loadData(false);
   });
 
   // Load tasks & materials for selected course
@@ -119,7 +150,11 @@ export const CoursesDashboard: React.FC = () => {
   };
 
   const handleSyncClick = async () => {
-    await requestSync('moodle', { bypassTtl: true });
+    if (courses.length === 0 || moodleSync.authStatus === 'expired') {
+      setIsModalOpen(true);
+    } else {
+      await requestSync('moodle', { bypassTtl: true });
+    }
   };
 
   const formatRemainingTime = (dueTs: number): string => {
@@ -169,11 +204,40 @@ export const CoursesDashboard: React.FC = () => {
         </span>
       );
     }
+    if (type === 'url' || type === 'link') {
+      return (
+        <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-indigo-500/15 text-indigo-400 border border-indigo-500/30">
+          URL
+        </span>
+      );
+    }
     return (
       <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
-        LINK
+        FILE
       </span>
     );
+  };
+
+  const handleSaveInstructor = async (
+    courseId: number,
+    name: string,
+    mail: string,
+    phone: string
+  ) => {
+    await updateMoodleCourseInstructor(courseId, name, mail, phone);
+    setCourses((prev) =>
+      prev.map((c) =>
+        c.course_id === courseId
+          ? {
+              ...c,
+              instructor_name: name,
+              instructor_mail: mail,
+              instructor_phone: phone,
+            }
+          : c
+      )
+    );
+    setEditingCourse(null);
   };
 
   return (
@@ -351,15 +415,41 @@ export const CoursesDashboard: React.FC = () => {
                       <h2 className="text-base font-bold text-white mt-1">{selectedCourse.fullname}</h2>
                     </div>
 
-                    <button
-                      onClick={() => openExternalUrl(selectedCourse.course_url)}
-                      className="flex items-center gap-1 text-xs text-sky-400 hover:text-sky-300 self-start sm:self-center transition-colors"
-                      title="Mở trực tiếp trên Moodle UIT"
-                    >
-                      <span>Mở Moodle</span>
-                      <ExternalLink className="h-3.5 w-3.5" />
-                    </button>
+                    <div className="flex items-center gap-2 self-start sm:self-center">
+                      <button
+                        onClick={() => handleOpenVaultFolder(selectedCourse.course_code)}
+                        className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-purple-800/60 bg-purple-950/40 hover:bg-purple-900/50 text-xs text-purple-300 transition-colors cursor-pointer"
+                        title="Mở thư mục ghi chú của môn học ngoài File Explorer"
+                      >
+                        <Folder className="h-3.5 w-3.5 text-purple-400" />
+                        <span>Mở thư mục Note</span>
+                      </button>
+
+                      <button
+                        onClick={() => setEditingCourse(selectedCourse)}
+                        className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-xs text-zinc-200 transition-colors cursor-pointer"
+                        title="Tùy chỉnh thông tin liên hệ giảng viên"
+                      >
+                        <Edit3 className="h-3.5 w-3.5 text-sky-400" />
+                        <span>Sửa thông tin</span>
+                      </button>
+
+                      <button
+                        onClick={() => openExternalUrl(selectedCourse.course_url)}
+                        className="flex items-center gap-1 text-xs text-sky-400 hover:text-sky-300 transition-colors"
+                        title="Mở trực tiếp trên Moodle UIT"
+                      >
+                        <span>Mở Moodle</span>
+                        <ExternalLink className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
                   </div>
+
+                  {vaultFolderError && (
+                    <div className="text-xs text-rose-400 bg-rose-950/40 border border-rose-900/60 px-3 py-2 rounded-lg">
+                      {vaultFolderError}
+                    </div>
+                  )}
 
                   {/* Instructor Contacts Card */}
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -553,9 +643,13 @@ export const CoursesDashboard: React.FC = () => {
                                 <button
                                   onClick={() => openExternalUrl(mat.file_url)}
                                   className="text-zinc-500 hover:text-sky-400 p-1 transition-colors shrink-0"
-                                  title="Mở hoặc tải file"
+                                  title={mat.file_type === 'url' ? 'Mở liên kết' : 'Mở hoặc tải file'}
                                 >
-                                  <Download className="h-3.5 w-3.5" />
+                                  {mat.file_type === 'url' ? (
+                                    <ExternalLink className="h-3.5 w-3.5 text-indigo-400" />
+                                  ) : (
+                                    <Download className="h-3.5 w-3.5" />
+                                  )}
                                 </button>
                               </div>
                             ))}
@@ -583,6 +677,142 @@ export const CoursesDashboard: React.FC = () => {
           loadData();
         }}
       />
+
+      {/* Edit Instructor Modal */}
+      <EditInstructorModal
+        course={editingCourse}
+        isOpen={Boolean(editingCourse)}
+        onClose={() => setEditingCourse(null)}
+        onSave={handleSaveInstructor}
+      />
+    </div>
+  );
+};
+
+interface EditInstructorModalProps {
+  course: MoodleCourse | null;
+  isOpen: boolean;
+  onClose: () => void;
+  onSave: (courseId: number, name: string, mail: string, phone: string) => Promise<void>;
+}
+
+const EditInstructorModal: React.FC<EditInstructorModalProps> = ({
+  course,
+  isOpen,
+  onClose,
+  onSave,
+}) => {
+  const [name, setName] = useState('');
+  const [mail, setMail] = useState('');
+  const [phone, setPhone] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    if (course) {
+      setName(course.instructor_name || '');
+      setMail(course.instructor_mail || '');
+      setPhone(course.instructor_phone || '');
+    }
+  }, [course]);
+
+  if (!isOpen || !course) return null;
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSaving(true);
+    try {
+      await onSave(course.course_id, name.trim(), mail.trim(), phone.trim());
+      onClose();
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+      <div className="w-full max-w-md rounded-xl border border-zinc-800 bg-zinc-950 p-6 shadow-2xl space-y-5">
+        <div className="flex items-center justify-between border-b border-zinc-800 pb-3.5">
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-sky-500/10 text-sky-400 border border-sky-500/20">
+              <User className="h-5 w-5" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-white">Tùy chỉnh thông tin giảng viên</h3>
+              <p className="text-[11px] font-mono text-zinc-400">
+                {course.course_code} - {course.fullname}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-white transition-colors"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4 text-xs">
+          <div className="space-y-1.5">
+            <label className="text-zinc-400 font-medium">Họ và tên giảng viên</label>
+            <div className="relative">
+              <User className="absolute left-3 top-2.5 h-3.5 w-3.5 text-zinc-500" />
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="VD: TS. Nguyễn Văn A"
+                className="w-full rounded-lg border border-zinc-800 bg-zinc-900 py-2 pl-9 pr-3 text-xs text-zinc-200 placeholder-zinc-600 focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-zinc-400 font-medium">Email liên hệ</label>
+            <div className="relative">
+              <Mail className="absolute left-3 top-2.5 h-3.5 w-3.5 text-zinc-500" />
+              <input
+                type="text"
+                value={mail}
+                onChange={(e) => setMail(e.target.value)}
+                placeholder="VD: anguyen@uit.edu.vn"
+                className="w-full rounded-lg border border-zinc-800 bg-zinc-900 py-2 pl-9 pr-3 text-xs text-zinc-200 placeholder-zinc-600 focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-zinc-400 font-medium">Số điện thoại / Zalo</label>
+            <div className="relative">
+              <Phone className="absolute left-3 top-2.5 h-3.5 w-3.5 text-zinc-500" />
+              <input
+                type="text"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="VD: 0909 123 456"
+                className="w-full rounded-lg border border-zinc-800 bg-zinc-900 py-2 pl-9 pr-3 text-xs text-zinc-200 placeholder-zinc-600 focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500"
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-zinc-800/60">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-3 py-1.5 rounded-lg border border-zinc-800 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 font-medium transition-colors"
+            >
+              Hủy
+            </button>
+            <button
+              type="submit"
+              disabled={isSaving}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-semibold transition-colors disabled:opacity-50"
+            >
+              <Check className="h-3.5 w-3.5" />
+              <span>{isSaving ? 'Đang lưu...' : 'Lưu thông tin'}</span>
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 };
