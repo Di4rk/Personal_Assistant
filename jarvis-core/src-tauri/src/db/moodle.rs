@@ -32,6 +32,10 @@ pub struct MoodleTaskRecord {
     pub course_code: Option<String>,
 }
 
+fn default_download_status() -> String {
+    "online_only".to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MoodleMaterialRecord {
     pub id: i64,
@@ -41,6 +45,37 @@ pub struct MoodleMaterialRecord {
     pub file_url: String,
     pub file_type: String,
     pub created_at: i64,
+    #[serde(default)]
+    pub local_file_path: String,
+    #[serde(default = "default_download_status")]
+    pub download_status: String, // 'online_only' | 'downloading' | 'synced' | 'failed'
+    #[serde(default)]
+    pub file_size_bytes: i64,
+}
+
+impl MoodleMaterialRecord {
+    pub fn new_online(
+        id: i64,
+        course_id: i64,
+        section_name: String,
+        title: String,
+        file_url: String,
+        file_type: String,
+        created_at: i64,
+    ) -> Self {
+        Self {
+            id,
+            course_id,
+            section_name,
+            title,
+            file_url,
+            file_type,
+            created_at,
+            local_file_path: String::new(),
+            download_status: "online_only".to_string(),
+            file_size_bytes: 0,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -163,7 +198,7 @@ pub fn commit_moodle_payload(
         }
     }
 
-    // 3. Upsert moodle_materials (xóa materials cũ của các course trong payload để tránh duplicates)
+    // 3. Upsert moodle_materials (xóa materials cũ của các course trong payload để tránh duplicates, bảo toàn file offline đã tải)
     let mut mat_count = 0;
     {
         let mut course_ids_touched = std::collections::HashSet::new();
@@ -171,11 +206,37 @@ pub fn commit_moodle_payload(
             course_ids_touched.insert(m.course_id);
         }
 
+        // Cache existing downloaded metadata: (course_id, file_url) -> (local_file_path, download_status, file_size_bytes)
+        let mut existing_offline: std::collections::HashMap<(i64, String), (String, String, i64)> =
+            std::collections::HashMap::new();
+        for cid in &course_ids_touched {
+            let mut sel = tx
+                .prepare("SELECT file_url, local_file_path, download_status, file_size_bytes FROM moodle_materials WHERE course_id = ?1")
+                .map_err(|e| format!("Prepare query offline materials: {e}"))?;
+            let rows = sel
+                .query_map(params![cid], |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, String>(2)?,
+                        r.get::<_, i64>(3)?,
+                    ))
+                })
+                .map_err(|e| format!("Query offline materials error: {e}"))?;
+            for r in rows {
+                if let Ok((url, path, status, size)) = r {
+                    if !path.is_empty() || status == "synced" {
+                        existing_offline.insert((*cid, url), (path, status, size));
+                    }
+                }
+            }
+        }
+
         let mut del_stmt = tx
             .prepare("DELETE FROM moodle_materials WHERE course_id = ?1")
             .map_err(|e| format!("Prepare del materials error: {e}"))?;
 
-        for cid in course_ids_touched {
+        for cid in &course_ids_touched {
             del_stmt
                 .execute(params![cid])
                 .map_err(|e| format!("Execute del materials for course {cid} error: {e}"))?;
@@ -185,14 +246,31 @@ pub fn commit_moodle_payload(
             .prepare(
                 r#"
                 INSERT INTO moodle_materials (
-                    course_id, section_name, title, file_url, file_type, created_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                    course_id, section_name, title, file_url, file_type, created_at,
+                    local_file_path, download_status, file_size_bytes
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
                 "#,
             )
             .map_err(|e| format!("Prepare insert material error: {e}"))?;
 
         for m in &payload.materials {
             let created_at = if m.created_at > 0 { m.created_at } else { now_ts };
+            let (local_path, dl_status, file_size) = if let Some((p, s, sz)) =
+                existing_offline.get(&(m.course_id, m.file_url.clone()))
+            {
+                (p.clone(), s.clone(), *sz)
+            } else {
+                (
+                    m.local_file_path.clone(),
+                    if m.download_status.is_empty() {
+                        "online_only".to_string()
+                    } else {
+                        m.download_status.clone()
+                    },
+                    m.file_size_bytes,
+                )
+            };
+
             ins_stmt
                 .execute(params![
                     m.course_id,
@@ -201,6 +279,9 @@ pub fn commit_moodle_payload(
                     m.file_url,
                     m.file_type,
                     created_at,
+                    local_path,
+                    dl_status,
+                    file_size,
                 ])
                 .map_err(|e| format!("Execute insert material error: {e}"))?;
             mat_count += 1;
@@ -322,7 +403,8 @@ pub fn get_moodle_materials(
     crate::db::schema::ensure_moodle_schema(conn)?;
     let mut stmt = conn.prepare(
         r#"
-        SELECT id, course_id, section_name, title, file_url, file_type, created_at
+        SELECT id, course_id, section_name, title, file_url, file_type, created_at,
+               local_file_path, download_status, file_size_bytes
         FROM moodle_materials
         WHERE course_id = ?1
         ORDER BY id ASC
@@ -338,6 +420,9 @@ pub fn get_moodle_materials(
             file_url: row.get(4)?,
             file_type: row.get(5)?,
             created_at: row.get(6)?,
+            local_file_path: row.get(7)?,
+            download_status: row.get(8)?,
+            file_size_bytes: row.get(9)?,
         })
     })?;
 
@@ -346,6 +431,61 @@ pub fn get_moodle_materials(
         list.push(r?);
     }
     Ok(list)
+}
+
+pub fn get_material_by_id(
+    conn: &Connection,
+    material_id: i64,
+) -> SqlResult<Option<MoodleMaterialRecord>> {
+    crate::db::schema::ensure_moodle_schema(conn)?;
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT id, course_id, section_name, title, file_url, file_type, created_at,
+               local_file_path, download_status, file_size_bytes
+        FROM moodle_materials
+        WHERE id = ?1
+        "#,
+    )?;
+
+    let mut rows = stmt.query_map(params![material_id], |row| {
+        Ok(MoodleMaterialRecord {
+            id: row.get(0)?,
+            course_id: row.get(1)?,
+            section_name: row.get(2)?,
+            title: row.get(3)?,
+            file_url: row.get(4)?,
+            file_type: row.get(5)?,
+            created_at: row.get(6)?,
+            local_file_path: row.get(7)?,
+            download_status: row.get(8)?,
+            file_size_bytes: row.get(9)?,
+        })
+    })?;
+
+    if let Some(r) = rows.next() {
+        Ok(Some(r?))
+    } else {
+        Ok(None)
+    }
+}
+
+pub fn update_material_download_status(
+    conn: &Connection,
+    material_id: i64,
+    download_status: &str,
+    local_file_path: &str,
+    file_size_bytes: i64,
+) -> SqlResult<()> {
+    crate::db::schema::ensure_moodle_schema(conn)?;
+    conn.execute(
+        r#"
+        UPDATE moodle_materials
+        SET download_status = ?1, local_file_path = ?2, file_size_bytes = ?3
+        WHERE id = ?4
+        "#,
+        params![download_status, local_file_path, file_size_bytes, material_id],
+    )?;
+    Ok(())
 }
 
 pub fn update_moodle_course_instructor(
@@ -427,15 +567,15 @@ mod tests {
                 },
             ],
             materials: vec![
-                MoodleMaterialRecord {
-                    id: 1,
-                    course_id: 1289,
-                    section_name: "Tuần 2".to_string(),
-                    title: "C1_Slide BG".to_string(),
-                    file_url: "https://courses.uit.edu.vn/slide.pdf".to_string(),
-                    file_type: "pdf".to_string(),
-                    created_at: 1789662966,
-                },
+                MoodleMaterialRecord::new_online(
+                    1,
+                    1289,
+                    "Tuần 2".to_string(),
+                    "C1_Slide BG".to_string(),
+                    "https://courses.uit.edu.vn/slide.pdf".to_string(),
+                    "pdf".to_string(),
+                    1789662966,
+                ),
             ],
             ..Default::default()
         };

@@ -36,7 +36,7 @@ fastembed = "4"
 
 # --- Local HTTP server (nhận webhook từ Chrome extension) ---
 axum = "0.7"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "io-util"] }
 tokio-util = "0.7"
 tower-http = { version = "0.5", features = ["cors"] }
 
@@ -58,6 +58,7 @@ walkdir = "2.4"
 open = "5.3"
 serde_yaml = "0.9"
 regex = "1"
+notify = "6.1"
 
 # --- Lightweight HTTP parser cho sync server loopback (không kéo axum/actix) ---
 httparse = "1.8"

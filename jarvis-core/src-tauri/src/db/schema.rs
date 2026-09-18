@@ -355,18 +355,44 @@ pub fn ensure_moodle_schema(conn: &Connection) -> SqlResult<()> {
 
         -- 3. Slide & Tài liệu học tập môn học
         CREATE TABLE IF NOT EXISTS moodle_materials (
-            id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            course_id    INTEGER NOT NULL,
-            section_name TEXT NOT NULL,               -- 'Chung', 'Tuần 1', 'Tuần 2'
-            title        TEXT NOT NULL,               -- 'C1_Slide BG'
-            file_url     TEXT NOT NULL,
-            file_type    TEXT NOT NULL,               -- 'pdf', 'pptx', 'docx', 'link'
-            created_at   INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            course_id         INTEGER NOT NULL,
+            section_name      TEXT NOT NULL,               -- 'Chung', 'Tuần 1', 'Tuần 2'
+            title             TEXT NOT NULL,               -- 'C1_Slide BG'
+            file_url          TEXT NOT NULL,
+            file_type         TEXT NOT NULL,               -- 'pdf', 'pptx', 'docx', 'link'
+            created_at        INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+            local_file_path   TEXT NOT NULL DEFAULT '',
+            download_status   TEXT NOT NULL DEFAULT 'online_only', -- 'online_only' | 'downloading' | 'synced' | 'failed'
+            file_size_bytes   INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY(course_id) REFERENCES moodle_courses(course_id) ON DELETE CASCADE
         );
         CREATE INDEX IF NOT EXISTS idx_moodle_mat_course ON moodle_materials(course_id);
         "#,
     )?;
+
+    // Idempotent migrations cho các DB đã tồn tại trước v0.5.0
+    let has_local_file_path: bool = conn
+        .prepare("SELECT 1 FROM pragma_table_info('moodle_materials') WHERE name = 'local_file_path'")?
+        .exists([])?;
+    if !has_local_file_path {
+        conn.execute("ALTER TABLE moodle_materials ADD COLUMN local_file_path TEXT NOT NULL DEFAULT '';", [])?;
+    }
+
+    let has_download_status: bool = conn
+        .prepare("SELECT 1 FROM pragma_table_info('moodle_materials') WHERE name = 'download_status'")?
+        .exists([])?;
+    if !has_download_status {
+        conn.execute("ALTER TABLE moodle_materials ADD COLUMN download_status TEXT NOT NULL DEFAULT 'online_only';", [])?;
+    }
+
+    let has_file_size_bytes: bool = conn
+        .prepare("SELECT 1 FROM pragma_table_info('moodle_materials') WHERE name = 'file_size_bytes'")?
+        .exists([])?;
+    if !has_file_size_bytes {
+        conn.execute("ALTER TABLE moodle_materials ADD COLUMN file_size_bytes INTEGER NOT NULL DEFAULT 0;", [])?;
+    }
+
     Ok(())
 }
 

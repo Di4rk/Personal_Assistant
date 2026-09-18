@@ -70,6 +70,160 @@ pub fn update_moodle_course_instructor(
     .map_err(|e| format!("Update moodle course instructor error: {e}"))
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct MaterialDownloadProgress {
+    pub course_id: i64,
+    pub current: usize,
+    pub total: usize,
+    pub filename: String,
+}
+
+#[tauri::command]
+pub async fn download_course_materials(
+    app: tauri::AppHandle,
+    db: State<'_, SharedDb>,
+    course_id: i64,
+    vault_root: String,
+) -> Result<usize, String> {
+    use tauri::Emitter;
+
+    let (cookie_header, slides_dir, to_download) = {
+        let conn = db.lock().map_err(|e| format!("DB lock error: {e}"))?;
+
+        // Trích xuất cookie nếu đã lưu trong settings
+        let cookie: String = conn
+            .query_row(
+                "SELECT value FROM settings WHERE key IN ('moodle_session', 'moodle_cookie') LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or_default();
+
+        let slides_dir = crate::modules::academic::material_downloader::resolve_course_slides_dir(
+            std::path::Path::new(&vault_root),
+            course_id,
+            &conn,
+        )?;
+
+        let materials = crate::db::moodle::get_moodle_materials(&conn, course_id)
+            .map_err(|e| format!("Lỗi đọc danh sách tài liệu: {e}"))?;
+
+        let to_download: Vec<MoodleMaterialRecord> = materials
+            .into_iter()
+            .filter(|m| m.file_type != "url" && m.file_type != "link")
+            .filter(|m| {
+                m.download_status != "synced"
+                    || m.local_file_path.is_empty()
+                    || !std::path::Path::new(&m.local_file_path).exists()
+            })
+            .collect();
+
+        (cookie, slides_dir, to_download)
+    };
+
+    if to_download.is_empty() {
+        return Ok(0);
+    }
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(45))
+        .build()
+        .map_err(|e| format!("Lỗi tạo HTTP client: {e}"))?;
+
+    let total = to_download.len();
+    let mut downloaded_count = 0;
+
+    for (idx, mat) in to_download.iter().enumerate() {
+        let filename = crate::modules::academic::material_downloader::sanitize_material_filename(
+            &mat.title,
+            &mat.file_type,
+            &mat.file_url,
+        );
+        let target_path = slides_dir.join(&filename);
+
+        // Đánh dấu trạng thái downloading trong DB
+        {
+            if let Ok(conn) = db.lock() {
+                let _ = crate::db::moodle::update_material_download_status(
+                    &conn,
+                    mat.id,
+                    "downloading",
+                    "",
+                    0,
+                );
+            }
+        }
+
+        let _ = app.emit(
+            "moodle-material-download-progress",
+            MaterialDownloadProgress {
+                course_id,
+                current: idx + 1,
+                total,
+                filename: filename.clone(),
+            },
+        );
+
+        match crate::modules::academic::material_downloader::download_single_material(
+            &client,
+            &cookie_header,
+            &mat.file_url,
+            &target_path,
+        )
+        .await
+        {
+            Ok(bytes) => {
+                let path_str = target_path.to_string_lossy().to_string();
+                if let Ok(conn) = db.lock() {
+                    let _ = crate::db::moodle::update_material_download_status(
+                        &conn,
+                        mat.id,
+                        "synced",
+                        &path_str,
+                        bytes as i64,
+                    );
+                }
+                downloaded_count += 1;
+            }
+            Err(e) => {
+                eprintln!("[moodle-download] Lỗi tải tài liệu {}: {e}", mat.title);
+                if let Ok(conn) = db.lock() {
+                    let _ = crate::db::moodle::update_material_download_status(
+                        &conn,
+                        mat.id,
+                        "failed",
+                        "",
+                        0,
+                    );
+                }
+            }
+        }
+    }
+
+    Ok(downloaded_count)
+}
+
+#[tauri::command]
+pub fn open_local_material(
+    db: State<'_, SharedDb>,
+    material_id: i64,
+) -> Result<(), String> {
+    let conn = db.lock().map_err(|e| format!("DB lock error: {e}"))?;
+    let material = crate::db::moodle::get_material_by_id(&conn, material_id)
+        .map_err(|e| format!("Lỗi truy vấn tài liệu: {e}"))?
+        .ok_or_else(|| format!("Không tìm thấy tài liệu với ID {material_id}"))?;
+
+    let path = std::path::Path::new(&material.local_file_path);
+    if !path.exists() {
+        return Err(format!(
+            "File tài liệu không tồn tại trên đĩa tại: {}",
+            material.local_file_path
+        ));
+    }
+
+    open::that(path).map_err(|e| format!("Lỗi mở file tài liệu: {e}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

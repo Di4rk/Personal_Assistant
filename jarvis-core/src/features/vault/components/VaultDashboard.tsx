@@ -22,7 +22,11 @@ import {
   setVaultPath as setVaultPathBackend,
   scaffoldSemesterVault,
   getMoodleCourses,
+  startVaultWatcher,
+  getVaultWatcherStatus,
+  VaultSyncEvent,
 } from "@/lib/tauri-client";
+import { useTauriEvent } from "@/hooks/useTauriEvent";
 import type { VaultStatsDto, VaultSearchResultDto, NoteType } from "../types";
 import { QuickCaptureModal } from "./QuickCaptureModal";
 
@@ -35,6 +39,8 @@ export const VaultDashboard: React.FC = () => {
   const [isQuickCaptureOpen, setIsQuickCaptureOpen] = useState<boolean>(false);
   const [coursesCount, setCoursesCount] = useState<number>(0);
   const [isScaffolding, setIsScaffolding] = useState<boolean>(false);
+  const [isWatcherActive, setIsWatcherActive] = useState<boolean>(false);
+  const [lastSyncedFile, setLastSyncedFile] = useState<string | null>(null);
 
   // Search state
   const [searchQuery, setSearchQuery] = useState<string>("");
@@ -70,6 +76,40 @@ export const VaultDashboard: React.FC = () => {
       }
     })();
   }, [loadStats]);
+
+  // Lắng nghe sự kiện đồng bộ thời gian thực từ Rust Vault Watcher (debounce 800ms)
+  useTauriEvent<VaultSyncEvent>("vault-sync-event", (payload) => {
+    setIsWatcherActive(true);
+    setLastSyncedFile(payload.updated_file);
+    setStats((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        totalNotes: payload.total_notes,
+        totalTags: payload.distinct_tags,
+      };
+    });
+    void loadStats();
+    setTimeout(() => setLastSyncedFile(null), 3000);
+  });
+
+  // Tự động khởi động / kiểm tra Watcher khi vaultPath thay đổi
+  useEffect(() => {
+    if (vaultPath && vaultPath.trim()) {
+      void (async () => {
+        try {
+          await startVaultWatcher(vaultPath.trim());
+          setIsWatcherActive(true);
+        } catch (err) {
+          console.error("Failed to start vault watcher:", err);
+          const active = await getVaultWatcherStatus().catch(() => false);
+          setIsWatcherActive(active);
+        }
+      })();
+    } else {
+      setIsWatcherActive(false);
+    }
+  }, [vaultPath]);
 
   const handleScaffoldVault = async () => {
     if (!vaultPath || !vaultPath.trim()) {
@@ -189,9 +229,16 @@ export const VaultDashboard: React.FC = () => {
     try {
       const selected = await open({ directory: true, multiple: false });
       if (selected && typeof selected === "string") {
-        setVaultPath(selected);
-        await setVaultPathBackend(selected);
-        await triggerScanVault(selected);
+        const clean = selected.trim();
+        setVaultPath(clean);
+        await setVaultPathBackend(clean);
+        try {
+          await startVaultWatcher(clean);
+          setIsWatcherActive(true);
+        } catch (watcherErr) {
+          console.error("Failed to start watcher on chosen directory:", watcherErr);
+        }
+        await triggerScanVault(clean);
       }
     } catch (err) {
       console.error("Error picking vault directory:", err);
@@ -216,7 +263,7 @@ export const VaultDashboard: React.FC = () => {
             </p>
           </div>
 
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full md:w-auto">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full md:w-auto flex-wrap">
             <div className="flex items-center gap-2">
               <button
                 type="button"
@@ -240,7 +287,7 @@ export const VaultDashboard: React.FC = () => {
             </div>
             <button
               onClick={() => setIsQuickCaptureOpen(true)}
-              className="flex items-center justify-center gap-1.5 px-3.5 py-1.5 bg-violet-600 hover:bg-violet-500 text-white text-xs font-medium rounded-lg transition-colors shadow-sm whitespace-nowrap"
+              className="flex items-center justify-center gap-1.5 px-3.5 py-1.5 bg-violet-600 hover:bg-violet-500 text-white text-xs font-medium rounded-lg transition-colors shadow-sm whitespace-nowrap cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>+ Quick Note</span>
@@ -262,6 +309,29 @@ export const VaultDashboard: React.FC = () => {
                 </>
               )}
             </button>
+
+            {/* Live Watcher Status Badge */}
+            {isWatcherActive && vaultPath ? (
+              <span
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-950/60 text-emerald-400 border border-emerald-800/40 shadow-sm whitespace-nowrap"
+                title={`Live Watcher đang chạy. Tự động đồng bộ FTS5 theo thời gian thực từ: ${vaultPath}`}
+              >
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                </span>
+                <span>🟢 Tự động đồng bộ (Live Watcher)</span>
+              </span>
+            ) : (
+              <span
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-zinc-900 text-zinc-400 border border-zinc-800 shadow-sm whitespace-nowrap"
+                title={vaultPath ? "Live Watcher đang dừng hoặc chưa kết nối" : "Chưa chọn thư mục Vault"}
+              >
+                <span className="h-2 w-2 rounded-full bg-zinc-500"></span>
+                <span>⚪ Chưa kích hoạt</span>
+              </span>
+            )}
+
             {vaultPath && (
               <button
                 type="button"
@@ -286,7 +356,13 @@ export const VaultDashboard: React.FC = () => {
           </div>
         </div>
 
-        {/* Sync status messages */}
+        {/* Sync status messages & Live Watcher toast */}
+        {lastSyncedFile && (
+          <div className="mt-3 text-xs text-emerald-300 bg-emerald-950/60 border border-emerald-800/60 px-3 py-2 rounded-lg flex items-center gap-2">
+            <span className="h-2 w-2 rounded-full bg-emerald-400 animate-ping"></span>
+            <span>Live Watcher đã cập nhật index cho ghi chú: <strong className="font-mono">{lastSyncedFile}</strong></span>
+          </div>
+        )}
         {syncMessage && (
           <div className="mt-3 text-xs text-emerald-400 bg-emerald-950/40 border border-emerald-900/60 px-3 py-2 rounded-lg">
             {syncMessage}

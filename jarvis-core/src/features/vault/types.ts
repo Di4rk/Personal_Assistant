@@ -43,3 +43,9 @@ export interface ScaffoldResultDto {
   skippedNotes: number;
   semesterFolder: string;
 }
+
+export interface VaultSyncEvent {
+  total_notes: number;
+  distinct_tags: number;
+  updated_file: string;
+}

@@ -480,6 +480,39 @@ pub async fn open_vault_course_folder(
     Ok(())
 }
 
+/// Starts real-time incremental watcher on the vault directory.
+#[tauri::command]
+pub async fn start_vault_watcher(
+    app: tauri::AppHandle,
+    db: tauri::State<'_, SharedDb>,
+    watcher_state: tauri::State<'_, crate::modules::vault::VaultWatcherState>,
+    vault_path: String,
+) -> Result<bool, String> {
+    crate::modules::vault::start_vault_watcher(
+        app,
+        vault_path,
+        &watcher_state,
+        db.inner().clone(),
+    )
+    .await
+}
+
+/// Stops the real-time incremental watcher on the vault directory.
+#[tauri::command]
+pub async fn stop_vault_watcher(
+    watcher_state: tauri::State<'_, crate::modules::vault::VaultWatcherState>,
+) -> Result<(), String> {
+    crate::modules::vault::stop_vault_watcher(&watcher_state).await
+}
+
+/// Queries whether the real-time vault watcher is currently running.
+#[tauri::command]
+pub async fn get_vault_watcher_status(
+    watcher_state: tauri::State<'_, crate::modules::vault::VaultWatcherState>,
+) -> Result<bool, String> {
+    Ok(crate::modules::vault::get_vault_watcher_status(&watcher_state).await)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

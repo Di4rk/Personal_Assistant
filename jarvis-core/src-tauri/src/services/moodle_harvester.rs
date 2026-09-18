@@ -380,15 +380,15 @@ pub fn parse_moodle_course_html(
                         "pdf" // default document type
                     };
 
-                    materials.push(MoodleMaterialRecord {
-                        id: 0,
+                    materials.push(MoodleMaterialRecord::new_online(
+                        0,
                         course_id,
-                        section_name: sec_name.clone(),
-                        title: clean_title,
-                        file_url: url,
-                        file_type: file_type.to_string(),
-                        created_at: now_ts,
-                    });
+                        sec_name.clone(),
+                        clean_title,
+                        url,
+                        file_type.to_string(),
+                        now_ts,
+                    ));
                 }
             }
         }

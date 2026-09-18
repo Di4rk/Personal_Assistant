@@ -587,6 +587,22 @@ export interface MoodleMaterial {
   file_url: string;
   file_type: string;
   created_at: number;
+  local_file_path?: string;
+  download_status?: 'online_only' | 'downloading' | 'synced' | 'failed';
+  file_size_bytes?: number;
+}
+
+export interface MaterialDownloadProgress {
+  course_id: number;
+  current: number;
+  total: number;
+  filename: string;
+}
+
+export interface VaultSyncEvent {
+  total_notes: number;
+  distinct_tags: number;
+  updated_file: string;
 }
 
 export interface MoodleSyncPayload {
@@ -631,5 +647,43 @@ export async function updateMoodleCourseInstructor(
     instructorMail,
     instructorPhone,
   });
+}
+
+/**
+ * Tải toàn bộ tài liệu slide offline của một môn học về thư mục Vault.
+ */
+export async function downloadCourseMaterials(
+  courseId: number,
+  vaultRoot: string
+): Promise<number> {
+  return invoke<number>("download_course_materials", { courseId, vaultRoot });
+}
+
+/**
+ * Mở file tài liệu offline bằng ứng dụng mặc định của hệ thống.
+ */
+export async function openLocalMaterial(materialId: number): Promise<void> {
+  return invoke<void>("open_local_material", { materialId });
+}
+
+/**
+ * Khởi động Vault Incremental File Watcher lắng nghe thư mục Vault.
+ */
+export async function startVaultWatcher(vaultPath: string): Promise<boolean> {
+  return invoke<boolean>("start_vault_watcher", { vaultPath });
+}
+
+/**
+ * Dừng Vault Watcher đang chạy.
+ */
+export async function stopVaultWatcher(): Promise<void> {
+  return invoke<void>("stop_vault_watcher");
+}
+
+/**
+ * Lấy trạng thái hoạt động của Vault Watcher.
+ */
+export async function getVaultWatcherStatus(): Promise<boolean> {
+  return invoke<boolean>("get_vault_watcher_status");
 }
 

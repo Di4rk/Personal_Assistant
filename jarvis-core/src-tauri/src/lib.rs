@@ -84,6 +84,8 @@ macro_rules! registered_commands {
             commands::moodle::get_moodle_courses,
             commands::moodle::get_moodle_tasks,
             commands::moodle::get_moodle_materials,
+            commands::moodle::download_course_materials,
+            commands::moodle::open_local_material,
             commands::moodle::ingest_moodle_sync_payload_json,
             commands::moodle::update_moodle_course_instructor,
             commands::workspace::ingest_moodle_course_html,
@@ -106,6 +108,9 @@ macro_rules! registered_commands {
             commands::vault::get_vault_path,
             commands::vault::scaffold_semester_vault,
             commands::vault::open_vault_course_folder,
+            commands::vault::start_vault_watcher,
+            commands::vault::stop_vault_watcher,
+            commands::vault::get_vault_watcher_status,
             commands::open_external_url,
             commands::hide_hud,
             // Settings & Identity
@@ -189,6 +194,8 @@ macro_rules! registered_commands {
             commands::moodle::get_moodle_courses,
             commands::moodle::get_moodle_tasks,
             commands::moodle::get_moodle_materials,
+            commands::moodle::download_course_materials,
+            commands::moodle::open_local_material,
             commands::moodle::ingest_moodle_sync_payload_json,
             commands::moodle::update_moodle_course_instructor,
             commands::workspace::ingest_moodle_course_html,
@@ -211,6 +218,9 @@ macro_rules! registered_commands {
             commands::vault::get_vault_path,
             commands::vault::scaffold_semester_vault,
             commands::vault::open_vault_course_folder,
+            commands::vault::start_vault_watcher,
+            commands::vault::stop_vault_watcher,
+            commands::vault::get_vault_watcher_status,
             commands::open_external_url,
             commands::hide_hud,
             // Settings & Identity (Always available)
@@ -264,6 +274,9 @@ pub fn run() {
             app.manage(AppState { db: shared_db.clone() });
             app.manage(crate::commands::portal_auth::WatchdogRegistry::new());
             app.manage(crate::commands::portal_auth::PartialStateRegistry::default());
+
+            let vault_watcher_state = crate::modules::vault::VaultWatcherState::default();
+            app.manage(vault_watcher_state.clone());
 
             // HTTP client (15s timeout) — dùng chung giữa worker và IPC command
             // trigger_cf_sync, tránh tạo nhiều pool connection mỗi khi user bấm sync.
@@ -320,6 +333,26 @@ pub fn run() {
                     sync_db,
                 )
                 .await;
+            });
+
+            // Vault Real-time Incremental Watcher: Tự động chạy nếu đã có vault_path trong settings
+            let auto_app = app.handle().clone();
+            let auto_db = shared_db.clone();
+            let auto_watcher = vault_watcher_state.clone();
+            tauri::async_runtime::spawn(async move {
+                let saved_path_opt = {
+                    if let Ok(conn) = auto_db.lock() {
+                        crate::db::settings::get_setting(&conn, "vault_path").ok().flatten()
+                    } else {
+                        None
+                    }
+                };
+                if let Some(path) = saved_path_opt {
+                    if std::path::Path::new(&path).exists() {
+                        println!("[Vault Watcher] Tự động khởi chạy watcher cho: {path}");
+                        let _ = crate::modules::vault::start_vault_watcher(auto_app, path, &auto_watcher, auto_db).await;
+                    }
+                }
             });
 
             // Setup System Tray

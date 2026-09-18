@@ -18,6 +18,9 @@ import {
   Edit3,
   X,
   Folder,
+  Loader2,
+  CheckCircle2,
+  ArrowDownToLine,
 } from 'lucide-react';
 import {
   getMoodleCourses,
@@ -26,9 +29,13 @@ import {
   openExternalUrl,
   updateMoodleCourseInstructor,
   openVaultCourseFolder,
+  downloadCourseMaterials,
+  openLocalMaterial,
+  getVaultPath,
   MoodleCourse,
   MoodleTask,
   MoodleMaterial,
+  MaterialDownloadProgress,
 } from '../../lib/tauri-client';
 import { useSyncOrchestratorStore } from './stores/syncOrchestratorStore';
 import { SyncMoodleModal } from './components/SyncMoodleModal';
@@ -50,6 +57,12 @@ export const CoursesDashboard: React.FC = () => {
   const moodleSync = serviceState.moodle;
   const isSyncing = moodleSync.isSyncing;
   const [vaultFolderError, setVaultFolderError] = useState<string | null>(null);
+
+  // Material offline mirror state
+  const [isDownloadingSlides, setIsDownloadingSlides] = useState<boolean>(false);
+  const [downloadProgress, setDownloadProgress] = useState<MaterialDownloadProgress | null>(null);
+  const [slideDownloadError, setSlideDownloadError] = useState<string | null>(null);
+  const [slideSuccessMsg, setSlideSuccessMsg] = useState<string | null>(null);
 
   const handleOpenVaultFolder = async (courseCode: string) => {
     try {
@@ -104,6 +117,56 @@ export const CoursesDashboard: React.FC = () => {
     loadData(false);
   });
 
+  useTauriEvent<MaterialDownloadProgress>('moodle-material-download-progress', (payload) => {
+    if (payload.course_id === selectedCourseId) {
+      setDownloadProgress(payload);
+    }
+  });
+
+  const handleDownloadAllSlides = async () => {
+    if (!selectedCourseId) return;
+    try {
+      setSlideDownloadError(null);
+      setSlideSuccessMsg(null);
+      const vaultRoot = await getVaultPath();
+      if (!vaultRoot || !vaultRoot.trim()) {
+        setSlideDownloadError('Vui lòng chọn thư mục Obsidian Vault trong tab Vault trước khi tải tài liệu offline!');
+        setTimeout(() => setSlideDownloadError(null), 6000);
+        return;
+      }
+      setIsDownloadingSlides(true);
+      const downloadedCount = await downloadCourseMaterials(selectedCourseId, vaultRoot);
+      await refreshCourseDetails(selectedCourseId);
+      setSlideSuccessMsg(`Đã tải và lưu thành công ${downloadedCount} tài liệu về thư mục môn học trong Vault.`);
+      setTimeout(() => setSlideSuccessMsg(null), 6000);
+    } catch (err) {
+      console.error('[CoursesDashboard] Lỗi tải tài liệu offline:', err);
+      setSlideDownloadError(typeof err === 'string' ? err : 'Lỗi khi tải slide tài liệu từ Moodle');
+      setTimeout(() => setSlideDownloadError(null), 6000);
+    } finally {
+      setIsDownloadingSlides(false);
+      setDownloadProgress(null);
+    }
+  };
+
+  const handleOpenLocalMaterial = async (materialId: number) => {
+    try {
+      setSlideDownloadError(null);
+      await openLocalMaterial(materialId);
+    } catch (err) {
+      console.error('[CoursesDashboard] Lỗi mở file offline:', err);
+      setSlideDownloadError(typeof err === 'string' ? err : 'Không thể mở file offline bằng ứng dụng mặc định');
+      setTimeout(() => setSlideDownloadError(null), 5000);
+    }
+  };
+
+  const formatFileSize = (bytes?: number): string | null => {
+    if (!bytes || bytes <= 0) return null;
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
   // Load tasks & materials for selected course
   useEffect(() => {
     if (!selectedCourseId) {
@@ -141,6 +204,14 @@ export const CoursesDashboard: React.FC = () => {
       grouped[sec].push(m);
     }
     return grouped;
+  }, [materials]);
+
+  const offlineMaterialsCount = useMemo(() => {
+    return materials.filter(
+      (m) =>
+        m.download_status === 'synced' ||
+        Boolean(m.local_file_path && m.local_file_path.trim().length > 0)
+    ).length;
   }, [materials]);
 
   const handleCopy = (text: string, field: string) => {
@@ -599,17 +670,60 @@ export const CoursesDashboard: React.FC = () => {
 
                 {/* ZONE 3: DANH MỤC SLIDE & TÀI LIỆU HỌC TẬP */}
                 <div className="rounded-xl border border-zinc-800 bg-zinc-900/80 p-5 space-y-4">
-                  <div className="flex items-center justify-between border-b border-zinc-800/60 pb-3">
-                    <div className="flex items-center gap-2">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-zinc-800/60 pb-3">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <span className="flex h-6 w-6 items-center justify-center rounded-md bg-emerald-500/10 text-emerald-400">
                         <FileText className="h-3.5 w-3.5" />
                       </span>
                       <h3 className="text-sm font-bold text-white">Slide bài giảng & Tài liệu môn học</h3>
-                      <span className="rounded-full bg-zinc-800 px-2 py-0.2 text-[11px] font-mono text-zinc-400">
+                      <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-[11px] font-mono text-zinc-400">
                         {materials.length} files
                       </span>
+                      {offlineMaterialsCount > 0 && (
+                        <span className="rounded-full bg-emerald-950/60 border border-emerald-800/40 px-2 py-0.5 text-[10px] font-mono text-emerald-400">
+                          {offlineMaterialsCount} offline
+                        </span>
+                      )}
                     </div>
+
+                    <button
+                      type="button"
+                      onClick={handleDownloadAllSlides}
+                      disabled={isDownloadingSlides || materials.length === 0}
+                      className="flex items-center justify-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 disabled:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed text-white transition-colors shadow-sm cursor-pointer border border-emerald-500/30 whitespace-nowrap"
+                      title="Tải toàn bộ tài liệu về thư mục Slides của môn trong Vault"
+                    >
+                      {isDownloadingSlides ? (
+                        <>
+                          <Loader2 className="h-3.5 w-3.5 animate-spin text-emerald-200" />
+                          <span>
+                            {downloadProgress
+                              ? `Đang tải ${downloadProgress.current}/${downloadProgress.total}... (${Math.round((downloadProgress.current / Math.max(downloadProgress.total, 1)) * 100)}%)`
+                              : 'Đang tải Slide...'}
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          <ArrowDownToLine className="h-3.5 w-3.5 text-emerald-200" />
+                          <span>Tải toàn bộ Slide về máy</span>
+                        </>
+                      )}
+                    </button>
                   </div>
+
+                  {slideDownloadError && (
+                    <div className="p-2.5 rounded-lg bg-rose-950/40 border border-rose-800/50 text-rose-300 text-xs flex items-center gap-2">
+                      <AlertCircle className="h-4 w-4 shrink-0 text-rose-400" />
+                      <span>{slideDownloadError}</span>
+                    </div>
+                  )}
+
+                  {slideSuccessMsg && (
+                    <div className="p-2.5 rounded-lg bg-emerald-950/40 border border-emerald-800/50 text-emerald-300 text-xs flex items-center gap-2">
+                      <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
+                      <span>{slideSuccessMsg}</span>
+                    </div>
+                  )}
 
                   {materials.length === 0 ? (
                     <div className="py-6 text-center text-xs text-zinc-500 font-mono">
@@ -628,31 +742,88 @@ export const CoursesDashboard: React.FC = () => {
                           </div>
 
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                            {sectionMaterials.map((mat) => (
-                              <div
-                                key={mat.id || mat.file_url}
-                                className="group flex items-center justify-between p-2.5 rounded-lg border border-zinc-800/60 bg-zinc-950/40 hover:border-zinc-700 transition-colors text-xs"
-                              >
-                                <div className="flex items-center gap-2 min-w-0 flex-1">
-                                  {renderFileBadge(mat.file_type)}
-                                  <span className="font-medium text-zinc-200 group-hover:text-sky-300 transition-colors truncate">
-                                    {mat.title}
-                                  </span>
-                                </div>
+                            {sectionMaterials.map((mat) => {
+                              const isSynced =
+                                mat.download_status === 'synced' ||
+                                Boolean(mat.local_file_path && mat.local_file_path.trim().length > 0);
+                              const isDownloadingThis =
+                                isDownloadingSlides &&
+                                (mat.download_status === 'downloading' ||
+                                  downloadProgress?.filename === mat.title);
+                              const sizeStr = formatFileSize(mat.file_size_bytes);
 
-                                <button
-                                  onClick={() => openExternalUrl(mat.file_url)}
-                                  className="text-zinc-500 hover:text-sky-400 p-1 transition-colors shrink-0"
-                                  title={mat.file_type === 'url' ? 'Mở liên kết' : 'Mở hoặc tải file'}
+                              return (
+                                <div
+                                  key={mat.id || mat.file_url}
+                                  className="group flex items-center justify-between p-2.5 rounded-lg border border-zinc-800/60 bg-zinc-950/40 hover:border-zinc-700 transition-colors text-xs gap-2"
                                 >
-                                  {mat.file_type === 'url' ? (
-                                    <ExternalLink className="h-3.5 w-3.5 text-indigo-400" />
-                                  ) : (
-                                    <Download className="h-3.5 w-3.5" />
-                                  )}
-                                </button>
-                              </div>
-                            ))}
+                                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                                    {renderFileBadge(mat.file_type)}
+                                    <span
+                                      className="font-medium text-zinc-200 group-hover:text-sky-300 transition-colors truncate"
+                                      title={mat.title}
+                                    >
+                                      {mat.title}
+                                    </span>
+                                    {sizeStr && (
+                                      <span className="text-[10px] font-mono text-zinc-500 shrink-0">
+                                        ({sizeStr})
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  <div className="flex items-center gap-1.5 shrink-0">
+                                    {isSynced ? (
+                                      <>
+                                        <span className="hidden sm:inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono font-medium bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                                          <Check className="h-3 w-3" />
+                                          <span>Đã lưu Offline</span>
+                                        </span>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleOpenLocalMaterial(mat.id)}
+                                          className="flex items-center gap-1 px-2.5 py-1 rounded bg-emerald-950/60 hover:bg-emerald-900/80 text-emerald-300 hover:text-white transition-colors text-[11px] font-medium border border-emerald-700/50 shadow-sm cursor-pointer"
+                                          title={mat.local_file_path ? `Mở: ${mat.local_file_path}` : 'Mở file offline'}
+                                        >
+                                          <FileText className="h-3.5 w-3.5 text-emerald-400" />
+                                          <span>Mở File</span>
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => openExternalUrl(mat.file_url)}
+                                          className="text-zinc-500 hover:text-sky-400 p-1 transition-colors"
+                                          title="Mở link trực tuyến trên Moodle"
+                                        >
+                                          <ExternalLink className="h-3.5 w-3.5" />
+                                        </button>
+                                      </>
+                                    ) : isDownloadingThis ? (
+                                      <span className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono text-amber-300 bg-amber-500/10 border border-amber-500/30">
+                                        <Loader2 className="h-3 w-3 animate-spin text-amber-400" />
+                                        <span>Đang tải...</span>
+                                      </span>
+                                    ) : (
+                                      <>
+                                        {mat.download_status === 'failed' && (
+                                          <span className="px-1.5 py-0.5 rounded text-[10px] font-mono text-rose-400 bg-rose-500/10 border border-rose-500/20">
+                                            Lỗi tải
+                                          </span>
+                                        )}
+                                        <button
+                                          type="button"
+                                          onClick={() => openExternalUrl(mat.file_url)}
+                                          className="flex items-center gap-1 px-2.5 py-1 rounded bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-sky-400 transition-colors text-[11px] font-medium border border-zinc-800 cursor-pointer"
+                                          title={mat.file_type === 'url' ? 'Mở liên kết web' : 'Mở hoặc tải trên Moodle'}
+                                        >
+                                          <span>{mat.file_type === 'url' ? 'Mở URL' : 'Mở Moodle'}</span>
+                                          <ExternalLink className="h-3 w-3 text-zinc-500" />
+                                        </button>
+                                      </>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
                           </div>
                         </div>
                       ))}
