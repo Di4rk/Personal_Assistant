@@ -248,7 +248,14 @@ export default function App() {
   useTauriEvent<void>("system-genesis-reset", handleResetToGenesis);
 
   if (profileState.status === "loading") {
-    return null;
+    return (
+      <div className="flex h-screen w-screen items-center justify-center bg-zinc-950 text-zinc-400 font-mono text-xs select-none">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-zinc-800 border-t-emerald-400" />
+          <span className="tracking-wider text-zinc-500">Đang khởi tạo DIARK OS...</span>
+        </div>
+      </div>
+    );
   }
 
   if (profileState.status === "needs-onboarding") {
