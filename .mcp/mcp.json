@@ -1,12 +1,12 @@
 {
   "mcpServers": {
-    "jarvis-sqlite": {
+    "diark-sqlite": {
       "command": "npx",
       "args": [
         "-y",
         "@modelcontextprotocol/server-sqlite",
         "--db-path",
-        "${env:APPDATA}/dev.yourname.jarviscore/jarvis.sqlite3"
+        "${env:APPDATA}/dev.diark.core/diark.sqlite3"
       ]
     }
   }

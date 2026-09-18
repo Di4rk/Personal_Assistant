@@ -1,4 +1,4 @@
-# DIARK // OS (JARVIS PERSONAL OS) — MASTER ARCHITECTURAL DOSSIER (v1.3.0 BASELINE)
+# DIARK // OS — MASTER ARCHITECTURAL DOSSIER (v1.3.0 BASELINE)
 
 ## 1. TỔNG QUAN HỆ THỐNG & NHÂN THỨC NGƯỜI DÙNG (PERSONA & HARDWARE)
 - **Chủ sở hữu hệ thống:** Sinh viên CS/IT năm 2 (UIT - ĐHQG-HCM), định hướng Competitive Programming (ICPC), Nghiên cứu AI và An toàn thông tin; Visual Designer thương hiệu Diark.

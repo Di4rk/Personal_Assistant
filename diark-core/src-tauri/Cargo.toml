@@ -1,0 +1,83 @@
+[package]
+name = "diark-core"
+version = "1.0.0"
+description = "DIARK Personal OS - Core Vertical Slice"
+edition = "2021"
+
+# Tauri v2 convention: tách logic ra lib.rs (diark_core_lib) để main.rs chỉ
+# là entrypoint mỏng gọi run(). Cần thiết cho mobile targets sau này, và giúp
+# test được business logic mà không cần khởi động full Tauri runtime.
+[lib]
+name = "diark_core_lib"
+path = "src/lib.rs"
+
+[[bin]]
+name = "diark-core"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# --- Tauri core ---
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-autostart = "2"
+tauri-plugin-notification = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# --- Database ---
+rusqlite = { version = "0.32", features = ["bundled", "bundled-windows", "functions", "load_extension"] }
+
+# --- Local Text Embeddings (Pure Rust ONNX Engine) ---
+fastembed = "4"
+
+# --- Local HTTP server (nhận webhook từ Chrome extension) ---
+axum = "0.7"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "io-util"] }
+tokio-util = "0.7"
+tower-http = { version = "0.5", features = ["cors"] }
+
+# --- HTTP client cho background worker gọi Codeforces API ---
+# rustls-tls thay vì native-tls: tránh phụ thuộc OpenSSL, build trên Windows
+# gọn hơn hẳn (không cần cài thêm gì ngoài MSVC Build Tools).
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+# --- Error handling: KHÔNG unwrap()/expect() ở business logic ---
+thiserror = "1"
+anyhow = "1"
+
+# --- Utils ---
+# Timezone Lock (UTC+7 Asia/Ho_Chi_Minh)
+chrono = { version = "0.4", features = ["serde", "clock"] }
+uuid = { version = "1", features = ["v4"] }
+scraper = "0.22"
+walkdir = "2.4"
+open = "5.3"
+serde_yaml = "0.9"
+regex = "1"
+notify = "6.1"
+
+# --- Lightweight HTTP parser cho sync server loopback (không kéo axum/actix) ---
+httparse = "1.8"
+urlencoding = "2.1"
+
+# --- Remote Plugin verification and extraction ---
+sha2 = "0.10"
+zip = "2"
+
+# --- Chỉ dùng cho mock data seeder (dev-only, xem cfg(debug_assertions)) ---
+rand = "0.8"
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+# Tối ưu size + tốc độ cho bản release, quan trọng vì mày cần app nhẹ
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true
