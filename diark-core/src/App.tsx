@@ -264,6 +264,10 @@ export default function App() {
   }>("cf://sync-event", handleLegacySync);
   useTauriEvent<void>("system-genesis-reset", handleResetToGenesis);
 
+  // Khai báo vô điều kiện trước mọi early-return để tuân thủ React Rules of Hooks
+  const isQuickCaptureOpen = useQuickCaptureStore((s) => s.isOpen);
+  const quickCapturePrefill = useQuickCaptureStore((s) => s.prefill);
+
   if (profileState.status === "loading") {
     return (
       <div className="flex h-screen w-screen items-center justify-center bg-zinc-950 font-mono select-none">
@@ -452,9 +456,9 @@ export default function App() {
       </div>
 
       <QuickCaptureModal
-        isOpen={useQuickCaptureStore((s) => s.isOpen)}
+        isOpen={isQuickCaptureOpen}
         onClose={() => useQuickCaptureStore.getState().closeQuickCapture()}
-        prefill={useQuickCaptureStore((s) => s.prefill)}
+        prefill={quickCapturePrefill}
       />
 
       <SettingsModal onResetGenesis={handleResetToGenesis} />
