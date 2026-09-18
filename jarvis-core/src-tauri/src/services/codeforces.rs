@@ -119,7 +119,7 @@ pub async fn sync_submissions(
 
     let client = Client::builder()
         .timeout(Duration::from_secs(10))
-        .user_agent("JARVIS-Personal-OS/0.1")
+        .user_agent("DIARK-Personal-OS/0.1")
         .build()
         .map_err(|e| CodeforcesError::Network(e.to_string()))?;
 

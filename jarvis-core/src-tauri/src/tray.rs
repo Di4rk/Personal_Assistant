@@ -8,7 +8,7 @@ use tauri::{
 pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let show_i = MenuItem::with_id(app, "show", "Show HUD (Alt+K)", true, None::<&str>)?;
     let status_i = MenuItem::with_id(app, "status", "Status: Running", false, None::<&str>)?;
-    let quit_i = MenuItem::with_id(app, "quit", "Quit Jarvis OS", true, None::<&str>)?;
+    let quit_i = MenuItem::with_id(app, "quit", "Quit Diark OS", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&show_i, &status_i, &quit_i])?;
 
     let icon = match app.default_window_icon() {

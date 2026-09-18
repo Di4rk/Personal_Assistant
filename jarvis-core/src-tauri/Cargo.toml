@@ -1,18 +1,18 @@
 [package]
-name = "jarvis-core"
+name = "diark-core"
 version = "0.4.0"
-description = "JARVIS Personal OS - Core Vertical Slice"
+description = "DIARK Personal OS - Core Vertical Slice"
 edition = "2021"
 
-# Tauri v2 convention: tách logic ra lib.rs (jarvis_core_lib) để main.rs chỉ
+# Tauri v2 convention: tách logic ra lib.rs (diark_core_lib) để main.rs chỉ
 # là entrypoint mỏng gọi run(). Cần thiết cho mobile targets sau này, và giúp
 # test được business logic mà không cần khởi động full Tauri runtime.
 [lib]
-name = "jarvis_core_lib"
+name = "diark_core_lib"
 path = "src/lib.rs"
 
 [[bin]]
-name = "jarvis-core"
+name = "diark-core"
 path = "src/main.rs"
 
 [build-dependencies]

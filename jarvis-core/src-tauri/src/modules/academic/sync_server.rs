@@ -4,7 +4,8 @@
 //! - Chỉ lắng nghe trên 127.0.0.1 (loopback). Không bao giờ expose ra internet.
 //! - Không dùng axum/actix/warp — dùng tokio::net::TcpListener + httparse để giữ
 //!   binary footprint nhỏ nhất có thể.
-//! - Xác thực bắt buộc: header `X-Jarvis-Sync-Token` phải khớp với token
+//! - Xác thực bắt buộc: header `X-Diark-Sync-Token` (hoặc `X-Jarvis-Sync-Token` cho backward-compat)
+//! phải khớp với token
 //!   được lưu trong bảng `settings` của SQLite.
 //! - Connection error không bao giờ panic luồng chính: toàn bộ lỗi được log
 //!   và trả HTTP error response, sau đó kết nối bị đóng gracefully.
@@ -139,7 +140,11 @@ async fn handle_connection(
                             content_len = s.trim().parse::<usize>().unwrap_or(0);
                         }
                     }
-                    if h.name.eq_ignore_ascii_case("x-jarvis-sync-token") {
+                    // Chấp nhận cả tên mới (X-Diark-Sync-Token) lẫn tên cũ (X-Jarvis-Sync-Token)
+                    // để backward-compatible với Tampermonkey userscript chưa cập nhật.
+                    if h.name.eq_ignore_ascii_case("x-diark-sync-token")
+                        || h.name.eq_ignore_ascii_case("x-jarvis-sync-token")
+                    {
                         token_opt = std::str::from_utf8(h.value)
                             .ok()
                             .map(|s| s.trim().to_string());
@@ -317,7 +322,7 @@ async fn send_cors_preflight(stream: &mut TcpStream) -> Result<(), std::io::Erro
         "HTTP/1.1 204 No Content\r\n",
         "Access-Control-Allow-Origin: *\r\n",
         "Access-Control-Allow-Methods: POST, OPTIONS\r\n",
-        "Access-Control-Allow-Headers: Content-Type, X-Jarvis-Sync-Token\r\n",
+        "Access-Control-Allow-Headers: Content-Type, X-Diark-Sync-Token, X-Jarvis-Sync-Token\r\n",
         "Access-Control-Allow-Private-Network: true\r\n",
         "Content-Length: 0\r\n",
         "\r\n"
@@ -380,7 +385,7 @@ mod tests {
     /// Kiểm tra parser HTTP request thủ công dùng httparse
     #[test]
     fn test_httparse_extracts_method_path_and_token() {
-        let raw = b"POST /api/sync/academic HTTP/1.1\r\nHost: 127.0.0.1:41718\r\nContent-Type: application/json\r\nX-Jarvis-Sync-Token: abc123def456\r\nContent-Length: 2\r\n\r\n{}";
+        let raw = b"POST /api/sync/academic HTTP/1.1\r\nHost: 127.0.0.1:41718\r\nContent-Type: application/json\r\nX-Diark-Sync-Token: abc123def456\r\nContent-Length: 2\r\n\r\n{}";
 
         let mut headers = [httparse::EMPTY_HEADER; 32];
         let mut req = httparse::Request::new(&mut headers);
@@ -393,7 +398,9 @@ mod tests {
         let mut token_found: Option<&str> = None;
         let mut content_len: usize = 0;
         for h in req.headers.iter() {
-            if h.name.eq_ignore_ascii_case("x-jarvis-sync-token") {
+            if h.name.eq_ignore_ascii_case("x-diark-sync-token")
+                || h.name.eq_ignore_ascii_case("x-jarvis-sync-token")
+            {
                 token_found = std::str::from_utf8(h.value).ok();
             }
             if h.name.eq_ignore_ascii_case("content-length") {

@@ -239,8 +239,24 @@ pub fn run() {
             let app_data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&app_data_dir)?;
 
-            let db_path = app_data_dir.join("jarvis.sqlite3");
-            println!("[jarvis] DB path: {}", db_path.display());
+            // DB Migration: nếu tồn tại file cũ từ thời jarvis, tự động rename sang diàrk
+            // trước khi mở connection, đảm bảo dữ liệu người dùng không bị mất.
+            let legacy_db = app_data_dir.join("jarvis.sqlite3");
+            let db_path = app_data_dir.join("diark.sqlite3");
+            if legacy_db.exists() && !db_path.exists() {
+                println!("[diark] Migrating database: jarvis.sqlite3 → diark.sqlite3");
+                std::fs::rename(&legacy_db, &db_path)
+                    .map_err(|e| anyhow::anyhow!("DB migration failed: {e}"))?;
+                // Di chuyển cả WAL và SHM files nếu có
+                for ext in &["-wal", "-shm"] {
+                    let old = app_data_dir.join(format!("jarvis.sqlite3{ext}"));
+                    let new = app_data_dir.join(format!("diark.sqlite3{ext}"));
+                    if old.exists() {
+                        let _ = std::fs::rename(old, new);
+                    }
+                }
+            }
+            println!("[diark] DB path: {}", db_path.display());
 
             let conn = db::init_db(&db_path)?;
             let shared_db: db::SharedDb = Arc::new(Mutex::new(conn));
@@ -295,7 +311,7 @@ pub fn run() {
 
             // Portal Browser Bridge — Loopback sync server nhận payload từ
             // Tampermonkey userscript trên student.uit.edu.vn.
-            // Chỉ bind 127.0.0.1, xác thực qua X-Jarvis-Sync-Token.
+            // Chỉ bind 127.0.0.1, xác thực qua X-Diark-Sync-Token.
             let sync_app_handle = app.handle().clone();
             let sync_db = shared_db.clone();
             tauri::async_runtime::spawn(async move {
@@ -397,7 +413,7 @@ pub fn run() {
         .run(tauri::generate_context!());
 
     if let Err(e) = build_result {
-        eprintln!("[jarvis] Lỗi fatal khi khởi chạy Tauri application: {e}");
+        eprintln!("[diark] Lỗi fatal khi khởi chạy Tauri application: {e}");
         std::process::exit(1);
     }
 }

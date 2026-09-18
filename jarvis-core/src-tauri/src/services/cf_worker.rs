@@ -187,7 +187,7 @@ pub async fn start_cf_sync_worker(
 pub fn build_http_client() -> AppResult<Client> {
     Client::builder()
         .timeout(Duration::from_secs(15))
-        .user_agent("jarvis-personal-os/0.1 (+local-desktop-app)")
+        .user_agent("diark-personal-os/0.1 (+local-desktop-app)")
         .build()
         .map_err(AppError::Http)
 }

@@ -427,14 +427,14 @@ pub async fn run_server(app: AppHandle, db: SharedDb) {
     let listener = match tokio::net::TcpListener::bind(&addr).await {
         Ok(l) => l,
         Err(e) => {
-            eprintln!("[jarvis-server] Không bind được port {addr}: {e}");
+            eprintln!("[diark-server] Không bind được port {addr}: {e}");
             return;
         }
     };
 
-    println!("[jarvis-server] Đang lắng nghe tại http://{addr}");
+    println!("[diark-server] Đang lắng nghe tại http://{addr}");
 
     if let Err(e) = axum::serve(listener, app_router).await {
-        eprintln!("[jarvis-server] Server crash: {e}");
+        eprintln!("[diark-server] Server crash: {e}");
     }
 }

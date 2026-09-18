@@ -4,7 +4,7 @@ use rusqlite::Connection;
 #[test]
 fn test_ingest_and_recompute_lock_cycle() {
     let conn = Connection::open_in_memory().expect("in-memory db must open");
-    jarvis_core_lib::db::schema::create_tables(&conn).expect("create_tables must succeed");
+    diark_core_lib::db::schema::create_tables(&conn).expect("create_tables must succeed");
     let db_arc = Arc::new(Mutex::new(conn));
 
     // Bước 1: Giả lập lock của transaction ghi
@@ -21,7 +21,7 @@ fn test_ingest_and_recompute_lock_cycle() {
 
     // Bước 2: Gọi recompute độc lập ngay sau đó
     let conn_guard = db_arc.lock().expect("mutex lock must succeed");
-    let recompute_result = jarvis_core_lib::db::matrix::recompute_daily_matrix_for_date(
+    let recompute_result = diark_core_lib::db::matrix::recompute_daily_matrix_for_date(
         &conn_guard,
         "2024-03-09",
     );

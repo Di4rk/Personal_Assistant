@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    jarvis_core_lib::run();
+    diark_core_lib::run();
 }
