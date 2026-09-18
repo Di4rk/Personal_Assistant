@@ -111,6 +111,7 @@ macro_rules! registered_commands {
             commands::vault::start_vault_watcher,
             commands::vault::stop_vault_watcher,
             commands::vault::get_vault_watcher_status,
+            commands::vault::archive_semester,
             commands::open_external_url,
             commands::hide_hud,
             // Settings & Identity
@@ -221,6 +222,7 @@ macro_rules! registered_commands {
             commands::vault::start_vault_watcher,
             commands::vault::stop_vault_watcher,
             commands::vault::get_vault_watcher_status,
+            commands::vault::archive_semester,
             commands::open_external_url,
             commands::hide_hud,
             // Settings & Identity (Always available)

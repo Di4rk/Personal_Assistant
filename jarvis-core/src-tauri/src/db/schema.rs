@@ -333,6 +333,7 @@ pub fn ensure_moodle_schema(conn: &Connection) -> SqlResult<()> {
             instructor_mail  TEXT NOT NULL DEFAULT '',-- 'phuongtbhcmue@gmail.com'
             instructor_phone TEXT NOT NULL DEFAULT '',-- '0376 333 654'
             course_url       TEXT NOT NULL,
+            status           TEXT NOT NULL DEFAULT 'active', -- 'active' | 'archived'
             updated_at       INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
         );
 
@@ -371,7 +372,7 @@ pub fn ensure_moodle_schema(conn: &Connection) -> SqlResult<()> {
         "#,
     )?;
 
-    // Idempotent migrations cho các DB đã tồn tại trước v0.5.0
+    // Idempotent migrations cho các DB đã tồn tại trước v0.5.0 / v0.6.0
     let has_local_file_path: bool = conn
         .prepare("SELECT 1 FROM pragma_table_info('moodle_materials') WHERE name = 'local_file_path'")?
         .exists([])?;
@@ -391,6 +392,13 @@ pub fn ensure_moodle_schema(conn: &Connection) -> SqlResult<()> {
         .exists([])?;
     if !has_file_size_bytes {
         conn.execute("ALTER TABLE moodle_materials ADD COLUMN file_size_bytes INTEGER NOT NULL DEFAULT 0;", [])?;
+    }
+
+    let has_moodle_course_status: bool = conn
+        .prepare("SELECT 1 FROM pragma_table_info('moodle_courses') WHERE name = 'status'")?
+        .exists([])?;
+    if !has_moodle_course_status {
+        conn.execute("ALTER TABLE moodle_courses ADD COLUMN status TEXT NOT NULL DEFAULT 'active';", [])?;
     }
 
     Ok(())

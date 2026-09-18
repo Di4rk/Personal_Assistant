@@ -11,6 +11,7 @@ import { useAcademicRadar } from "./hooks/useAcademicRadar";
 import { AcademicRadarChart } from "./components/AcademicRadarChart";
 import { GpaSimulatorCard } from "./components/GpaSimulatorCard";
 import { SyncPortalModal } from "./components/SyncPortalModal";
+import { ArchiveRitualModal } from "./components/ArchiveRitualModal";
 import { AcademicSummaryCards } from "./components/AcademicSummaryCards";
 import { SemesterTabs } from "./components/SemesterTabs";
 import { AcademicCourseTable } from "./components/AcademicCourseTable";
@@ -58,6 +59,7 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
 
   const [curriculumCredits, setCurriculumCredits] = useState<number>(126);
   const [isSyncPortalModalOpen, setIsSyncPortalModalOpen] = useState<boolean>(false);
+  const [isArchiveModalOpen, setIsArchiveModalOpen] = useState<boolean>(false);
 
   const loadMacroMetrics = useCallback(async () => {
     try {
@@ -374,6 +376,7 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
             isLoading={isLoadingCourses}
             currentMacro={currentMacro}
             currentSemester={currentSemester}
+            onArchiveClick={() => setIsArchiveModalOpen(true)}
           />
         </div>
 
@@ -457,6 +460,8 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
             currentGpa10={cumulativeStats.cGpa10}
             completedTermsCount={macroMetrics.length > 0 ? macroMetrics.length : overview.length}
             totalDegreeCredits={curriculumCredits}
+            activeCourses={courses}
+            activeSemesterId={selectedSemesterId || undefined}
           />
         </div>
       </div>
@@ -466,6 +471,18 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
         onClose={() => setIsSyncPortalModalOpen(false)}
         onSyncSuccess={() => { void handleRefresh(); }}
       />
+
+      {selectedSemesterId && (
+        <ArchiveRitualModal
+          isOpen={isArchiveModalOpen}
+          onClose={() => setIsArchiveModalOpen(false)}
+          semesterId={selectedSemesterId}
+          courses={courses}
+          onArchiveSuccess={() => {
+            void handleRefresh();
+          }}
+        />
+      )}
     </div>
   );
 };

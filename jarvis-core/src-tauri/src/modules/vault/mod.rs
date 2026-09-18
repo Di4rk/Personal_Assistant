@@ -1,8 +1,10 @@
+pub mod archive_ritual;
 pub mod onenote_guard;
 pub mod scaffolder;
 pub mod scanner;
 pub mod watcher;
 
+pub use archive_ritual::{execute_archive_ritual, ArchiveSemesterResultDto};
 pub use onenote_guard::validate_onenote_uri;
 pub use scaffolder::{
     find_course_folder, sanitize_folder_name, scaffold_semester_courses, ScaffoldResultDto,

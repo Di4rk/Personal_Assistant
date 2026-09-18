@@ -96,6 +96,7 @@ pub fn parse_moodle_enrolled_courses_json(json_str: &str) -> Result<Vec<MoodleCo
             } else {
                 rc.viewurl
             },
+            status: "active".to_string(),
             updated_at: now_ts,
         });
     }

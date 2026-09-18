@@ -1,6 +1,10 @@
 use rusqlite::{params, Connection, Result as SqlResult};
 use serde::{Deserialize, Serialize};
 
+fn default_active_status() -> String {
+    "active".to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MoodleCourseRecord {
     pub course_id: i64,
@@ -11,6 +15,8 @@ pub struct MoodleCourseRecord {
     pub instructor_mail: String,
     pub instructor_phone: String,
     pub course_url: String,
+    #[serde(default = "default_active_status")]
+    pub status: String,
     pub updated_at: i64,
 }
 
@@ -310,7 +316,7 @@ pub fn get_all_moodle_courses(conn: &Connection) -> SqlResult<Vec<MoodleCourseRe
         r#"
         SELECT course_id, course_code, fullname, term,
                instructor_name, instructor_mail, instructor_phone,
-               course_url, updated_at
+               course_url, COALESCE(status, 'active'), updated_at
         FROM moodle_courses
         ORDER BY course_code ASC
         "#,
@@ -326,7 +332,8 @@ pub fn get_all_moodle_courses(conn: &Connection) -> SqlResult<Vec<MoodleCourseRe
             instructor_mail: row.get(5)?,
             instructor_phone: row.get(6)?,
             course_url: row.get(7)?,
-            updated_at: row.get(8)?,
+            status: row.get(8)?,
+            updated_at: row.get(9)?,
         })
     })?;
 
@@ -547,6 +554,7 @@ mod tests {
                     instructor_mail: "phuongtbhcmue@gmail.com".to_string(),
                     instructor_phone: "0376 333 654".to_string(),
                     course_url: "https://courses.uit.edu.vn/course/view.php?id=1289".to_string(),
+                    status: "active".to_string(),
                     updated_at: 1789663457,
                 },
             ],
@@ -632,6 +640,7 @@ mod tests {
                     instructor_mail: "".to_string(),
                     instructor_phone: "".to_string(),
                     course_url: "https://courses.uit.edu.vn/course/view.php?id=1073".to_string(),
+                    status: "active".to_string(),
                     updated_at: 100,
                 },
             ],
@@ -668,6 +677,7 @@ mod tests {
                     instructor_mail: "".to_string(),
                     instructor_phone: "".to_string(),
                     course_url: "https://courses.uit.edu.vn/course/view.php?id=1073".to_string(),
+                    status: "active".to_string(),
                     updated_at: 200,
                 },
             ],

@@ -1,5 +1,5 @@
 import React from "react";
-import { CheckCircle2, RefreshCw, XCircle } from "lucide-react";
+import { CheckCircle2, FolderArchive, RefreshCw, XCircle } from "lucide-react";
 import type {
   AcademicCourseRecord,
   AcademicMacroMetricSSOT,
@@ -17,6 +17,7 @@ export interface AcademicCourseTableProps {
   isLoading?: boolean;
   currentMacro?: AcademicMacroMetricSSOT | null;
   currentSemester?: AcademicOverviewDto | null;
+  onArchiveClick?: () => void;
   className?: string;
 }
 
@@ -114,6 +115,7 @@ export const AcademicCourseTable: React.FC<AcademicCourseTableProps> = ({
   isLoading = false,
   currentMacro = null,
   currentSemester = null,
+  onArchiveClick,
   className = "",
 }) => {
   const formatScore = (val: number | null | undefined): string => {
@@ -192,9 +194,34 @@ export const AcademicCourseTable: React.FC<AcademicCourseTableProps> = ({
             </p>
           ) : null}
         </div>
-        <span className="text-xs font-mono text-zinc-500">
-          {courses.length} môn
-        </span>
+        <div className="flex items-center gap-2">
+          {onArchiveClick && (
+            <button
+              type="button"
+              onClick={onArchiveClick}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all cursor-pointer ${
+                currentSemester?.isCompleted
+                  ? "bg-zinc-800/80 hover:bg-zinc-800 text-zinc-300 border-zinc-700"
+                  : "bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border-amber-500/30 shadow-sm"
+              }`}
+              title={
+                currentSemester?.isCompleted
+                  ? "Học kỳ này đã hoàn tất nghi thức đóng kỳ. Bấm để xem lại hoặc đóng lại."
+                  : "Nghi thức Đóng kỳ: Ghi điểm vào 00_Index.md, cập nhật SQLite và di chuyển thư mục sang 01_Archive"
+              }
+            >
+              <FolderArchive className="w-3.5 h-3.5 text-amber-400" />
+              <span>
+                {currentSemester?.isCompleted
+                  ? "Đã đóng kỳ (Xem)"
+                  : `Đóng kỳ ${currentSemester ? `HK${currentSemester.semesterTerm}` : ""}`}
+              </span>
+            </button>
+          )}
+          <span className="text-xs font-mono text-zinc-500">
+            {courses.length} môn
+          </span>
+        </div>
       </div>
 
       {isLoading ? (

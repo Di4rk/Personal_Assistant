@@ -687,3 +687,32 @@ export async function getVaultWatcherStatus(): Promise<boolean> {
   return invoke<boolean>("get_vault_watcher_status");
 }
 
+export interface ArchiveSemesterResultDto {
+  semesterId: string;
+  semesterDirName: string;
+  archivedCoursesCount: number;
+  updatedIndexFiles: string[];
+  movedFrom: string;
+  movedTo: string;
+  summaryGpa10: number | null;
+  summaryGpa4: number | null;
+}
+
+/**
+ * Thực thi Nghi Thức Đóng Kỳ (Archive Ritual):
+ * - Ghi điểm tổng kết vào YAML frontmatter của 00_Index.md
+ * - Chuyển trạng thái môn học & học kỳ sang 'archived'
+ * - Di chuyển thư mục học kỳ vào 01_Archive/{semester_dir}/
+ * - Quét và đồng bộ lại FTS5
+ */
+export async function archiveSemester(
+  semesterId: string,
+  vaultRoot?: string
+): Promise<ArchiveSemesterResultDto> {
+  return invoke<ArchiveSemesterResultDto>("archive_semester", {
+    semesterId,
+    vaultRoot,
+  });
+}
+
+

@@ -513,6 +513,48 @@ pub async fn get_vault_watcher_status(
     Ok(crate::modules::vault::get_vault_watcher_status(&watcher_state).await)
 }
 
+/// Executes the Archive Ritual for a semester.
+///
+/// Updates YAML frontmatter with official final grades, marks courses & semester as archived in SQLite,
+/// moves active folder into `01_Archive/{semester_dir}/`, and re-syncs FTS5.
+#[tauri::command]
+pub async fn archive_semester(
+    db: tauri::State<'_, SharedDb>,
+    semester_id: String,
+    vault_root: Option<String>,
+) -> Result<crate::modules::vault::ArchiveSemesterResultDto, String> {
+    let db_arc = db.inner().clone();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut conn = db_arc
+            .lock()
+            .map_err(|_| "DB mutex bị poisoned".to_string())?;
+
+        let active_path = if let Some(ref p) = vault_root {
+            if !p.trim().is_empty() {
+                p.trim().to_string()
+            } else {
+                crate::db::settings::get_setting(&conn, "vault_path")
+                    .map_err(|e| format!("Lỗi đọc cài đặt vault_path: {e}"))?
+                    .ok_or_else(|| {
+                        "Chưa cấu hình thư mục Vault. Hãy chọn thư mục Vault trước!".to_string()
+                    })?
+            }
+        } else {
+            crate::db::settings::get_setting(&conn, "vault_path")
+                .map_err(|e| format!("Lỗi đọc cài đặt vault_path: {e}"))?
+                .ok_or_else(|| {
+                    "Chưa cấu hình thư mục Vault. Hãy chọn thư mục Vault trước!".to_string()
+                })?
+        };
+
+        let root_path = PathBuf::from(&active_path);
+        crate::modules::vault::execute_archive_ritual(&mut conn, &root_path, &semester_id)
+    })
+    .await
+    .map_err(|e| format!("Lỗi runtime worker archive_semester: {e}"))?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
