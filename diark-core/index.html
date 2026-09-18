@@ -15,11 +15,33 @@
         width: 100%;
         overflow: hidden;
       }
+      @keyframes diark-spin {
+        to { transform: rotate(360deg); }
+      }
+      @keyframes diark-spin-reverse {
+        to { transform: rotate(-360deg); }
+      }
+      @keyframes diark-pulse {
+        0%, 100% { opacity: 0.6; }
+        50% { opacity: 1; }
+      }
     </style>
   </head>
 
   <body class="bg-zinc-950 text-zinc-100">
-    <div id="root"></div>
+    <div id="root">
+      <div style="display: flex; height: 100vh; width: 100vw; align-items: center; justify-content: center; flex-direction: column; gap: 16px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; background-color: #09090b; user-select: none;">
+        <div style="position: relative; width: 48px; height: 48px; display: flex; align-items: center; justify-content: center;">
+          <div style="position: absolute; width: 44px; height: 44px; border: 2px solid #27272a; border-top-color: #10b981; border-radius: 50%; animation: diark-spin 0.9s cubic-bezier(0.5, 0, 0.5, 1) infinite;"></div>
+          <div style="position: absolute; width: 24px; height: 24px; border: 2px solid #27272a; border-bottom-color: #06b6d4; border-radius: 50%; animation: diark-spin-reverse 1.3s linear infinite;"></div>
+        </div>
+        <div style="display: flex; flex-direction: column; align-items: center; gap: 4px;">
+          <div style="font-weight: 700; font-size: 13px; letter-spacing: 0.15em; color: #f4f4f5;">DIARK <span style="color: #06b6d4;">// OS</span></div>
+          <div style="font-size: 11px; letter-spacing: 0.08em; color: #71717a; animation: diark-pulse 1.8s ease-in-out infinite;">Đang tải hệ thống...</div>
+        </div>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
+

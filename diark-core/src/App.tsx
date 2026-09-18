@@ -92,9 +92,23 @@ export default function App() {
   // Load User Profile on mount
   useEffect(() => {
     let isMounted = true;
+
+    const fallbackTimer = setTimeout(() => {
+      if (isMounted) {
+        setProfileState((curr) => {
+          if (curr.status === "loading") {
+            console.warn("[App] getUserProfile timeout, defaulting to needs-onboarding");
+            return { status: "needs-onboarding" };
+          }
+          return curr;
+        });
+      }
+    }, 2500);
+
     getUserProfile()
       .then((profile) => {
         if (!isMounted) return;
+        clearTimeout(fallbackTimer);
         if (!profile.is_initialized) {
           setProfileState({ status: "needs-onboarding" });
         } else {
@@ -104,14 +118,17 @@ export default function App() {
       .catch((err) => {
         console.error("Failed to load user profile:", err);
         if (isMounted) {
+          clearTimeout(fallbackTimer);
           setProfileState({
             status: "ready",
             profile: { nickname: "Diark", major: "CS", is_initialized: false },
           });
         }
       });
+
     return () => {
       isMounted = false;
+      clearTimeout(fallbackTimer);
     };
   }, []);
 
@@ -249,10 +266,20 @@ export default function App() {
 
   if (profileState.status === "loading") {
     return (
-      <div className="flex h-screen w-screen items-center justify-center bg-zinc-950 text-zinc-400 font-mono text-xs select-none">
-        <div className="flex flex-col items-center gap-3">
-          <div className="h-6 w-6 animate-spin rounded-full border-2 border-zinc-800 border-t-emerald-400" />
-          <span className="tracking-wider text-zinc-500">Đang khởi tạo DIARK OS...</span>
+      <div className="flex h-screen w-screen items-center justify-center bg-zinc-950 font-mono select-none">
+        <div className="flex flex-col items-center gap-4">
+          <div className="relative flex h-12 w-12 items-center justify-center">
+            <div className="absolute h-11 w-11 animate-[spin_0.9s_cubic-bezier(0.5,0,0.5,1)_infinite] rounded-full border-2 border-zinc-800 border-t-emerald-400" />
+            <div className="absolute h-6 w-6 animate-[spin_1.3s_linear_infinite_reverse] rounded-full border-2 border-zinc-800 border-b-cyan-400" />
+          </div>
+          <div className="flex flex-col items-center gap-1">
+            <span className="text-xs font-bold tracking-[0.15em] text-zinc-100">
+              DIARK <span className="text-cyan-400">// OS</span>
+            </span>
+            <span className="text-[11px] tracking-wider text-zinc-500 animate-pulse">
+              Đang khởi tạo nhân hệ thống...
+            </span>
+          </div>
         </div>
       </div>
     );
