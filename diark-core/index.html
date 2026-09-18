@@ -30,9 +30,25 @@
         color: #f4f4f5;
         margin: 0;
         padding: 0;
-        height: 100%;
+        min-height: 100%;
         width: 100%;
-        overflow: hidden;
+        overflow-x: hidden;
+        overflow-y: auto;
+      }
+      /* Custom sleek dark scrollbar */
+      ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+      }
+      ::-webkit-scrollbar-track {
+        background: #09090b;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #27272a;
+        border-radius: 4px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: #3f3f46;
       }
       @keyframes diark-spin {
         to { transform: rotate(360deg); }
