@@ -70,15 +70,21 @@ macro_rules! registered_commands {
             // Portal In-App SSO
             commands::portal_auth::launch_portal_sso_sync,
             commands::portal_auth::launch_wecode_sso_sync,
+            commands::portal_auth::launch_moodle_sso_sync,
             commands::portal_auth::launch_portal_silent_sync,
             commands::portal_auth::launch_wecode_silent_sync,
+            commands::portal_auth::launch_moodle_silent_sync,
             // Wecode
             commands::wecode::get_wecode_submissions,
             commands::wecode::get_wecode_problems,
             commands::wecode::get_wecode_assignments,
             commands::wecode::get_sync_timestamps,
             commands::wecode::ingest_wecode_submissions_json,
-            // Moodle & Workspace
+            // Moodle & Courses Engine
+            commands::moodle::get_moodle_courses,
+            commands::moodle::get_moodle_tasks,
+            commands::moodle::get_moodle_materials,
+            commands::moodle::ingest_moodle_sync_payload_json,
             commands::workspace::ingest_moodle_course_html,
             commands::workspace::get_upcoming_deadlines,
             commands::workspace::mark_deadline_submitted,
@@ -166,15 +172,21 @@ macro_rules! registered_commands {
             // Portal In-App SSO
             commands::portal_auth::launch_portal_sso_sync,
             commands::portal_auth::launch_wecode_sso_sync,
+            commands::portal_auth::launch_moodle_sso_sync,
             commands::portal_auth::launch_portal_silent_sync,
             commands::portal_auth::launch_wecode_silent_sync,
+            commands::portal_auth::launch_moodle_silent_sync,
             // Wecode
             commands::wecode::get_wecode_submissions,
             commands::wecode::get_wecode_problems,
             commands::wecode::get_wecode_assignments,
             commands::wecode::get_sync_timestamps,
             commands::wecode::ingest_wecode_submissions_json,
-            // Moodle & Workspace
+            // Moodle & Courses Engine
+            commands::moodle::get_moodle_courses,
+            commands::moodle::get_moodle_tasks,
+            commands::moodle::get_moodle_materials,
+            commands::moodle::ingest_moodle_sync_payload_json,
             commands::workspace::ingest_moodle_course_html,
             commands::workspace::get_upcoming_deadlines,
             commands::workspace::mark_deadline_submitted,

@@ -130,20 +130,20 @@ export interface CategoryAxisData {
 }
 
 const FOUNDATIONAL_CODES = new Set([
-  "IT001",
   "IT002",
   "IT003",
   "IT012",
   "CS005",
-  "MA004",
-  "MA005",
+  "IT004",
+  "IT005",
+  "IT007",
 ]);
 
 /**
  * Phân loại danh mục môn học UIT dựa theo mã môn học:
  * - Điều kiện/Bổ trợ: PE*, ME*
- * - Cơ sở ngành: IT001, IT002, IT003, IT012, CS005, MA004, MA005
- * - Đại cương: MA*, PH*, SS*, ENG* (loại trừ các môn cơ sở ngành như MA004, MA005)
+ * - Cơ sở ngành: IT002, IT003, IT012, CS005, IT004, IT005, IT007
+ * - Đại cương: MA*, PH*, SS*, ENG*, IT001
  * - Chuyên ngành: Các môn IT/CS nâng cao còn lại.
  */
 export function classifyCourseCategory(courseCode: string): CourseCategory {
@@ -159,12 +159,13 @@ export function classifyCourseCategory(courseCode: string): CourseCategory {
     return "foundational";
   }
 
-  // 3. Đại cương (Toán, Vật lý, Lý luận chính trị, Ngoại ngữ)
+  // 3. Đại cương (Toán, Vật lý, Lý luận chính trị, Ngoại ngữ, Tin học đại cương IT001)
   if (
     normalized.startsWith("MA") ||
     normalized.startsWith("PH") ||
     normalized.startsWith("SS") ||
-    normalized.startsWith("ENG")
+    normalized.startsWith("ENG") ||
+    normalized === "IT001"
   ) {
     return "general";
   }

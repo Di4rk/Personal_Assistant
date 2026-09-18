@@ -28,7 +28,7 @@ import { useWecodeStore } from "./stores/useWecodeStore";
 import { usePrivacyStore } from "./stores/usePrivacyStore";
 import { listInstalledPlugins } from "./lib/plugin-sdk";
 import type { PluginMetaDto } from "./types/plugin";
-import { Code2, GraduationCap, FolderGit2, Blocks, Settings } from "lucide-react";
+import { Code2, GraduationCap, FolderGit2, Blocks, Settings, BookOpen, Terminal } from "lucide-react";
 import { APP_VERSION, APP_SUBTITLE } from "./constants/app";
 import {
   getUserProfile,
@@ -297,6 +297,10 @@ export default function App() {
                   >
                     {p.pluginId === "cp-codeforces" ? (
                       <Code2 className="w-3.5 h-3.5" />
+                    ) : p.pluginId === "uit-courses" ? (
+                      <BookOpen className="w-3.5 h-3.5" />
+                    ) : p.pluginId === "uit-wecode" ? (
+                      <Terminal className="w-3.5 h-3.5" />
                     ) : (
                       <Blocks className="w-3.5 h-3.5" />
                     )}

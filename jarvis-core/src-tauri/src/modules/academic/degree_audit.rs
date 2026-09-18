@@ -7,6 +7,7 @@
 //! - Kiểm toán 4 điều kiện tiên quyết phi tín chỉ (GDQP ME001, GDTC PE231/PE232, Tiếng Anh ENG03, ĐRL >= 65).
 
 use crate::error::{AppError, AppResult};
+use regex::Regex;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -35,6 +36,8 @@ pub struct BlockAuditResult {
     pub compulsory_fulfilled: bool,
     pub missing_compulsory_codes: Vec<String>,
     pub passed_courses: Vec<AuditCourseItem>,
+    #[serde(default)]
+    pub remaining_electives: Vec<AuditCourseItem>,
     pub overflow_credits: f64,
 }
 
@@ -86,9 +89,13 @@ pub fn get_block_display_name(raw_block: &str) -> String {
         raw_block.to_string()
     } else if norm == "cn" || norm == "chuyen nganh" {
         "Chuyên ngành".to_string()
+    } else if norm == "tttn" || norm.contains("thuc tap") {
+        "Thực tập tốt nghiệp".to_string()
+    } else if norm.contains("do an") {
+        raw_block.to_string()
     } else if norm.contains("tu do") || norm.contains("tu chon tu do") || norm == "tu_do" {
         "Tự chọn tự do".to_string()
-    } else if norm == "kltn" || norm.contains("khoa luan") || norm.contains("tot nghiep") {
+    } else if norm == "kltn" || norm.contains("khoa luan") {
         "Khóa luận tốt nghiệp".to_string()
     } else {
         raw_block.to_string()
@@ -150,9 +157,10 @@ pub fn run_degree_audit(conn: &Connection, preferred_slug: Option<&str>) -> AppR
         }
     }
 
-    // 3. Tải danh sách môn học của sinh viên từ academic_courses
+    // 3. Tải danh sách môn học của sinh viên: Hợp nhất academic_courses (theo học kỳ) và academic_curriculum (theo CTĐT)
     let mut raw_student_courses: Vec<StudentCourseRecord> = Vec::new();
     {
+        // 3.1 Nạp từ academic_courses
         let mut stmt = conn.prepare(
             r#"
             SELECT course_code, course_name, credits, summary_score_10, grade_char, semester_id, is_passed
@@ -163,11 +171,16 @@ pub fn run_degree_audit(conn: &Connection, preferred_slug: Option<&str>) -> AppR
         let rows = stmt.query_map([], |row| {
             let code = row.get::<_, String>(0)?.trim().to_uppercase();
             let name = row.get::<_, String>(1)?;
-            let credits = row.get::<_, f64>(2)?;
+            let mut credits = row.get::<_, f64>(2)?;
             let score_10 = row.get::<_, Option<f64>>(3)?;
             let grade_char = row.get::<_, Option<String>>(4)?;
             let sem_id = row.get::<_, String>(5)?;
             let is_passed_raw = row.get::<_, i64>(6)? != 0;
+
+            // Đảm bảo môn phi tín chỉ (ME001, PE231, PE232) luôn giữ 0.0 TC để không phình tổng tín chỉ
+            if code == "ME001" || code.starts_with("PE") {
+                credits = 0.0;
+            }
 
             let is_passed = is_passed_raw
                 || score_10.map(|s| s >= 5.0).unwrap_or(false)
@@ -186,24 +199,94 @@ pub fn run_degree_audit(conn: &Connection, preferred_slug: Option<&str>) -> AppR
         for r in rows {
             raw_student_courses.push(r?);
         }
+
+        // 3.2 Nạp từ academic_curriculum (Bảng điểm theo CTĐT)
+        if let Ok(mut curr_stmt) = conn.prepare(
+            r#"
+            SELECT course_code, course_name, credits, course_type, ideal_term, status, final_score
+            FROM academic_curriculum
+            "#,
+        ) {
+            let curr_rows = curr_stmt.query_map([], |row| {
+                let code = row.get::<_, String>(0)?.trim().to_uppercase();
+                let name = row.get::<_, String>(1)?;
+                let mut credits = row.get::<_, f64>(2)?;
+                let _ctype = row.get::<_, Option<String>>(3)?;
+                let ideal_term = row.get::<_, Option<i64>>(4)?;
+                let status = row.get::<_, Option<String>>(5)?.unwrap_or_default();
+                let final_score = row.get::<_, Option<f64>>(6)?;
+
+                if code == "ME001" || code.starts_with("PE") {
+                    credits = 0.0;
+                }
+
+                let status_lower = status.to_lowercase();
+                let is_passed = status_lower.contains("qua")
+                    || status_lower.contains("đạt")
+                    || status_lower.contains("dat")
+                    || status_lower.contains("miễn")
+                    || status_lower.contains("mien")
+                    || final_score.map(|s| s >= 5.0).unwrap_or(false);
+
+                let grade_char = if is_passed {
+                    if let Some(score) = final_score {
+                        if score >= 9.0 { Some("A+".to_string()) }
+                        else if score >= 8.5 { Some("A".to_string()) }
+                        else if score >= 8.0 { Some("B+".to_string()) }
+                        else if score >= 7.0 { Some("B".to_string()) }
+                        else if score >= 6.5 { Some("C+".to_string()) }
+                        else if score >= 5.5 { Some("C".to_string()) }
+                        else if score >= 5.0 { Some("D+".to_string()) }
+                        else if score >= 4.0 { Some("D".to_string()) }
+                        else { Some("F".to_string()) }
+                    } else {
+                        Some("Đạt".to_string())
+                    }
+                } else {
+                    None
+                };
+
+                let sem_id = ideal_term.map(|t| format!("HK{}", t)).unwrap_or_else(|| "CTĐT".to_string());
+
+                Ok(StudentCourseRecord {
+                    course_code: code,
+                    course_name: name,
+                    credits,
+                    summary_score_10: final_score,
+                    grade_char,
+                    semester_id: sem_id,
+                    is_passed,
+                })
+            })?;
+
+            for r in curr_rows {
+                raw_student_courses.push(r?);
+            }
+        }
     }
 
     // 4. Deduplication: Chỉ giữ điểm cao nhất của môn học lại / học cải thiện
     let mut deduplicated_passed_courses: HashMap<String, StudentCourseRecord> = HashMap::new();
     let mut all_taken_codes: HashSet<String> = HashSet::new();
 
-    for course in raw_student_courses {
+    for mut course in raw_student_courses {
         all_taken_codes.insert(course.course_code.clone());
         if !course.is_passed {
             continue;
         }
 
-        match deduplicated_passed_courses.get(&course.course_code) {
+        if course.course_code == "ME001" || course.course_code.starts_with("PE") {
+            course.credits = 0.0;
+        }
+
+        match deduplicated_passed_courses.get_mut(&course.course_code) {
             Some(existing) => {
                 let existing_score = existing.summary_score_10.unwrap_or(0.0);
                 let current_score = course.summary_score_10.unwrap_or(0.0);
                 if current_score > existing_score {
-                    deduplicated_passed_courses.insert(course.course_code.clone(), course);
+                    *existing = course;
+                } else if existing.grade_char.is_none() && course.grade_char.is_some() {
+                    existing.grade_char = course.grade_char;
                 }
             }
             None => {
@@ -235,6 +318,7 @@ pub fn run_degree_audit(conn: &Connection, preferred_slug: Option<&str>) -> AppR
                     compulsory_fulfilled: true,
                     missing_compulsory_codes: Vec::new(),
                     passed_courses: Vec::new(),
+                    remaining_electives: Vec::new(),
                     overflow_credits: 0.0,
                 },
             );
@@ -263,6 +347,7 @@ pub fn run_degree_audit(conn: &Connection, preferred_slug: Option<&str>) -> AppR
                     compulsory_fulfilled: true,
                     missing_compulsory_codes: Vec::new(),
                     passed_courses: Vec::new(),
+                    remaining_electives: Vec::new(),
                     overflow_credits: 0.0,
                 },
             );
@@ -368,7 +453,27 @@ pub fn run_degree_audit(conn: &Connection, preferred_slug: Option<&str>) -> AppR
         }
     }
 
-    // BƯỚC 6.4: Cập nhật cờ fulfilled và tổng hợp toàn diện
+    // BƯỚC 6.4: Thu thập danh sách các môn tự chọn chưa học của từng khối kiến thức
+    for (block_key, block_result) in block_map.iter_mut() {
+        if let Some(courses_in_block) = curr_courses_by_block.get(block_key) {
+            for c in courses_in_block {
+                if !c.is_compulsory && !deduplicated_passed_courses.contains_key(&c.course_code) {
+                    block_result.remaining_electives.push(AuditCourseItem {
+                        course_code: c.course_code.clone(),
+                        course_name: c.course_name.clone(),
+                        credits: c.credits,
+                        grade_10: None,
+                        grade_char: None,
+                        semester_id: c.recommended_semester.map(|s| format!("HK{}", s)).unwrap_or_else(|| "Tự chọn".to_string()),
+                        is_compulsory: false,
+                        knowledge_block: block_key.clone(),
+                    });
+                }
+            }
+        }
+    }
+
+    // BƯỚC 6.5: Cập nhật cờ fulfilled và tổng hợp toàn diện
     let mut total_earned_credits = 0.0;
     let mut total_required_credits = 0.0;
     let mut all_compulsory_done = true;
@@ -419,8 +524,171 @@ pub fn run_degree_audit(conn: &Connection, preferred_slug: Option<&str>) -> AppR
     })
 }
 
+/// Bóc tách mã CTĐT học vụ từ portal (ví dụ "KHMT-CQUI-D480101 K20") thành các thuộc tính
+#[derive(Debug, Default, Clone)]
+pub struct AcademicCurriculumCodeAnalysis {
+    pub major_token: String,     // "KHMT", "KTPM", "ATTT", v.v.
+    pub tot_code: String,        // "CQUI", "CLC", "CTTT", "BCU", "CQ-VN", "TX", "CNTN"
+    pub major_code: String,      // "D480101", v.v.
+    pub cohort_num: Option<i32>, // 20
+    pub cohort_year: Option<i32>,// 2025
+}
+
+/// Phân tích cú pháp chuỗi curriculum_code lưu trong hồ sơ học vụ
+pub fn parse_curriculum_code_hint(raw: &str) -> AcademicCurriculumCodeAnalysis {
+    let mut analysis = AcademicCurriculumCodeAnalysis::default();
+    let cleaned = raw.trim();
+    if cleaned.is_empty() {
+        return analysis;
+    }
+
+    // 1. Tìm cohort (K20 -> 2005 + 20 = 2025, hoặc 2025)
+    let re_k = Regex::new(r"(?i)\bK(\d{1,2})\b").ok();
+    let re_y = Regex::new(r"\b(20\d{2})\b").ok();
+
+    if let Some(ref re) = re_k {
+        if let Some(caps) = re.captures(cleaned) {
+            if let Some(m) = caps.get(1).and_then(|c| c.as_str().parse::<i32>().ok()) {
+                analysis.cohort_num = Some(m);
+                analysis.cohort_year = Some(2005 + m);
+            }
+        }
+    }
+    if analysis.cohort_year.is_none() {
+        if let Some(ref re) = re_y {
+            if let Some(caps) = re.captures(cleaned) {
+                if let Some(y) = caps.get(1).and_then(|c| c.as_str().parse::<i32>().ok()) {
+                    analysis.cohort_year = Some(y);
+                    analysis.cohort_num = Some(y - 2005);
+                }
+            }
+        }
+    }
+
+    // 2. Tìm tot_code (CQUI, CLC, CTTT, BCU, CQ-VN, TX, CNTN)
+    let upper = cleaned.to_uppercase();
+    if upper.contains("CQUI") || upper.contains("-CQ-") || upper.contains("-CQ") {
+        analysis.tot_code = "CQUI".to_string();
+    } else if upper.contains("CLC") {
+        analysis.tot_code = "CLC".to_string();
+    } else if upper.contains("CTTT") || upper.contains("TIEN TIEN") {
+        analysis.tot_code = "CTTT".to_string();
+    } else if upper.contains("BCU") {
+        analysis.tot_code = "BCU".to_string();
+    } else if upper.contains("CQ-VN") || upper.contains("VIET NHAT") {
+        analysis.tot_code = "CQ-VN".to_string();
+    } else if upper.contains("TX") || upper.contains("TU XA") {
+        analysis.tot_code = "TX".to_string();
+    } else if upper.contains("TAI NANG") || upper.contains("CNTN") {
+        analysis.tot_code = "CNTN".to_string();
+    } else {
+        analysis.tot_code = "CQUI".to_string();
+    }
+
+    // 3. Tìm major_token (KHMT, KTPM, ATTT, HTTT, MMT, KTMT, KHDL, TMDT, TTNT, TKVM, TTDPT, CNTT)
+    for token in ["KHMT", "KTPM", "ATTT", "HTTT", "MMT", "KTMT", "KHDL", "TMDT", "TTNT", "TKVM", "TTDPT", "CNTT"] {
+        if upper.contains(token) {
+            analysis.major_token = token.to_string();
+            break;
+        }
+    }
+
+    // 4. Tìm major_code (D48.... hoặc D52....)
+    if let Ok(re_code) = Regex::new(r"\b(D\d{6})\b") {
+        if let Some(caps) = re_code.captures(&upper) {
+            if let Some(m) = caps.get(1) {
+                analysis.major_code = m.as_str().to_string();
+            }
+        }
+    }
+
+    analysis
+}
+
+/// Đối soát phân tích học vụ với danh mục CTĐT catalog.json để map chính xác 100% slug
+pub fn match_slug_from_catalog(analysis: &AcademicCurriculumCodeAnalysis) -> Option<String> {
+    let entries = crate::services::curriculum_harvester::get_catalog_entries();
+    let target_year = analysis.cohort_year?;
+
+    let major_keywords: &[&str] = match analysis.major_token.as_str() {
+        "KHMT" => &["khoa hoc may tinh", "khoa-hoc-may-tinh"],
+        "KTPM" => &["ky thuat phan mem", "phan-mem"],
+        "ATTT" => &["an toan thong tin", "an-toan"],
+        "HTTT" => &["he thong thong tin", "he-thong"],
+        "MMT" => &["mang may tinh", "mang-may-tinh"],
+        "KTMT" => &["ky thuat may tinh", "ky-thuat-may-tinh"],
+        "KHDL" => &["khoa hoc du lieu", "du-lieu"],
+        "TMDT" => &["thuong mai dien tu", "thuong-mai"],
+        "TTNT" => &["tri tue nhan tao", "tri-tue"],
+        "TKVM" => &["thiet ke vi mach", "vi-mach"],
+        "TTDPT" => &["truyen thong da phuong tien", "truyen-thong"],
+        "CNTT" => &["cong nghe thong tin", "cong-nghe-thong-tin"],
+        _ => &[],
+    };
+
+    let mut best_entry = None;
+    let mut best_score = -1;
+
+    for entry in entries {
+        if let Some(ref years) = entry.intake_years {
+            if !years.contains(&target_year) {
+                continue;
+            }
+        } else {
+            continue;
+        }
+
+        let mut score = 0;
+
+        if let Some(ref entry_tot) = entry.tot_code {
+            if entry_tot.eq_ignore_ascii_case(&analysis.tot_code) {
+                score += 20;
+            } else if analysis.tot_code == "CQUI" && (entry_tot == "CQ" || entry.he_code.as_deref() == Some("CQ")) {
+                score += 10;
+            }
+        } else if analysis.tot_code == "CQUI" && entry.he_code.as_deref() == Some("CQ") {
+            score += 10;
+        }
+
+        let norm_slug = entry.slug.to_lowercase();
+        let norm_name = crate::services::curriculum_harvester::normalize_major_name(&entry.name);
+        for kw in major_keywords {
+            if norm_slug.contains(kw) || norm_name.contains(kw) {
+                score += 30;
+                break;
+            }
+        }
+
+        if analysis.tot_code == "CQUI" {
+            if norm_slug.contains("tai-nang") || norm_slug.contains("chat-luong-cao") || norm_slug.contains("tu-xa") || norm_slug.contains("lien-ket") {
+                score -= 15;
+            }
+        } else if analysis.tot_code == "CLC" {
+            if norm_slug.contains("chat-luong-cao") {
+                score += 25;
+            }
+        } else if analysis.tot_code == "CNTN" || analysis.tot_code == "TN" {
+            if norm_slug.contains("tai-nang") {
+                score += 25;
+            }
+        }
+
+        if score > best_score {
+            best_score = score;
+            best_entry = Some(entry.slug.clone());
+        }
+    }
+
+    if best_score >= 30 {
+        best_entry
+    } else {
+        None
+    }
+}
+
 /// Xác định active curriculum slug dựa trên ưu tiên truyền vào hoặc cơ sở dữ liệu settings.
 fn resolve_active_curriculum_slug(conn: &Connection, preferred_slug: Option<&str>) -> AppResult<String> {
+    // 0. Ưu tiên slug truyền vào trực tiếp nếu hợp lệ
     if let Some(s) = preferred_slug {
         if !s.trim().is_empty() {
             let exists: bool = conn.query_row(
@@ -434,7 +702,60 @@ fn resolve_active_curriculum_slug(conn: &Connection, preferred_slug: Option<&str
         }
     }
 
-    // 1. Kiểm tra settings xem có curriculum_slug lưu thủ công không
+    // 1. Phân tích trực tiếp từ thông tin học vụ (curriculum_code, ví dụ "KHMT-CQUI-D480101 K20")
+    let curriculum_code: Option<String> = conn.query_row(
+        "SELECT value FROM settings WHERE key = 'curriculum_code'",
+        [],
+        |row| row.get(0),
+    ).ok();
+
+    if let Some(ref ccode) = curriculum_code {
+        let mut analysis = parse_curriculum_code_hint(ccode);
+
+        // Bổ sung cohort từ student_id nếu mã học vụ chưa có năm
+        if analysis.cohort_year.is_none() {
+            let student_id: Option<String> = conn.query_row(
+                "SELECT value FROM settings WHERE key = 'student_id'",
+                [],
+                |row| row.get(0),
+            ).ok();
+            if let Some(ref sid) = student_id {
+                if sid.len() >= 2 {
+                    if let Ok(prefix) = sid[..2].parse::<i32>() {
+                        analysis.cohort_year = Some(2000 + prefix);
+                    }
+                }
+            }
+        }
+
+        // Bổ sung major_token từ student_class hoặc user_major nếu thiếu
+        if analysis.major_token.is_empty() {
+            let student_class: Option<String> = conn.query_row(
+                "SELECT value FROM settings WHERE key = 'student_class'",
+                [],
+                |row| row.get(0),
+            ).ok();
+            if let Some(ref sclass) = student_class {
+                let upper = sclass.to_uppercase();
+                for token in ["KHMT", "KTPM", "ATTT", "HTTT", "MMT", "KTMT", "KHDL", "TMDT", "TTNT", "TKVM", "TTDPT", "CNTT"] {
+                    if upper.contains(token) {
+                        analysis.major_token = token.to_string();
+                        break;
+                    }
+                }
+            }
+        }
+
+        if let Some(matched_slug) = match_slug_from_catalog(&analysis) {
+            let _ = conn.execute(
+                "INSERT INTO settings (key, value) VALUES ('curriculum_slug', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                params![matched_slug],
+            );
+            return Ok(matched_slug);
+        }
+    }
+
+    // 2. Kiểm tra settings xem có curriculum_slug đã lưu trước đó không
     let saved_slug: Option<String> = conn.query_row(
         "SELECT value FROM settings WHERE key = 'curriculum_slug'",
         [],
@@ -446,7 +767,7 @@ fn resolve_active_curriculum_slug(conn: &Connection, preferred_slug: Option<&str
         }
     }
 
-    // 2. Tìm dựa trên student_class, student_id hoặc user_major
+    // 3. Fallback: Phân tích theo intro course trong academic_curriculum / user_major / student_class / student_id
     let student_id: Option<String> = conn.query_row(
         "SELECT value FROM settings WHERE key = 'student_id'",
         [],
@@ -455,6 +776,12 @@ fn resolve_active_curriculum_slug(conn: &Connection, preferred_slug: Option<&str
 
     let student_class: Option<String> = conn.query_row(
         "SELECT value FROM settings WHERE key = 'student_class'",
+        [],
+        |row| row.get(0),
+    ).ok();
+
+    let user_major: Option<String> = conn.query_row(
+        "SELECT value FROM settings WHERE key IN ('user_major', 'major_code') ORDER BY rowid DESC LIMIT 1",
         [],
         |row| row.get(0),
     ).ok();
@@ -468,38 +795,92 @@ fn resolve_active_curriculum_slug(conn: &Connection, preferred_slug: Option<&str
         }
     }
 
-    // Phân tích từ tên lớp nếu chưa có năm
     if detected_cohort_year.is_none() {
         if let Some(ref sclass) = student_class {
-            let re = regex::Regex::new(r"20\d{2}").map_err(|e| AppError::CurriculumParse(e.to_string()))?;
-            if let Some(m) = re.find(sclass) {
-                detected_cohort_year = m.as_str().parse::<i32>().ok();
+            if let Ok(re) = Regex::new(r"20\d{2}") {
+                if let Some(m) = re.find(sclass) {
+                    detected_cohort_year = m.as_str().parse::<i32>().ok();
+                }
             }
         }
     }
 
-    // Match theo cohort_year và major
-    if let Some(year) = detected_cohort_year {
-        let mut query = "SELECT slug FROM curriculum_index WHERE cohort_year = ?1 ORDER BY is_cached DESC LIMIT 1".to_string();
-        if let Some(ref sclass) = student_class {
-            let norm = crate::services::curriculum_harvester::normalize_major_name(sclass);
-            if norm.contains("khmt") {
-                query = "SELECT slug FROM curriculum_index WHERE cohort_year = ?1 AND major_name LIKE '%Khoa học Máy tính%' ORDER BY is_cached DESC LIMIT 1".to_string();
-            } else if norm.contains("ktpm") {
-                query = "SELECT slug FROM curriculum_index WHERE cohort_year = ?1 AND major_name LIKE '%Kỹ thuật Phần mềm%' ORDER BY is_cached DESC LIMIT 1".to_string();
-            } else if norm.contains("attt") {
-                query = "SELECT slug FROM curriculum_index WHERE cohort_year = ?1 AND major_name LIKE '%An toàn%' ORDER BY is_cached DESC LIMIT 1".to_string();
-            } else if norm.contains("httt") {
-                query = "SELECT slug FROM curriculum_index WHERE cohort_year = ?1 AND major_name LIKE '%Hệ thống Thông tin%' ORDER BY is_cached DESC LIMIT 1".to_string();
-            }
-        }
+    let cohort_year = detected_cohort_year.unwrap_or(2025);
 
-        if let Ok(slug) = conn.query_row(&query, params![year], |row| row.get::<_, String>(0)) {
-            return Ok(slug);
+    // Tìm major_token:
+    let mut major_token = String::new();
+    if let Some(ref sclass) = student_class {
+        let norm = crate::services::curriculum_harvester::normalize_major_name(sclass);
+        for (token, key) in [
+            ("KHMT", "khmt"), ("KTPM", "ktpm"), ("ATTT", "attt"), ("HTTT", "httt"),
+            ("MMT", "mmt"), ("KTMT", "ktmt"), ("KHDL", "khdl"), ("TMDT", "tmdt"),
+            ("TTNT", "ttnt"), ("TKVM", "tkvm"), ("TTDPT", "ttdpt"), ("CNTT", "cntt"),
+        ] {
+            if norm.contains(key) {
+                major_token = token.to_string();
+                break;
+            }
         }
     }
 
-    // 3. Fallback: Lấy slug đầu tiên có trong bảng hoặc slug mặc định
+    if major_token.is_empty() {
+        if let Some(ref m) = user_major {
+            let m_upper = m.trim().to_uppercase();
+            match m_upper.as_str() {
+                "CS" | "KHMT" => major_token = "KHMT".to_string(),
+                "SE" | "KTPM" => major_token = "KTPM".to_string(),
+                "IS" | "HTTT" => major_token = "HTTT".to_string(),
+                "CE" | "KTMT" => major_token = "KTMT".to_string(),
+                "NT" | "ATTT" => major_token = "ATTT".to_string(),
+                "NET" | "MMT" => major_token = "MMT".to_string(),
+                "DS" | "KHDL" => major_token = "KHDL".to_string(),
+                "AI" | "TTNT" => major_token = "TTNT".to_string(),
+                "EC" | "TMDT" => major_token = "TMDT".to_string(),
+                "IC" | "TKVM" => major_token = "TKVM".to_string(),
+                _ => {}
+            }
+        }
+    }
+
+    // Nếu vẫn chưa có, kiểm tra môn Giới thiệu ngành trong academic_curriculum
+    if major_token.is_empty() {
+        let intro_code: Option<String> = conn.query_row(
+            "SELECT course_code FROM academic_curriculum WHERE course_code IN ('CS005', 'SE005', 'IS005', 'CE005', 'NT015', 'DS005', 'EC005') LIMIT 1",
+            [],
+            |r| r.get(0),
+        ).ok();
+        if let Some(ref icode) = intro_code {
+            match icode.as_str() {
+                "CS005" => major_token = "KHMT".to_string(),
+                "SE005" => major_token = "KTPM".to_string(),
+                "IS005" => major_token = "HTTT".to_string(),
+                "CE005" => major_token = "KTMT".to_string(),
+                "NT015" => major_token = "ATTT".to_string(),
+                "DS005" => major_token = "KHDL".to_string(),
+                "EC005" => major_token = "TMDT".to_string(),
+                _ => {}
+            }
+        }
+    }
+
+    if !major_token.is_empty() {
+        let analysis = AcademicCurriculumCodeAnalysis {
+            major_token: major_token.clone(),
+            tot_code: "CQUI".to_string(),
+            major_code: String::new(),
+            cohort_num: Some(cohort_year - 2005),
+            cohort_year: Some(cohort_year),
+        };
+        if let Some(matched_slug) = match_slug_from_catalog(&analysis) {
+            let _ = conn.execute(
+                "INSERT INTO settings (key, value) VALUES ('curriculum_slug', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                params![matched_slug],
+            );
+            return Ok(matched_slug);
+        }
+    }
+
+    // 4. Default Fallback
     let default_slug: Option<String> = conn.query_row(
         "SELECT slug FROM curriculum_index ORDER BY is_cached DESC, cohort_year DESC LIMIT 1",
         [],
@@ -517,9 +898,14 @@ fn evaluate_non_credit_prerequisites(
     let mut details = Vec::new();
 
     // 1. ME001 (GDQP)
-    let has_gdqp = passed_courses.contains_key("ME001");
-    if has_gdqp {
-        details.push("GDQP: Đã hoàn thành (ME001)".to_string());
+    let gdqp_course = passed_courses.get("ME001");
+    let has_gdqp = gdqp_course.is_some();
+    if let Some(c) = gdqp_course {
+        if let Some(score) = c.summary_score_10 {
+            details.push(format!("GDQP: Đã hoàn thành (ME001 • {:.1} điểm)", score));
+        } else {
+            details.push("GDQP: Đã hoàn thành (ME001)".to_string());
+        }
     } else {
         details.push("GDQP: Chưa hoàn thành chứng chỉ GDQP (ME001)".to_string());
     }
@@ -621,6 +1007,22 @@ mod tests {
                 term_credits INTEGER NOT NULL DEFAULT 0,
                 cumulative_credits INTEGER NOT NULL DEFAULT 0,
                 drl INTEGER
+            );
+
+            CREATE TABLE IF NOT EXISTS academic_curriculum (
+                course_code TEXT PRIMARY KEY,
+                course_name TEXT NOT NULL,
+                credits REAL NOT NULL,
+                course_type TEXT,
+                ideal_term INTEGER,
+                status TEXT,
+                final_score REAL,
+                updated_at INTEGER
+            );
+
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
             );
             "#,
         ).expect("tables");
@@ -728,5 +1130,60 @@ mod tests {
         assert!(report.non_credit_prerequisites.has_gdtc);
         assert!(report.non_credit_prerequisites.has_english);
         assert!(report.non_credit_prerequisites.has_drl_65);
+    }
+
+    #[test]
+    fn test_academic_curriculum_merge_and_gdqp() {
+        let conn = setup_test_curriculum_and_db();
+
+        // Môn ME001 (GDQP) chỉ có trong academic_curriculum với status 'Đã qua' và điểm 7.8
+        conn.execute(
+            "INSERT INTO academic_curriculum (course_code, course_name, credits, course_type, ideal_term, status, final_score)
+             VALUES ('ME001', 'Giáo dục quốc phòng', 0.0, 'Bắt buộc', 1, 'Đã qua', 7.8)",
+            [],
+        ).expect("insert ME001 into academic_curriculum");
+
+        // Một môn học kỳ bình thường IT001
+        conn.execute(
+            "INSERT INTO academic_courses (id, semester_id, course_code, course_name, credits, summary_score_10, is_passed)
+             VALUES ('c1', 'sem1', 'IT001', 'Nhập môn lập trình', 4.0, 9.0, 1)",
+            [],
+        ).expect("insert IT001");
+
+        let report = run_degree_audit(&conn, Some("cu-nhan-nganh-khoa-hoc-may-tinh-khoa-20-2025")).expect("audit");
+
+        // GDQP phải được ghi nhận hoàn thành
+        assert!(report.non_credit_prerequisites.has_gdqp, "ME001 từ academic_curriculum phải được ghi nhận hoàn thành");
+        let gdqp_detail = report.non_credit_prerequisites.details.iter().find(|d| d.contains("GDQP")).unwrap();
+        assert!(gdqp_detail.contains("7.8"), "GDQP detail phải hiển thị điểm 7.8: {gdqp_detail}");
+
+        // Điểm tín chỉ toàn khóa không được bị phình vì ME001
+        assert_eq!(report.total_earned_credits, 4.0, "ME001 không được làm phình tổng tín chỉ tích lũy (chỉ tính 4.0 TC của IT001)");
+    }
+
+    #[test]
+    fn test_curriculum_code_parsing_and_slug_resolution() {
+        let analysis = parse_curriculum_code_hint("KHMT-CQUI-D480101 K20");
+        assert_eq!(analysis.major_token, "KHMT");
+        assert_eq!(analysis.tot_code, "CQUI");
+        assert_eq!(analysis.cohort_num, Some(20));
+        assert_eq!(analysis.cohort_year, Some(2025));
+
+        let slug = match_slug_from_catalog(&analysis);
+        assert_eq!(slug, Some("cu-nhan-nganh-khoa-hoc-may-tinh-khoa-20-2025".to_string()));
+    }
+
+    #[test]
+    fn test_remaining_electives_populated() {
+        let conn = setup_test_curriculum_and_db();
+
+        let report = run_degree_audit(&conn, Some("cu-nhan-nganh-khoa-hoc-may-tinh-khoa-20-2025")).expect("audit");
+        for b in &report.block_audits {
+            println!("Block: '{}' ({}) - remaining electives: {}", b.knowledge_block, b.block_name_display, b.remaining_electives.len());
+        }
+
+        // Tìm một khối kiến thức có môn tự chọn (ví dụ khối Chuyên ngành CN hoặc tự chọn)
+        let has_any_electives = report.block_audits.iter().any(|b| !b.remaining_electives.is_empty());
+        assert!(has_any_electives, "Phải có ít nhất một khối kiến thức có remaining_electives khi sinh viên chưa học");
     }
 }

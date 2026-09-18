@@ -89,5 +89,6 @@ export interface WecodeCourseSummary {
 export interface SyncTimestamps {
   portal_last_synced_at: number;
   wecode_last_synced_at: number;
+  moodle_last_synced_at?: number;
 }
 

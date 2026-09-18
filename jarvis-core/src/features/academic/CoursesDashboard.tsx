@@ -1,0 +1,590 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import {
+  BookOpen,
+  User,
+  Mail,
+  Phone,
+  FileText,
+  Clock,
+  Download,
+  ExternalLink,
+  Copy,
+  Check,
+  RefreshCw,
+  Sparkles,
+  AlertCircle,
+  Layers,
+  ChevronRight,
+} from 'lucide-react';
+import {
+  getMoodleCourses,
+  getMoodleTasks,
+  getMoodleMaterials,
+  openExternalUrl,
+  MoodleCourse,
+  MoodleTask,
+  MoodleMaterial,
+} from '../../lib/tauri-client';
+import { useSyncOrchestratorStore } from './stores/syncOrchestratorStore';
+import { SyncMoodleModal } from './components/SyncMoodleModal';
+import { UnifiedQuestHub } from './components/UnifiedQuestHub';
+import { useTauriEvent } from '../../hooks/useTauriEvent';
+
+export const CoursesDashboard: React.FC = () => {
+  const [courses, setCourses] = useState<MoodleCourse[]>([]);
+  const [selectedCourseId, setSelectedCourseId] = useState<number | null>(null);
+  const [tasks, setTasks] = useState<MoodleTask[]>([]);
+  const [materials, setMaterials] = useState<MoodleMaterial[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [activeTab, setActiveTab] = useState<'courses' | 'quests'>('courses');
+  const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
+  const [copiedField, setCopiedField] = useState<string | null>(null);
+
+  const { requestSync, serviceState } = useSyncOrchestratorStore();
+  const moodleSync = serviceState.moodle;
+  const isSyncing = moodleSync.isSyncing;
+
+  const loadData = async () => {
+    setLoading(true);
+    try {
+      const courseList = await getMoodleCourses();
+      setCourses(courseList);
+      if (courseList.length > 0) {
+        // Keep current selected course or default to first
+        setSelectedCourseId((prev) => {
+          if (prev && courseList.some((c) => c.course_id === prev)) {
+            return prev;
+          }
+          return courseList[0].course_id;
+        });
+      }
+    } catch (err) {
+      console.error('[CoursesDashboard] Lỗi tải môn học Moodle:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  useTauriEvent('moodle-data-synced', () => {
+    loadData();
+  });
+
+  // Load tasks & materials for selected course
+  useEffect(() => {
+    if (!selectedCourseId) {
+      setTasks([]);
+      setMaterials([]);
+      return;
+    }
+
+    let isMounted = true;
+    Promise.all([
+      getMoodleTasks(selectedCourseId).catch(() => []),
+      getMoodleMaterials(selectedCourseId).catch(() => []),
+    ]).then(([taskList, materialList]) => {
+      if (isMounted) {
+        setTasks(taskList);
+        setMaterials(materialList);
+      }
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedCourseId]);
+
+  const selectedCourse = useMemo(() => {
+    return courses.find((c) => c.course_id === selectedCourseId) || null;
+  }, [courses, selectedCourseId]);
+
+  // Group materials by section_name
+  const materialsBySection = useMemo(() => {
+    const grouped: Record<string, MoodleMaterial[]> = {};
+    for (const m of materials) {
+      const sec = m.section_name || 'Chung';
+      if (!grouped[sec]) grouped[sec] = [];
+      grouped[sec].push(m);
+    }
+    return grouped;
+  }, [materials]);
+
+  const handleCopy = (text: string, field: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedField(field);
+    setTimeout(() => setCopiedField(null), 2000);
+  };
+
+  const handleSyncClick = async () => {
+    await requestSync('moodle', { bypassTtl: true });
+  };
+
+  const formatRemainingTime = (dueTs: number): string => {
+    if (!dueTs) return 'Không thời hạn';
+    const nowSec = Math.floor(Date.now() / 1000);
+    const diff = dueTs - nowSec;
+    if (diff <= 0) return 'Đã hết hạn';
+    const hours = Math.floor(diff / 3600);
+    const minutes = Math.floor((diff % 3600) / 60);
+    if (hours < 1) return `còn ${minutes} phút`;
+    if (hours < 24) return `còn ${hours} giờ ${minutes} phút`;
+    const days = Math.floor(hours / 24);
+    return `còn ${days} ngày`;
+  };
+
+  const formatDueDate = (dueTs: number): string => {
+    if (!dueTs) return 'Chưa xác định';
+    const d = new Date(dueTs * 1000);
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year = d.getFullYear();
+    const hours = String(d.getHours()).padStart(2, '0');
+    const minutes = String(d.getMinutes()).padStart(2, '0');
+    return `${day}/${month}/${year} ${hours}:${minutes}`;
+  };
+
+  const renderFileBadge = (fileType: string) => {
+    const type = fileType.toLowerCase();
+    if (type === 'pdf') {
+      return (
+        <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-rose-500/15 text-rose-400 border border-rose-500/30">
+          PDF
+        </span>
+      );
+    }
+    if (type === 'pptx' || type === 'powerpoint') {
+      return (
+        <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30">
+          PPTX
+        </span>
+      );
+    }
+    if (type === 'docx' || type === 'word') {
+      return (
+        <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-sky-500/15 text-sky-400 border border-sky-500/30">
+          DOCX
+        </span>
+      );
+    }
+    return (
+      <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+        LINK
+      </span>
+    );
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Top Header & Sub-navigation */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-zinc-800 pb-5">
+        <div>
+          <div className="flex items-center gap-3">
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-sky-500/10 text-sky-400 border border-sky-500/20">
+              <BookOpen className="h-5 w-5" />
+            </span>
+            <div>
+              <div className="flex items-center gap-2">
+                <h1 className="text-xl font-black tracking-tight text-white">Courses Engine</h1>
+                <span className="rounded-full bg-sky-500/15 px-2.5 py-0.5 text-xs font-mono font-semibold text-sky-400 border border-sky-500/30">
+                  Moodle UIT
+                </span>
+                <span className="rounded bg-zinc-800 px-2 py-0.5 text-[11px] font-mono text-zinc-400">
+                  HK2 2025-2026
+                </span>
+              </div>
+              <p className="mt-0.5 text-xs text-zinc-400">
+                Chuẩn hóa không gian lớp học phẳng: Giảng viên, Nhiệm vụ nộp bài và Danh mục slide bài giảng.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* View Switcher & Sync Button */}
+        <div className="flex flex-wrap items-center gap-2.5">
+          <div className="flex rounded-lg border border-zinc-800 bg-zinc-900 p-0.5 text-xs">
+            <button
+              onClick={() => setActiveTab('courses')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium transition-colors cursor-pointer ${
+                activeTab === 'courses'
+                  ? 'bg-sky-600 text-white shadow-sm'
+                  : 'text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              <Layers className="h-3.5 w-3.5" />
+              <span>Lớp môn học ({courses.length})</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('quests')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium transition-colors cursor-pointer ${
+                activeTab === 'quests'
+                  ? 'bg-amber-600 text-white shadow-sm'
+                  : 'text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              <span>Unified Quest Hub</span>
+            </button>
+          </div>
+
+          <button
+            onClick={handleSyncClick}
+            disabled={isSyncing}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-sky-600/30 bg-sky-600/10 hover:bg-sky-600/20 text-xs font-medium text-sky-300 transition-colors cursor-pointer disabled:opacity-50"
+            title="Tự động đồng bộ môn học và tài liệu Moodle"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${isSyncing ? 'animate-spin text-sky-400' : ''}`} />
+            <span>{isSyncing ? 'Đang đồng bộ...' : 'Đồng bộ Moodle'}</span>
+          </button>
+
+          <button
+            onClick={() => setIsModalOpen(true)}
+            className="px-2.5 py-1.5 rounded-lg border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-xs text-zinc-300 transition-colors cursor-pointer"
+            title="Đăng nhập lại hoặc nạp JSON"
+          >
+            Tùy chọn
+          </button>
+        </div>
+      </div>
+
+      {/* Auth Expired Alert */}
+      {moodleSync.authStatus === 'expired' && (
+        <div className="flex items-center justify-between p-3.5 rounded-xl border border-rose-500/30 bg-rose-950/20 text-xs text-rose-300">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="h-4 w-4 shrink-0 text-rose-400" />
+            <span>Phiên đăng nhập Moodle UIT đã hết hạn. Vui lòng đăng nhập lại để cập nhật tài liệu mới.</span>
+          </div>
+          <button
+            onClick={() => setIsModalOpen(true)}
+            className="px-3 py-1 rounded bg-rose-600 hover:bg-rose-500 text-white font-semibold transition-colors cursor-pointer"
+          >
+            Đăng nhập lại
+          </button>
+        </div>
+      )}
+
+      {/* Main Content Area */}
+      {activeTab === 'quests' ? (
+        <UnifiedQuestHub />
+      ) : loading ? (
+        <div className="flex flex-col items-center justify-center py-20 text-zinc-500 gap-3">
+          <RefreshCw className="h-6 w-6 animate-spin text-sky-400" />
+          <span className="text-xs font-mono">Đang tải danh sách môn học...</span>
+        </div>
+      ) : courses.length === 0 ? (
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-12 text-center space-y-4">
+          <BookOpen className="mx-auto h-12 w-12 text-zinc-600" />
+          <div className="space-y-1">
+            <h3 className="text-base font-semibold text-zinc-200">Chưa có dữ liệu môn học Moodle</h3>
+            <p className="text-xs text-zinc-400 max-w-md mx-auto">
+              Nhấn nút &quot;Đồng bộ Moodle&quot; phía trên để tự động thu thập danh sách môn học, slide bài giảng và hạn chót nộp bài.
+            </p>
+          </div>
+          <button
+            onClick={() => setIsModalOpen(true)}
+            className="inline-flex items-center gap-2 rounded-lg bg-sky-600 px-4 py-2 text-xs font-semibold text-white hover:bg-sky-500 transition-colors"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+            <span>Đồng bộ ngay bây giờ</span>
+          </button>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          {/* Left Column: Course Selector (4 cols) */}
+          <div className="lg:col-span-4 space-y-2.5">
+            <div className="flex items-center justify-between text-xs font-semibold text-zinc-400 uppercase tracking-wider px-1">
+              <span>Môn học kỳ này ({courses.length})</span>
+            </div>
+
+            <div className="space-y-2 max-h-[700px] overflow-y-auto pr-1">
+              {courses.map((course) => {
+                const isSelected = course.course_id === selectedCourseId;
+                return (
+                  <button
+                    key={course.course_id}
+                    onClick={() => setSelectedCourseId(course.course_id)}
+                    className={`w-full text-left p-3.5 rounded-xl border transition-all cursor-pointer ${
+                      isSelected
+                        ? 'border-sky-500 bg-sky-950/20 shadow-sm'
+                        : 'border-zinc-800/80 bg-zinc-900/60 hover:border-zinc-700 hover:bg-zinc-900'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2 mb-1.5">
+                      <span className="font-mono text-xs font-bold text-sky-400 bg-sky-500/10 px-2 py-0.5 rounded border border-sky-500/20">
+                        {course.course_code}
+                      </span>
+                      {isSelected && <ChevronRight className="h-4 w-4 text-sky-400" />}
+                    </div>
+
+                    <div className="font-medium text-xs text-zinc-100 line-clamp-2 mb-2">
+                      {course.fullname}
+                    </div>
+
+                    {course.instructor_name && (
+                      <div className="flex items-center gap-1.5 text-[11px] text-zinc-400 truncate">
+                        <User className="h-3 w-3 text-zinc-500 shrink-0" />
+                        <span className="truncate">{course.instructor_name}</span>
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Right Column: 3 Clean Flat Zones (8 cols) */}
+          <div className="lg:col-span-8 space-y-6">
+            {selectedCourse ? (
+              <>
+                {/* ZONE 1: THÔNG TIN GIẢNG VIÊN */}
+                <div className="rounded-xl border border-zinc-800 bg-zinc-900/80 p-5 space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-zinc-800/60 pb-3.5">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-xs font-bold text-sky-400 bg-sky-500/10 px-2 py-0.5 rounded border border-sky-500/20">
+                          {selectedCourse.course_code}
+                        </span>
+                        <span className="text-xs text-zinc-400">{selectedCourse.term}</span>
+                      </div>
+                      <h2 className="text-base font-bold text-white mt-1">{selectedCourse.fullname}</h2>
+                    </div>
+
+                    <button
+                      onClick={() => openExternalUrl(selectedCourse.course_url)}
+                      className="flex items-center gap-1 text-xs text-sky-400 hover:text-sky-300 self-start sm:self-center transition-colors"
+                      title="Mở trực tiếp trên Moodle UIT"
+                    >
+                      <span>Mở Moodle</span>
+                      <ExternalLink className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+
+                  {/* Instructor Contacts Card */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="p-3 rounded-lg border border-zinc-800 bg-zinc-950/60 flex items-center gap-3">
+                      <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-sky-500/10 text-sky-400 shrink-0">
+                        <User className="h-4 w-4" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-[11px] text-zinc-500">Giảng viên phụ trách</div>
+                        <div className="text-xs font-semibold text-zinc-200 truncate">
+                          {selectedCourse.instructor_name || 'Đang cập nhật'}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="p-3 rounded-lg border border-zinc-800 bg-zinc-950/60 flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-amber-500/10 text-amber-400 shrink-0">
+                          <Mail className="h-4 w-4" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="text-[11px] text-zinc-500">Email liên hệ</div>
+                          <div className="text-xs font-semibold text-zinc-200 truncate">
+                            {selectedCourse.instructor_mail || 'Chưa có email'}
+                          </div>
+                        </div>
+                      </div>
+                      {selectedCourse.instructor_mail && (
+                        <button
+                          onClick={() => handleCopy(selectedCourse.instructor_mail, 'mail')}
+                          className="p-1 text-zinc-500 hover:text-zinc-300 transition-colors"
+                          title="Copy email"
+                        >
+                          {copiedField === 'mail' ? (
+                            <Check className="h-3.5 w-3.5 text-emerald-400" />
+                          ) : (
+                            <Copy className="h-3.5 w-3.5" />
+                          )}
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="p-3 rounded-lg border border-zinc-800 bg-zinc-950/60 flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-400 shrink-0">
+                          <Phone className="h-4 w-4" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="text-[11px] text-zinc-500">Điện thoại</div>
+                          <div className="text-xs font-semibold text-zinc-200 truncate">
+                            {selectedCourse.instructor_phone || 'Chưa có SĐT'}
+                          </div>
+                        </div>
+                      </div>
+                      {selectedCourse.instructor_phone && (
+                        <button
+                          onClick={() => handleCopy(selectedCourse.instructor_phone, 'phone')}
+                          className="p-1 text-zinc-500 hover:text-zinc-300 transition-colors"
+                          title="Copy số điện thoại"
+                        >
+                          {copiedField === 'phone' ? (
+                            <Check className="h-3.5 w-3.5 text-emerald-400" />
+                          ) : (
+                            <Copy className="h-3.5 w-3.5" />
+                          )}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* ZONE 2: NHIỆM VỤ CẦN NỘP KÈM FILE TEMPLATE */}
+                <div className="rounded-xl border border-zinc-800 bg-zinc-900/80 p-5 space-y-4">
+                  <div className="flex items-center justify-between border-b border-zinc-800/60 pb-3">
+                    <div className="flex items-center gap-2">
+                      <span className="flex h-6 w-6 items-center justify-center rounded-md bg-amber-500/10 text-amber-400">
+                        <Clock className="h-3.5 w-3.5" />
+                      </span>
+                      <h3 className="text-sm font-bold text-white">Nhiệm vụ & Bài tập cần nộp</h3>
+                      <span className="rounded-full bg-zinc-800 px-2 py-0.2 text-[11px] font-mono text-zinc-400">
+                        {tasks.length}
+                      </span>
+                    </div>
+                  </div>
+
+                  {tasks.length === 0 ? (
+                    <div className="py-6 text-center text-xs text-zinc-500 font-mono">
+                      Môn học này hiện chưa có bài tập hoặc nhiệm vụ cần nộp.
+                    </div>
+                  ) : (
+                    <div className="space-y-2.5">
+                      {tasks.map((task) => (
+                        <div
+                          key={task.task_id}
+                          className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-lg border border-zinc-800 bg-zinc-950/40 hover:border-zinc-700 transition-colors"
+                        >
+                          <div className="space-y-1 min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <span
+                                className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold uppercase ${
+                                  task.task_type === 'quiz'
+                                    ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20'
+                                    : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                                }`}
+                              >
+                                {task.task_type === 'quiz' ? 'Quiz' : 'Assign'}
+                              </span>
+                              <span className="font-semibold text-xs text-zinc-200 truncate">
+                                {task.title}
+                              </span>
+                            </div>
+
+                            <div className="flex items-center gap-3 text-[11px] font-mono text-zinc-500">
+                              <span className="text-amber-400 font-medium">
+                                {formatRemainingTime(task.due_date)}
+                              </span>
+                              <span>•</span>
+                              <span>Hạn nộp: {formatDueDate(task.due_date)}</span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2 shrink-0">
+                            {task.template_file_url && (
+                              <button
+                                onClick={() => openExternalUrl(task.template_file_url)}
+                                className="flex items-center gap-1 px-2.5 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-xs text-zinc-300 transition-colors"
+                                title="Tải mẫu đề đính kèm (.docx / .pdf)"
+                              >
+                                <Download className="h-3 w-3 text-sky-400" />
+                                <span>Mẫu nộp</span>
+                              </button>
+                            )}
+
+                            <button
+                              onClick={() => openExternalUrl(task.task_url)}
+                              className="flex items-center gap-1.5 px-3 py-1 rounded bg-sky-600 hover:bg-sky-500 text-xs font-semibold text-white transition-colors"
+                            >
+                              <span>Nộp bài</span>
+                              <ExternalLink className="h-3 w-3" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* ZONE 3: DANH MỤC SLIDE & TÀI LIỆU HỌC TẬP */}
+                <div className="rounded-xl border border-zinc-800 bg-zinc-900/80 p-5 space-y-4">
+                  <div className="flex items-center justify-between border-b border-zinc-800/60 pb-3">
+                    <div className="flex items-center gap-2">
+                      <span className="flex h-6 w-6 items-center justify-center rounded-md bg-emerald-500/10 text-emerald-400">
+                        <FileText className="h-3.5 w-3.5" />
+                      </span>
+                      <h3 className="text-sm font-bold text-white">Slide bài giảng & Tài liệu môn học</h3>
+                      <span className="rounded-full bg-zinc-800 px-2 py-0.2 text-[11px] font-mono text-zinc-400">
+                        {materials.length} files
+                      </span>
+                    </div>
+                  </div>
+
+                  {materials.length === 0 ? (
+                    <div className="py-6 text-center text-xs text-zinc-500 font-mono">
+                      Chưa có slide hoặc tài liệu học tập được đồng bộ cho môn này.
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {Object.entries(materialsBySection).map(([sectionName, sectionMaterials]) => (
+                        <div key={sectionName} className="space-y-2">
+                          <div className="text-xs font-mono font-semibold text-zinc-400 flex items-center gap-2">
+                            <span className="h-1.5 w-1.5 rounded-full bg-sky-400"></span>
+                            <span>{sectionName}</span>
+                            <span className="text-[10px] text-zinc-600 font-normal">
+                              ({sectionMaterials.length} tài liệu)
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                            {sectionMaterials.map((mat) => (
+                              <div
+                                key={mat.id || mat.file_url}
+                                className="group flex items-center justify-between p-2.5 rounded-lg border border-zinc-800/60 bg-zinc-950/40 hover:border-zinc-700 transition-colors text-xs"
+                              >
+                                <div className="flex items-center gap-2 min-w-0 flex-1">
+                                  {renderFileBadge(mat.file_type)}
+                                  <span className="font-medium text-zinc-200 group-hover:text-sky-300 transition-colors truncate">
+                                    {mat.title}
+                                  </span>
+                                </div>
+
+                                <button
+                                  onClick={() => openExternalUrl(mat.file_url)}
+                                  className="text-zinc-500 hover:text-sky-400 p-1 transition-colors shrink-0"
+                                  title="Mở hoặc tải file"
+                                >
+                                  <Download className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </>
+            ) : (
+              <div className="py-20 text-center text-xs text-zinc-500 font-mono">
+                Chọn một môn học từ danh sách bên trái để xem chi tiết.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Sync Moodle Modal */}
+      <SyncMoodleModal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        onSyncSuccess={() => {
+          loadData();
+        }}
+      />
+    </div>
+  );
+};
+
+export default CoursesDashboard;

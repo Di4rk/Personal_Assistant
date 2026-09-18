@@ -6,6 +6,7 @@ const FIRST_PARTY_PLUGIN_IDS: &[&str] = &[
     "cp-codeforces",
     "cp-leetcode",
     "uit-wecode",
+    "uit-courses",
     "sec-ctf",
     "ai-lab",
 ];
@@ -367,9 +368,10 @@ mod tests {
             .map(|r| r.unwrap())
             .collect::<Vec<_>>();
 
-        assert_eq!(plugins.len(), 5);
+        assert_eq!(plugins.len(), 6);
         assert!(plugins.iter().any(|p| p.plugin_id == "cp-codeforces" && p.trust_tier == "first_party"));
         assert!(plugins.iter().any(|p| p.plugin_id == "uit-wecode" && p.is_enabled));
+        assert!(plugins.iter().any(|p| p.plugin_id == "uit-courses" && p.is_enabled));
     }
 
     #[test]

@@ -206,6 +206,25 @@ pub struct UpsertSemesterDto {
 pub fn ensure_academic_schema(conn: &Connection) -> SqlResult<()> {
     conn.execute_batch(
         r#"
+        CREATE TABLE IF NOT EXISTS settings (
+            key   TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS curriculum_courses (
+            id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+            slug                 TEXT NOT NULL,
+            course_code          TEXT NOT NULL,
+            course_name          TEXT NOT NULL,
+            credits              REAL NOT NULL,
+            theory_credits       REAL,
+            practical_credits    REAL,
+            knowledge_block      TEXT NOT NULL,
+            is_compulsory        INTEGER NOT NULL DEFAULT 1,
+            recommended_semester INTEGER,
+            created_at           INTEGER NOT NULL DEFAULT 0
+        );
+
         CREATE TABLE IF NOT EXISTS academic_semesters (
             id             TEXT PRIMARY KEY,
             academic_year  TEXT NOT NULL,
@@ -459,11 +478,17 @@ pub fn self_heal_academic_data(conn: &Connection) -> SqlResult<()> {
         [],
     );
 
-    // 8. Chuẩn hóa category cho các môn Cơ sở ngành của UIT
+    // 8. Chuẩn hóa category cho các môn Cơ sở ngành và Đại cương của UIT
     let _ = conn.execute(
         "UPDATE academic_courses
          SET category = 'co_so_nganh'
-         WHERE course_code IN ('IT001', 'IT002', 'IT003', 'IT012', 'CS005', 'MA004', 'MA005');",
+         WHERE course_code IN ('IT002', 'IT003', 'IT012', 'CS005');",
+        [],
+    );
+    let _ = conn.execute(
+        "UPDATE academic_courses
+         SET category = 'dai_cuong'
+         WHERE course_code IN ('IT001', 'MA004', 'MA005');",
         [],
     );
 
@@ -582,15 +607,19 @@ pub fn get_courses_by_semester(
 ) -> SqlResult<Vec<AcademicCourseRecord>> {
     let mut stmt = conn.prepare(
         r#"
-        SELECT id, semester_id, course_code, course_name, credits,
-               midterm_score, final_score, other_scores,
-               summary_score_10, summary_score_4, grade_char,
-               is_passed, is_gpa_calculated, created_at, updated_at,
-               process_point, practice_point, final_point, course_point,
-               grade_4, result_status, category, status, note
-        FROM academic_courses
-        WHERE semester_id = ?1
-        ORDER BY course_code ASC
+        SELECT c.id, c.semester_id, c.course_code, c.course_name, c.credits,
+               c.midterm_score, c.final_score, c.other_scores,
+               c.summary_score_10, c.summary_score_4, c.grade_char,
+               c.is_passed, c.is_gpa_calculated, c.created_at, c.updated_at,
+               c.process_point, c.practice_point, c.final_point, c.course_point,
+               c.grade_4, c.result_status,
+               COALESCE(curr.knowledge_block, c.category) AS category,
+               c.status, c.note
+        FROM academic_courses c
+        LEFT JOIN settings s ON s.key = 'curriculum_slug'
+        LEFT JOIN curriculum_courses curr ON curr.slug = s.value AND curr.course_code = c.course_code
+        WHERE c.semester_id = ?1
+        ORDER BY c.course_code ASC
         "#,
     )?;
 

@@ -76,6 +76,8 @@ fn spawn_watchdog(app: AppHandle, window_label: String, token: CancellationToken
 pub const INJECTED_PORTAL_SCRIPT: &str = include_str!("../../../injected_portal_script.js");
 pub const PORTAL_HARVESTER_SCRIPT: &str = include_str!("../../../scripts/portal_harvester.js");
 pub const WECODE_HARVESTER_SCRIPT: &str = include_str!("../../../scripts/wecode_harvester.js");
+pub const MOODLE_HARVESTER_SCRIPT: &str = include_str!("../../../scripts/moodle_harvester.js");
+pub const MOODLE_LOGIN_URL: &str = "https://courses.uit.edu.vn/my/";
 
 pub const UNIVERSAL_GUARDIAN_SCRIPT: &str = r#"
 (() => {
@@ -1786,6 +1788,199 @@ pub async fn launch_wecode_silent_sync(app: AppHandle) -> Result<(), String> {
         Ok(result) => result,
         Err(_) => Err("CANCELLED".to_string()),
     }
+}
+
+fn close_moodle_window(app: &AppHandle) {
+    let partial_state_registry = if let Some(reg) = app.try_state::<PartialStateRegistry>() {
+        reg.inner().clone()
+    } else {
+        PartialStateRegistry::default()
+    };
+    if let Some(watchdog) = app.try_state::<WatchdogRegistry>() {
+        watchdog.cancel("moodle-sso-login");
+    }
+    close_silent_window(app, "moodle-sso-login", &partial_state_registry);
+}
+
+#[tauri::command]
+pub async fn launch_moodle_silent_sync(app: AppHandle) -> Result<(), String> {
+    let window_label = "moodle-silent-sync".to_string();
+
+    let partial_state_registry = if let Some(reg) = app.try_state::<PartialStateRegistry>() {
+        reg.inner().clone()
+    } else {
+        PartialStateRegistry::default()
+    };
+
+    close_silent_window(&app, &window_label, &partial_state_registry);
+
+    let auth_url = WebviewUrl::External(
+        MOODLE_LOGIN_URL
+            .parse()
+            .map_err(|e| format!("Invalid Moodle URL: {e}"))?,
+    );
+
+    let (tx, rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
+    let tx_arc = Arc::new(StdMutex::new(Some(tx)));
+
+    // 120s Watchdog Invariant
+    let tx_watchdog = tx_arc.clone();
+    let app_watchdog = app.clone();
+    let label_watchdog = window_label.clone();
+    let partial_watchdog = partial_state_registry.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(120)).await;
+        if let Ok(mut lock) = tx_watchdog.lock() {
+            if let Some(sender) = lock.take() {
+                close_silent_window(&app_watchdog, &label_watchdog, &partial_watchdog);
+                let _ = sender.send(Err("TIMEOUT".to_string()));
+            }
+        }
+    });
+
+    let tx_nav = tx_arc.clone();
+    let app_nav = app.clone();
+    let label_nav = window_label.clone();
+    let partial_for_nav = partial_state_registry.clone();
+
+    let window = WebviewWindowBuilder::new(&app, &window_label, auth_url)
+        .title("Diark Moodle Silent Sync")
+        .visible(false)
+        .initialization_script(MOODLE_HARVESTER_SCRIPT)
+        .on_navigation(move |url| {
+            let url_str = url.as_str();
+
+            // Detect expired auth: redirected to login
+            if url_str.contains("login.microsoftonline.com")
+                || (url_str.contains("/login") && !url_str.contains("diark-sso"))
+                || url_str.contains("/dang-nhap")
+            {
+                if let Ok(mut lock) = tx_nav.lock() {
+                    if let Some(sender) = lock.take() {
+                        let _ = sender.send(Err("AUTH_EXPIRED".to_string()));
+                    }
+                }
+                close_silent_window(&app_nav, &label_nav, &partial_for_nav);
+                return false;
+            }
+
+            // Intercept Callback (Atomic Commit)
+            if url_str.starts_with(CALLBACK_SCHEME) {
+                let fragment_opt = url.fragment().or_else(|| url_str.strip_prefix("diark-sso://callback#"));
+                if let Some(fragment) = fragment_opt {
+                    let target = extract_query_param(fragment, "target");
+                    if target == "moodle" {
+                        println!("[Moodle Silent] Moodle sync completed via background API engine!");
+                        let _ = app_nav.emit("moodle-data-synced", ());
+                        let _ = app_nav.emit("sso-callback-success", "moodle");
+                    }
+                }
+
+                if let Ok(mut lock) = tx_nav.lock() {
+                    if let Some(sender) = lock.take() {
+                        let _ = sender.send(Ok(()));
+                    }
+                }
+                close_silent_window(&app_nav, &label_nav, &partial_for_nav);
+                return false;
+            }
+
+            // Intercept Callback Failed
+            if url_str.starts_with(CALLBACK_FAIL_SCHEME) {
+                let reason = extract_query_param(url_str, "reason");
+                if let Ok(mut lock) = tx_nav.lock() {
+                    if let Some(sender) = lock.take() {
+                        let _ = sender.send(Err(format!("SERVER_ERROR: {reason}")));
+                    }
+                }
+                close_silent_window(&app_nav, &label_nav, &partial_for_nav);
+                return false;
+            }
+
+            if url_str.starts_with("diark-sso://") {
+                return false;
+            }
+
+            true
+        })
+        .build();
+
+    if let Err(e) = window {
+        return Err(format!("Failed to build silent moodle webview: {e}"));
+    }
+
+    match rx.await {
+        Ok(result) => result,
+        Err(_) => Err("CANCELLED".to_string()),
+    }
+}
+
+#[tauri::command]
+pub async fn launch_moodle_sso_sync(app: AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("moodle-sso-login") {
+        let _ = window.show();
+        let _ = window.set_focus();
+        return Ok(());
+    }
+
+    let auth_url = WebviewUrl::External(
+        MOODLE_LOGIN_URL
+            .parse()
+            .map_err(|e| format!("Invalid Moodle URL: {e}"))?,
+    );
+
+    let token = if let Some(watchdog) = app.try_state::<WatchdogRegistry>() {
+        watchdog.register("moodle-sso-login")
+    } else {
+        CancellationToken::new()
+    };
+    spawn_watchdog(app.clone(), "moodle-sso-login".to_string(), token);
+
+    let app_for_nav = app.clone();
+
+    let window = WebviewWindowBuilder::new(&app, "moodle-sso-login", auth_url)
+        .title("Đồng bộ Courses UIT (Moodle)")
+        .inner_size(900.0, 750.0)
+        .resizable(true)
+        .always_on_top(true)
+        .initialization_script(MOODLE_HARVESTER_SCRIPT)
+        .on_navigation(move |url| {
+            let url_str = url.as_str();
+
+            if url_str.starts_with(CALLBACK_SCHEME) {
+                let fragment_opt = url.fragment().or_else(|| url_str.strip_prefix("diark-sso://callback#"));
+                if let Some(fragment) = fragment_opt {
+                    let target = extract_query_param(fragment, "target");
+                    if target == "moodle" {
+                        println!("[SSO Moodle] Moodle sync completed via interactive window!");
+                        let _ = app_for_nav.emit("moodle-data-synced", ());
+                        let _ = app_for_nav.emit("sso-callback-success", "moodle");
+                    }
+                }
+                close_moodle_window(&app_for_nav);
+                return false;
+            }
+
+            if url_str.starts_with(CALLBACK_FAIL_SCHEME) {
+                let reason = extract_query_param(url_str, "reason");
+                let _ = app_for_nav.emit("sso-callback-error", reason.to_string());
+                close_moodle_window(&app_for_nav);
+                return false;
+            }
+
+            if url_str.starts_with("diark-sso://") {
+                return false;
+            }
+
+            true
+        })
+        .build();
+
+    if let Err(e) = window {
+        return Err(format!("Failed to build moodle SSO webview: {e}"));
+    }
+
+    Ok(())
 }
 
 

@@ -185,7 +185,7 @@ pub fn execute_reset_user_data_to_genesis(conn: &mut rusqlite::Connection) -> Re
     tx.execute("DELETE FROM course_workspace_config;", [])?;
 
     // Xóa các bảng tùy chọn/tương thích nếu tồn tại
-    for opt_table in &["student_profile", "daily_life_matrix"] {
+    for opt_table in &["student_profile", "daily_life_matrix", "academic_curriculum", "sync_state"] {
         let exists: bool = tx
             .query_row(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
@@ -217,6 +217,11 @@ pub fn execute_reset_user_data_to_genesis(conn: &mut rusqlite::Connection) -> Re
             'specialization',
             'student_class',
             'curriculum_code',
+            'curriculum_slug',
+            'student_curriculum_slug',
+            'preferred_curriculum_slug',
+            'total_degree_credits',
+            'english_cert_verified',
             'admission_year',
             'user_major',
             'cf_handle'
@@ -376,6 +381,29 @@ mod tests {
             [],
         ).unwrap();
 
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS academic_curriculum (
+                course_code TEXT PRIMARY KEY,
+                course_name TEXT NOT NULL,
+                credits INTEGER NOT NULL,
+                course_type TEXT NOT NULL,
+                ideal_term INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                final_score REAL,
+                updated_at INTEGER NOT NULL
+            )",
+            [],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO academic_curriculum (course_code, course_name, credits, course_type, ideal_term, status, final_score, updated_at)
+             VALUES ('CS005', 'Giới thiệu ngành KHMT', 1, 'Bắt buộc', 1, 'Đã qua', 9.7, 1000)",
+            [],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('curriculum_slug', 'cu-nhan-nganh-khoa-hoc-may-tinh-khoa-20-2025')",
+            [],
+        ).unwrap();
+
         // Thêm community plugin (is_builtin = 0)
         conn.execute(
             "INSERT INTO plugin_registry (plugin_id, name, version, author, category, is_enabled, is_builtin)
@@ -399,6 +427,12 @@ mod tests {
 
         let courses_count: i64 = conn.query_row("SELECT COUNT(*) FROM academic_courses", [], |r| r.get(0)).unwrap();
         assert_eq!(courses_count, 0);
+
+        let curr_count: i64 = conn.query_row("SELECT COUNT(*) FROM academic_curriculum", [], |r| r.get(0)).unwrap();
+        assert_eq!(curr_count, 0, "Bảng academic_curriculum của sinh viên phải bị xóa sạch khi reset genesis");
+
+        let curr_slug_count: i64 = conn.query_row("SELECT COUNT(*) FROM settings WHERE key = 'curriculum_slug'", [], |r| r.get(0)).unwrap();
+        assert_eq!(curr_slug_count, 0, "curriculum_slug phải bị xóa khi reset genesis");
 
         let semesters_count: i64 = conn.query_row("SELECT COUNT(*) FROM academic_semesters", [], |r| r.get(0)).unwrap();
         assert_eq!(semesters_count, 0);
@@ -441,6 +475,6 @@ mod tests {
             [],
             |r| r.get(0),
         ).unwrap();
-        assert_eq!(builtin_plugins_count, 5, "5 builtin plugins phải được bảo tồn");
+        assert_eq!(builtin_plugins_count, 6, "6 builtin plugins phải được bảo tồn");
     }
 }

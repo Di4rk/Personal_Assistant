@@ -102,6 +102,38 @@ pub fn canonicalize_block_name(raw: &str) -> String {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CatalogEntry {
+    pub id: Option<i64>,
+    pub slug: String,
+    pub name: String,
+    pub he_code: Option<String>,
+    pub tot_code: Option<String>,
+    pub intake_years: Option<Vec<i32>>,
+    pub major: Option<String>,
+}
+
+/// Nạp danh mục CTĐT chính thức từ catalog.json tĩnh (không phụ thuộc file IO runtime)
+pub fn get_catalog_entries() -> &'static [CatalogEntry] {
+    static ENTRIES: LazyLock<Vec<CatalogEntry>> = LazyLock::new(|| {
+        let raw = include_str!("../../resources/default_curriculum_catalog.json");
+        serde_json::from_str(raw).unwrap_or_default()
+    });
+    &ENTRIES
+}
+
+/// Tra cứu tên tiếng Việt chuẩn có dấu trực tiếp từ catalog.json theo slug
+pub fn lookup_catalog_name_by_slug(slug: &str) -> Option<String> {
+    static MAP: LazyLock<HashMap<String, String>> = LazyLock::new(|| {
+        let mut map = HashMap::new();
+        for entry in get_catalog_entries() {
+            map.insert(entry.slug.clone(), entry.name.clone());
+        }
+        map
+    });
+    MAP.get(slug).cloned()
+}
+
 use std::sync::LazyLock;
 
 static H1_SEL: LazyLock<Selector> = LazyLock::new(|| Selector::parse("h1").unwrap_or_else(|_| Selector::parse("*").expect("valid selector")));
@@ -119,15 +151,40 @@ static RE_CREDITS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)Số\s+t�
 static RE_SEM: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"Học kỳ\s+(\d+)").unwrap_or_else(|_| Regex::new(".*").expect("valid regex")));
 static RE_MAJOR: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)ngành\s+([^(]+)").unwrap_or_else(|_| Regex::new(".*").expect("valid regex")));
 
+static RE_RSC_H1: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"\["\$","h1",null,\{[^}]*?"children":"([^"]+)""#)
+        .unwrap_or_else(|_| Regex::new(".*").expect("valid regex"))
+});
+static RE_RSC_TITLE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#""children":"([^"]+?)\s*—\s*Cổng thông tin UIT""#)
+        .unwrap_or_else(|_| Regex::new(".*").expect("valid regex"))
+});
+
 /// Phân giải Next.js RSC payload của Cổng thông tin UIT thành cấu trúc dữ liệu CTĐT.
 /// Áp dụng thuật toán Heading-to-Sibling Traversal để tìm table.table-bordered kế tiếp.
 pub fn parse_curriculum_stream(rsc_content: &str, slug: &str) -> AppResult<ParsedCurriculum> {
     let document = Html::parse_document(rsc_content);
 
-    // 1. Phân giải tiêu đề & khóa từ h1
+    // 1. Phân giải tiêu đề & khóa từ catalog.json hoặc RSC payload
+    let catalog_name = lookup_catalog_name_by_slug(slug);
+
     let mut page_title = String::new();
     if let Some(h1) = document.select(&H1_SEL).next() {
         page_title = h1.text().collect::<String>().trim().to_string();
+    }
+    if page_title.is_empty() {
+        if let Some(caps) = RE_RSC_H1.captures(rsc_content) {
+            if let Some(m) = caps.get(1) {
+                page_title = m.as_str().trim().to_string();
+            }
+        }
+    }
+    if page_title.is_empty() {
+        if let Some(caps) = RE_RSC_TITLE.captures(rsc_content) {
+            if let Some(m) = caps.get(1) {
+                page_title = m.as_str().trim().to_string();
+            }
+        }
     }
 
     let cohort_year = {
@@ -382,14 +439,16 @@ pub fn parse_curriculum_stream(rsc_content: &str, slug: &str) -> AppResult<Parse
             .sum()
     });
 
-    let major_name = if !page_title.is_empty() {
+    let major_name = if let Some(cat_name) = catalog_name {
+        cat_name
+    } else if !page_title.is_empty() {
         if let Some(caps) = RE_MAJOR.captures(&page_title) {
             caps.get(1).map(|m| m.as_str().trim().to_string()).unwrap_or(page_title)
         } else {
             page_title
         }
     } else {
-        slug.replace('-', " ")
+        "Chương trình đào tạo UIT".to_string()
     };
 
     Ok(ParsedCurriculum {
@@ -403,42 +462,35 @@ pub fn parse_curriculum_stream(rsc_content: &str, slug: &str) -> AppResult<Parse
     })
 }
 
+/// Chuẩn hóa lại toàn bộ major_name trong curriculum_index theo catalog.json có dấu tiếng Việt
+pub fn sync_curriculum_catalog_names(conn: &Connection) -> AppResult<usize> {
+    let entries = get_catalog_entries();
+    let tx = conn.unchecked_transaction()?;
+    let mut updated = 0;
+    {
+        let mut stmt = tx.prepare(
+            "UPDATE curriculum_index SET major_name = ?1 WHERE slug = ?2"
+        )?;
+        for entry in entries {
+            let affected = stmt.execute(params![entry.name, entry.slug])?;
+            updated += affected;
+        }
+    }
+    tx.commit()?;
+    println!("[CurriculumHarvester] Synchronized {} curriculum display names with accents", updated);
+    Ok(updated)
+}
+
 /// Nạp danh mục CTĐT mặc định vào cơ sở dữ liệu nếu bảng curriculum_index còn rỗng.
 pub fn seed_curriculum_catalog_if_empty(conn: &Connection) -> AppResult<usize> {
     let count: i64 = conn.query_row("SELECT COUNT(*) FROM curriculum_index", [], |row| row.get(0))?;
     if count > 0 {
+        // Luôn đồng bộ tên chuẩn có dấu cho các bản ghi đã có
+        let _ = sync_curriculum_catalog_names(conn);
         return Ok(0);
     }
 
-    let catalog_json_paths = [
-        std::path::PathBuf::from("resources/default_curriculum_catalog.json"),
-        std::path::PathBuf::from("src-tauri/resources/default_curriculum_catalog.json"),
-        std::path::PathBuf::from("../src-tauri/resources/default_curriculum_catalog.json"),
-    ];
-
-    let mut found_path = None;
-    for p in &catalog_json_paths {
-        if p.exists() {
-            found_path = Some(p.clone());
-            break;
-        }
-    }
-
-    let path = match found_path {
-        Some(p) => p,
-        None => {
-            eprintln!("[CurriculumHarvester] default_curriculum_catalog.json not found, skipping seeding");
-            return Ok(0);
-        }
-    };
-
-    let content = std::fs::read_to_string(&path)?;
-    let items: serde_json::Value = serde_json::from_str(&content)?;
-    let arr = match items.as_array() {
-        Some(a) => a,
-        None => return Ok(0),
-    };
-
+    let entries = get_catalog_entries();
     let tx = conn.unchecked_transaction()?;
     let mut inserted = 0;
     {
@@ -451,33 +503,29 @@ pub fn seed_curriculum_catalog_if_empty(conn: &Connection) -> AppResult<usize> {
         )?;
 
         let now = chrono::Local::now().timestamp();
-        for item in arr {
-            let slug = match item.get("slug").and_then(|v| v.as_str()) {
-                Some(s) => s,
-                None => continue,
+        for item in entries {
+            let slug = &item.slug;
+            let display_name = if !item.name.is_empty() {
+                item.name.as_str()
+            } else {
+                item.major.as_deref().unwrap_or("Công nghệ thông tin")
             };
-            let major = item.get("major").and_then(|v| v.as_str()).unwrap_or("Công nghệ thông tin");
-            let name = item.get("name").and_then(|v| v.as_str()).unwrap_or("");
-            let he_code = item.get("he_code").and_then(|v| v.as_str()).unwrap_or("CQ");
+            let he_code = item.he_code.as_deref().unwrap_or("CQ");
 
-            let cohort_year = item.get("intake_years")
-                .and_then(|v| v.as_array())
-                .and_then(|arr| arr.first())
-                .and_then(|y| y.as_i64())
-                .map(|y| y as i32);
+            let cohort_year = item.intake_years.as_ref().and_then(|arr| arr.first()).copied();
 
             let cohort_num = {
                 let re = Regex::new(r"(?i)kh[oó]a\s+(\d+)").map_err(|e| AppError::CurriculumParse(e.to_string()))?;
-                re.captures(name)
+                re.captures(&item.name)
                     .and_then(|c| c.get(1))
                     .and_then(|m| m.as_str().parse::<i32>().ok())
             };
 
-            let degree_level = if name.contains("Kỹ sư") { "Kỹ sư" } else { "Cử nhân" };
+            let degree_level = if item.name.contains("Kỹ sư") { "Kỹ sư" } else { "Cử nhân" };
 
             stmt.execute(params![
                 slug,
-                major,
+                display_name,
                 degree_level,
                 cohort_year,
                 cohort_num,

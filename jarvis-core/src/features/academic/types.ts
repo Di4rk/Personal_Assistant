@@ -303,6 +303,7 @@ export interface BlockAuditResult {
   compulsoryFulfilled: boolean;
   missingCompulsoryCodes: string[];
   passedCourses: AuditCourseItem[];
+  remainingElectives?: AuditCourseItem[];
   overflowCredits: number;
 }
 
