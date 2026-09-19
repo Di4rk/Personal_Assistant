@@ -11,14 +11,7 @@ permissions:
 
 jobs:
   release:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: 'windows-latest'
-            args: ''
-
-    runs-on: ${{ matrix.platform }}
+    runs-on: windows-latest
 
     steps:
       - name: Checkout repository
@@ -34,22 +27,17 @@ jobs:
         with:
           workspaces: 'diark-core/src-tauri -> diark-core/src-tauri/target'
 
-      - name: Install pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 11
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'pnpm'
-          cache-dependency-path: 'diark-core/pnpm-lock.yaml'
+
+      - name: Install pnpm
+        run: npm install -g pnpm@11
 
       - name: Install frontend dependencies
-        run: |
-          cd diark-core
-          pnpm install --no-frozen-lockfile
+        working-directory: diark-core
+        run: pnpm install --no-frozen-lockfile
 
       - name: Build and Package Tauri App
         uses: tauri-apps/tauri-action@v0
@@ -62,4 +50,3 @@ jobs:
           releaseBody: 'Phiên bản DIARK OS chính thức. Vui lòng tải file cài đặt (.exe) bên dưới.'
           releaseDraft: false
           prerelease: false
-          args: ${{ matrix.args }}
