@@ -917,7 +917,7 @@ pub fn ingest_dynamic_academic_data(
 pub fn get_academic_macro_metrics_ssot(
     db: tauri::State<'_, SharedDb>,
 ) -> Result<Vec<AcademicMacroMetricSSOT>, String> {
-    let mut conn = db.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
+    let conn = db.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
 
     // Tự động phục hồi và chuẩn hóa dữ liệu học kỳ / loại bỏ LATEST
     crate::db::academic::self_heal_academic_data(&conn)
@@ -965,23 +965,7 @@ pub fn get_academic_macro_metrics_ssot(
         Ok(list)
     };
 
-    let has_mock: bool = conn
-        .query_row(
-            "SELECT COUNT(*) FROM academic_courses WHERE course_code LIKE 'PE00%' OR (course_code = 'CS005' AND semester_id = '2025-2026.2')",
-            [],
-            |row| row.get::<_, i64>(0),
-        )
-        .map(|cnt| cnt > 0)
-        .unwrap_or(false);
-
-    let mut list = query_fn(&conn)?;
-
-    // Tự động dọn dẹp mock và seed dữ liệu chuẩn nếu phát hiện mock courses
-    if has_mock {
-        crate::db::academic::purge_and_seed_canonical_data(&mut conn)
-            .map_err(|e| format!("Lỗi purge_and_seed_canonical_data: {e}"))?;
-        list = query_fn(&conn)?;
-    }
+    let list = query_fn(&conn)?;
 
     Ok(list)
 }
