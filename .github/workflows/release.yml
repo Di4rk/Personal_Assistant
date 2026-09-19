@@ -38,10 +38,20 @@ jobs:
           version: 11
           run_install: false
 
+      - name: Remove workspace config to avoid CI conflict
+        shell: pwsh
+        run: |
+          if (Test-Path "diark-core/pnpm-workspace.yaml") {
+            Remove-Item "diark-core/pnpm-workspace.yaml" -Force
+            Write-Host "Removed pnpm-workspace.yaml"
+          }
+
       - name: Install frontend dependencies
         working-directory: diark-core
         shell: pwsh
-        run: pnpm install --no-frozen-lockfile --ignore-workspace
+        run: |
+          pnpm install --no-frozen-lockfile
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build and Package Tauri App
         uses: tauri-apps/tauri-action@v0
