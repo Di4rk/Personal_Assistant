@@ -40,7 +40,8 @@ jobs:
 
       - name: Install frontend dependencies
         working-directory: diark-core
-        run: pnpm install --no-frozen-lockfile
+        shell: pwsh
+        run: pnpm install --no-frozen-lockfile --ignore-workspace
 
       - name: Build and Package Tauri App
         uses: tauri-apps/tauri-action@v0
