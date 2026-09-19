@@ -60,6 +60,6 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: 'DIARK OS ${{ github.ref_name }}'
           releaseBody: 'Phiên bản DIARK OS chính thức. Vui lòng tải file cài đặt (.exe) bên dưới.'
-          releaseDraft: true
+          releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
