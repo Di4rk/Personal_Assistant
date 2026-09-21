@@ -64,3 +64,4 @@ jobs:
           releaseBody: 'Phiên bản DIARK OS chính thức. Vui lòng tải file cài đặt (.exe) bên dưới..'
           releaseDraft: false
           prerelease: false
+          githubToken: ${{ secrets.GITHUB_TOKEN }}
