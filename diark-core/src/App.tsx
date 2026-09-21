@@ -296,7 +296,7 @@ export default function App() {
   const { profile } = profileState;
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col">
+    <div className="h-full overflow-y-auto overflow-x-hidden bg-zinc-950 text-zinc-100">
       <header className="sticky top-0 z-40 flex items-center justify-between border-b border-slate-800 bg-slate-950/90 backdrop-blur-md px-6 py-4">
         <div>
           <h1 className="text-xl font-black tracking-wider text-white">
@@ -378,7 +378,7 @@ export default function App() {
         </div>
       </header>
 
-      <main className="flex-1 p-6">
+      <main className="p-6">
         {activeTab === "academic" ? (
           <AcademicDashboard />
         ) : activeTab === "vault" ? (

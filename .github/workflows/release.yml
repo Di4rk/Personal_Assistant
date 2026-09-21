@@ -38,20 +38,20 @@ jobs:
           version: 11
           run_install: false
 
-      - name: Remove workspace config to avoid CI conflict
-        shell: pwsh
-        run: |
-          if (Test-Path "diark-core/pnpm-workspace.yaml") {
-            Remove-Item "diark-core/pnpm-workspace.yaml" -Force
-            Write-Host "Removed pnpm-workspace.yaml"
-          }
-
       - name: Install frontend dependencies
         working-directory: diark-core
         shell: pwsh
+        env:
+          PNPM_IGNORE_WORKSPACE: "true"
         run: |
-          pnpm install --no-frozen-lockfile
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Write-Host "=== pnpm version ==="
+          pnpm --version
+          Write-Host "=== workspace files ==="
+          Get-ChildItem -Filter "pnpm-workspace*" | ForEach-Object { Write-Host $_.Name }
+          Write-Host "=== running pnpm install ==="
+          pnpm install --no-frozen-lockfile 2>&1
+          Write-Host "Exit code: $LASTEXITCODE"
+          exit $LASTEXITCODE
 
       - name: Build and Package Tauri App
         uses: tauri-apps/tauri-action@v0
@@ -61,6 +61,6 @@ jobs:
           projectPath: './diark-core'
           tagName: ${{ github.ref_name }}
           releaseName: 'DIARK OS ${{ github.ref_name }}'
-          releaseBody: 'Phiên bản DIARK OS chính thức. Vui lòng tải file cài đặt (.exe) bên dưới.'
+          releaseBody: 'Phiên bản DIARK OS chính thức. Vui lòng tải file cài đặt (.exe) bên dưới..'
           releaseDraft: false
           prerelease: false
