@@ -1,4 +1,4 @@
-# DIARK OS (v1.0.0)
+# DIARK OS (v1.1.0)
 
 > **Personal Engineering & Academic Operating System**  
 > *Local-first desktop environment for Competitive Programming (ICPC), Academic Management (UIT Portal & Moodle), and Socratic Pedagogical AI Coaching.*
@@ -69,6 +69,11 @@ DIARK is designed with a strict **Zero-Cloud, Local-First, Zero-Leak** philosoph
 - **Exam Countdown Clock**: High-efficiency countdown timer that dynamically manages CPU utilization and only runs when exams are upcoming.
 - **Preparation Checklist**: Persistent per-exam checklists for student IDs, calculators, and revision notes.
 - **Native Windows Notifications**: Rate-limited briefing notifications with 30-minute cooldowns to eliminate spam.
+
+### 6. 🔄 Auto-Update & Continuous Delivery (@tauri-apps/plugin-updater)
+- **Zero-Friction Updates**: Seamless background version checking against official GitHub Releases with cryptographic signature verification (Minisign).
+- **In-App Updater UI**: Native dark-mode changelog inspector, byte-level progress bar, and automated application restart (`@tauri-apps/plugin-process`).
+- **Automated CI/CD Release Pipeline**: GitHub Actions workflow builds, signs with private keys, and publishes release assets upon pushing version tags (`v*`).
 
 ---
 

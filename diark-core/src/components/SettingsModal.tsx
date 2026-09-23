@@ -19,6 +19,7 @@ import {
 } from '../lib/tauri-client';
 import { listInstalledPlugins, togglePlugin } from '../lib/plugin-sdk';
 import { PluginMetaDto } from '../types/plugin';
+import { APP_VERSION } from '../constants/app';
 import {
   User,
   Blocks,
@@ -341,7 +342,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = () => {
           </div>
 
           <div className="px-2 pt-4 border-t border-slate-800/80 font-mono text-[10px] text-slate-500">
-            DIARK // OS v1.0.0
+            DIARK // OS {APP_VERSION}
           </div>
         </div>
 
@@ -825,7 +826,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = () => {
                         <span>CẬP NHẬT HỆ THỐNG (AUTO-UPDATE)</span>
                       </div>
                       <p className="text-[11px] text-slate-400 mt-1">
-                        Kênh phát hành chính thức từ GitHub Releases. Phiên bản hiện tại: <span className="font-mono text-cyan-400">v1.0.0</span>
+                        Kênh phát hành chính thức từ GitHub Releases. Phiên bản hiện tại: <span className="font-mono text-cyan-400">{APP_VERSION}</span>
                       </p>
                     </div>
                     <button
