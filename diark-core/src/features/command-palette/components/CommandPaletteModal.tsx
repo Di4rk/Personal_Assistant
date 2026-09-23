@@ -10,8 +10,8 @@ import {
 } from "lucide-react";
 import { searchVault, openOnenoteLink, getVaultStats } from "@/lib/tauri-client";
 import type { VaultSearchResultDto, VaultRecentNote } from "@/features/vault/types";
-import { QuickCaptureModal } from "@/features/vault/components/QuickCaptureModal";
 import { useCommandPalette } from "../hooks/useCommandPalette";
+import { useQuickCaptureStore } from "@/stores/useQuickCaptureStore";
 
 interface PaletteItem {
   id: string;
@@ -29,7 +29,6 @@ export const CommandPaletteModal: React.FC = () => {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [searchResults, setSearchResults] = useState<VaultSearchResultDto[]>([]);
   const [recentNotes, setRecentNotes] = useState<VaultRecentNote[]>([]);
-  const [isQuickCaptureOpen, setIsQuickCaptureOpen] = useState<boolean>(false);
 
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -129,7 +128,7 @@ export const CommandPaletteModal: React.FC = () => {
     if (item.type === "action") {
       if (item.id === "action-quick-note") {
         setIsOpen(false);
-        setIsQuickCaptureOpen(true);
+        useQuickCaptureStore.getState().openQuickCapture();
       }
     } else {
       if (item.externalUri) {
@@ -159,11 +158,10 @@ export const CommandPaletteModal: React.FC = () => {
     } else if (e.key === "Escape") {
       e.preventDefault();
       setIsOpen(false);
-      void hideHud();
     }
   };
 
-  if (!isOpen && !isQuickCaptureOpen) {
+  if (!isOpen) {
     return null;
   }
 
@@ -306,13 +304,6 @@ export const CommandPaletteModal: React.FC = () => {
           </div>
         </div>
       )}
-
-      {/* QuickCaptureModal triggered from Command Palette */}
-      <QuickCaptureModal
-        isOpen={isQuickCaptureOpen}
-        onClose={() => setIsQuickCaptureOpen(false)}
-        onSuccess={() => void loadRecent()}
-      />
     </>
   );
 };

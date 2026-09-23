@@ -30,10 +30,6 @@ export function useCommandPalette() {
           }
           return next;
         });
-      } else if (e.key === "Escape" && isOpen) {
-        e.preventDefault();
-        setIsOpen(false);
-        void hideHudBackend().catch(() => {});
       }
     };
 
@@ -44,7 +40,7 @@ export function useCommandPalette() {
       window.removeEventListener("keydown", handleKeyDown);
       unlistenPromise.then((unlisten) => unlisten()).catch(() => {});
     };
-  }, [isOpen]);
+  }, []);
 
   const hideHud = async () => {
     setIsOpen(false);
