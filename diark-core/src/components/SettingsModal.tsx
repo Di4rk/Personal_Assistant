@@ -37,6 +37,7 @@ import {
   EyeOff,
   CheckCircle2,
   AlertCircle,
+  ArrowUpCircle,
 } from 'lucide-react';
 
 interface SettingsModalProps {
@@ -813,6 +814,31 @@ export const SettingsModal: React.FC<SettingsModalProps> = () => {
                       </div>
                     </div>
                   )}
+                </div>
+
+                {/* Auto-Updater Section */}
+                <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="flex items-center gap-2 text-slate-200 font-semibold text-xs font-mono">
+                        <ArrowUpCircle className="w-4 h-4 text-violet-400" />
+                        <span>CẬP NHẬT HỆ THỐNG (AUTO-UPDATE)</span>
+                      </div>
+                      <p className="text-[11px] text-slate-400 mt-1">
+                        Kênh phát hành chính thức từ GitHub Releases. Phiên bản hiện tại: <span className="font-mono text-cyan-400">v1.0.0</span>
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        window.dispatchEvent(new CustomEvent('check-app-updates'));
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-violet-500/40 bg-violet-600/20 hover:bg-violet-600/30 text-violet-300 font-mono text-xs transition cursor-pointer"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      <span>Kiểm tra bản mới</span>
+                    </button>
+                  </div>
                 </div>
               </div>
             )}

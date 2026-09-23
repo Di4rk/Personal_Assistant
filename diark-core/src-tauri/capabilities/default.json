@@ -10,6 +10,9 @@
     "global-shortcut:allow-is-registered",
     "dialog:allow-open",
     "autostart:default",
-    "notification:default"
+    "notification:default",
+    "updater:default",
+    "process:default",
+    "process:allow-restart"
   ]
 }

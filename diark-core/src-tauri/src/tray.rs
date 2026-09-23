@@ -27,7 +27,7 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         .on_menu_event(|app, event| match event.id.as_ref() {
             "show" => {
                 if let Some(window) = app.get_webview_window("main") {
-                    let _ = show_and_focus_hud(&window);
+                    let _ = show_and_focus_main(&window);
                 }
             }
             "briefing" => {
@@ -53,12 +53,9 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
             {
                 let app = tray.app_handle();
                 if let Some(window) = app.get_webview_window("main") {
-                    let is_visible = window.is_visible().unwrap_or(false);
-                    if is_visible {
-                        let _ = window.hide();
-                    } else {
-                        let _ = show_and_focus_hud(&window);
-                    }
+                    // Tray click = restore the dashboard. Never emit hud-shown
+                    // (that overlay is reserved for Alt+K / Quick Note).
+                    let _ = show_and_focus_main(&window);
                 }
             }
         })
@@ -67,12 +64,19 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-pub fn show_and_focus_hud(window: &tauri::WebviewWindow) -> Result<(), String> {
+/// Restore and focus the main dashboard without opening the HUD / Quick Note overlay.
+pub fn show_and_focus_main(window: &tauri::WebviewWindow) -> Result<(), String> {
     window.unminimize().map_err(|e| e.to_string())?;
     window.show().map_err(|e| e.to_string())?;
     let _ = window.set_always_on_top(true);
     window.set_focus().map_err(|e| e.to_string())?;
     let _ = window.set_always_on_top(false);
+    Ok(())
+}
+
+/// Alt+K HUD path: same restore as the main window, then emit `hud-shown` for the overlay.
+pub fn show_and_focus_hud(window: &tauri::WebviewWindow) -> Result<(), String> {
+    show_and_focus_main(window)?;
     window.emit("hud-shown", ()).map_err(|e| e.to_string())?;
     Ok(())
 }

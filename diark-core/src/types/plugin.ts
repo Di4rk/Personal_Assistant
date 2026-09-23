@@ -11,6 +11,11 @@ export interface PluginMetaDto {
   trustTier: PluginTrustTier;
 }
 
+/** Remount key for the plugin nav/viewport tree when enable flags change. */
+export function pluginViewportKey(plugins: PluginMetaDto[]): string {
+  return plugins.map((p) => `${p.pluginId}:${p.isEnabled ? "on" : "off"}`).join("|");
+}
+
 export interface ActivityEventInput {
   eventDate: string;
   eventType: string;

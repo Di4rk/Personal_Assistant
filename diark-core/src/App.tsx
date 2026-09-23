@@ -21,6 +21,8 @@ import { DevControlDock } from "./components/DevControlDock";
 import { PluginMarketplaceModal } from "./components/PluginMarketplaceModal";
 import { PluginViewportRouter } from "./features/plugins/PluginViewportRouter";
 import { SettingsModal } from "./components/SettingsModal";
+import { AutoUpdateModal } from "./components/AutoUpdateModal";
+import { useAutoUpdater } from "./hooks/useAutoUpdater";
 import { QuickCaptureModal } from "./features/vault/components/QuickCaptureModal";
 import { useQuickCaptureStore } from "./stores/useQuickCaptureStore";
 import { useSettingsStore } from "./stores/useSettingsStore";
@@ -48,6 +50,27 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<string>("academic");
   const [plugins, setPlugins] = useState<PluginMetaDto[]>([]);
   const [isPluginModalOpen, setIsPluginModalOpen] = useState(false);
+
+  // Auto-Update Engine (Tauri v2 official updater plugin)
+  const {
+    status: updateStatus,
+    updateInfo,
+    downloadProgress,
+    downloadedBytes,
+    totalBytes,
+    error: updateError,
+    checkForUpdates,
+    installUpdate,
+    dismissUpdate,
+  } = useAutoUpdater();
+
+  useEffect(() => {
+    const handleManualCheck = () => {
+      void checkForUpdates(true);
+    };
+    window.addEventListener("check-app-updates", handleManualCheck);
+    return () => window.removeEventListener("check-app-updates", handleManualCheck);
+  }, [checkForUpdates]);
 
   const handleResetIdentity = () => {
     setProfileState({ status: "needs-onboarding" });
@@ -463,6 +486,17 @@ export default function App() {
 
       <SettingsModal onResetGenesis={handleResetToGenesis} />
       <DevControlDock onResetIdentity={handleResetIdentity} />
+
+      <AutoUpdateModal
+        status={updateStatus}
+        updateInfo={updateInfo}
+        downloadProgress={downloadProgress}
+        downloadedBytes={downloadedBytes}
+        totalBytes={totalBytes}
+        error={updateError}
+        onInstall={() => void installUpdate()}
+        onDismiss={dismissUpdate}
+      />
     </div>
   );
 }

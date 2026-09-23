@@ -34,5 +34,13 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/Di4rk/Personal_Assistant/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDlDRDI4NjAyMURDOTg0OEEKUldTS2hNa2RBb2JTbkltNFdzTTdhVnVOQUllR2ZzU0R1UnVoTGZvcmdQbzdtdUxTeGVWRDN5cW8K"
+    }
   }
 }
