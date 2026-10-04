@@ -9,7 +9,15 @@ export interface GeminiStreamChunk {
   session_id: string;
   chunk: string;
   is_done: boolean;
-  error?: string | null;
+  error: string | null;
+}
+
+export interface StreamBuffer {
+  pendingText: string;
+  rafId: number | null;
+  append(chunk: string): void;
+  flush(): void;
+  dispose(): void;
 }
 
 export interface SocraticDebugRequest {

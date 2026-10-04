@@ -7,6 +7,7 @@ pub mod plugins;
 pub mod portal_auth;
 pub mod post_mortem;
 pub mod settings;
+pub mod system;
 pub mod vault;
 pub mod wecode;
 pub mod workspace;
@@ -146,18 +147,12 @@ fn xp_to_tier(xp: i64) -> &'static str {
     }
 }
 
-/// Lấy toàn bộ daily_activity của 1 năm để render lưới Heatmap 365 ô.
-/// Trả về TẤT CẢ ngày trong năm (kể cả ngày 0 hoạt động) để frontend không phải
-/// tự tính ngày thiếu - tránh lệch lịch giữa Rust (server-side date) và JS (client-side date).
-#[tauri::command]
-pub fn get_yearly_heatmap(
-    db: tauri::State<'_, SharedDb>,
+pub(crate) fn compute_yearly_heatmap_days(
+    conn: &rusqlite::Connection,
     year: i32,
 ) -> Result<Vec<HeatmapDay>, String> {
     use chrono::{Datelike, Duration, NaiveDate};
     use std::collections::HashMap;
-
-    let conn = db.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
 
     let mut stmt = conn
         .prepare(
@@ -185,7 +180,8 @@ pub fn get_yearly_heatmap(
 
     // Điền đủ 365/366 ngày, ngày nào không có data thì mặc định 0 (tier "rest").
     let start = NaiveDate::from_ymd_opt(year, 1, 1).ok_or("Năm không hợp lệ")?;
-    let is_leap = NaiveDate::from_ymd_opt(year, 12, 31).unwrap().ordinal() == 366;
+    let end = NaiveDate::from_ymd_opt(year, 12, 31).ok_or("Năm không hợp lệ")?;
+    let is_leap = end.ordinal() == 366;
     let days_in_year = if is_leap { 366 } else { 365 };
 
     let mut result = Vec::with_capacity(days_in_year);
@@ -203,6 +199,18 @@ pub fn get_yearly_heatmap(
     }
 
     Ok(result)
+}
+
+/// Lấy toàn bộ daily_activity của 1 năm để render lưới Heatmap 365 ô.
+/// Trả về TẤT CẢ ngày trong năm (kể cả ngày 0 hoạt động) để frontend không phải
+/// tự tính ngày thiếu - tránh lệch lịch giữa Rust (server-side date) và JS (client-side date).
+#[tauri::command]
+pub fn get_yearly_heatmap(
+    db: tauri::State<'_, SharedDb>,
+    year: i32,
+) -> Result<Vec<HeatmapDay>, String> {
+    let conn = db.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
+    compute_yearly_heatmap_days(&conn, year)
 }
 
 /// Lấy level + progress hiện tại, tính từ TỔNG XP mọi thời điểm (không phải hôm nay).
@@ -424,5 +432,24 @@ mod tests {
         assert_eq!(ac_after, 0, "ac_count should be reset to 0");
         assert_eq!(deadlines_after, 1, "deadlines_cleared must be 100% preserved!");
         assert_eq!(xp_after, 20, "total_xp should reflect only deadline XP (20)");
+    }
+
+    #[test]
+    fn test_compute_yearly_heatmap_days_leap_and_invalid_years() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        create_tables(&conn).expect("create tables");
+
+        // 2024 is a leap year (366 days)
+        let days_2024 = compute_yearly_heatmap_days(&conn, 2024).expect("compute 2024");
+        assert_eq!(days_2024.len(), 366);
+
+        // 2025 is a common year (365 days)
+        let days_2025 = compute_yearly_heatmap_days(&conn, 2025).expect("compute 2025");
+        assert_eq!(days_2025.len(), 365);
+
+        // Extreme invalid year returns error without panicking
+        let err_invalid = compute_yearly_heatmap_days(&conn, i32::MAX);
+        assert!(err_invalid.is_err());
+        assert_eq!(err_invalid.unwrap_err(), "Năm không hợp lệ");
     }
 }

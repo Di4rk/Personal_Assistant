@@ -1,11 +1,134 @@
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
-use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, Manager, Url, WebviewUrl, WebviewWindowBuilder};
 use tokio_util::sync::CancellationToken;
 use urlencoding::decode;
 use crate::db::SharedDb;
+pub use crate::webview_lifecycle::*;
+
+pub type HostSet = HashSet<String>;
+pub const MAX_SSO_PAYLOAD_SIZE: usize = 10 * 1024 * 1024; // 10MB safety threshold
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RemoteTarget {
+    Portal,
+    Wecode,
+    Moodle,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteOriginPolicy {
+    pub target: Option<RemoteTarget>,
+    pub portal: HostSet,
+    pub wecode: HostSet,
+    pub moodle: HostSet,
+}
+
+impl Default for RemoteOriginPolicy {
+    fn default() -> Self {
+        let mut portal = HostSet::new();
+        portal.insert("portal.uit.edu.vn".to_string());
+        portal.insert("login.microsoftonline.com".to_string());
+        portal.insert("login.live.com".to_string());
+
+        let mut wecode = HostSet::new();
+        wecode.insert("khmt.uit.edu.vn".to_string());
+
+        let mut moodle = HostSet::new();
+        moodle.insert("courses.uit.edu.vn".to_string());
+        moodle.insert("login.microsoftonline.com".to_string());
+        moodle.insert("login.live.com".to_string());
+
+        Self {
+            target: None,
+            portal,
+            wecode,
+            moodle,
+        }
+    }
+}
+
+impl RemoteOriginPolicy {
+    pub fn new(portal: HostSet, wecode: HostSet, moodle: HostSet) -> Self {
+        Self {
+            target: None,
+            portal,
+            wecode,
+            moodle,
+        }
+    }
+
+    pub fn for_target(target: RemoteTarget) -> Self {
+        let mut policy = Self::default();
+        policy.target = Some(target);
+        policy
+    }
+
+    pub fn for_portal() -> Self {
+        Self::for_target(RemoteTarget::Portal)
+    }
+
+    pub fn for_wecode() -> Self {
+        Self::for_target(RemoteTarget::Wecode)
+    }
+
+    pub fn for_moodle() -> Self {
+        Self::for_target(RemoteTarget::Moodle)
+    }
+
+    pub fn is_host_allowed(&self, host: &str) -> bool {
+        let host_lower = host.trim().to_ascii_lowercase();
+        match self.target {
+            Some(RemoteTarget::Portal) => self.portal.iter().any(|h| h.eq_ignore_ascii_case(&host_lower)),
+            Some(RemoteTarget::Wecode) => self.wecode.iter().any(|h| h.eq_ignore_ascii_case(&host_lower)),
+            Some(RemoteTarget::Moodle) => self.moodle.iter().any(|h| h.eq_ignore_ascii_case(&host_lower)),
+            None => {
+                self.portal.iter().any(|h| h.eq_ignore_ascii_case(&host_lower))
+                    || self.wecode.iter().any(|h| h.eq_ignore_ascii_case(&host_lower))
+                    || self.moodle.iter().any(|h| h.eq_ignore_ascii_case(&host_lower))
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NavigationDecision {
+    AllowTrustedHttps,
+    InterceptDiarkSso,
+    Reject,
+}
+
+pub fn classify_remote_navigation(url: &Url, policy: &RemoteOriginPolicy) -> NavigationDecision {
+    let scheme = url.scheme().to_ascii_lowercase();
+
+    if scheme == "diark-sso" {
+        let action = url
+            .host_str()
+            .unwrap_or_else(|| url.path().trim_start_matches('/'));
+        match action {
+            "callback" | "partial" | "failed" => NavigationDecision::InterceptDiarkSso,
+            _ => NavigationDecision::Reject,
+        }
+    } else if scheme == "https" {
+        if url.port().is_some() && url.port() != Some(443) {
+            return NavigationDecision::Reject;
+        }
+        if let Some(host) = url.host_str() {
+            let clean_host = host.trim().to_ascii_lowercase();
+            if !clean_host.is_empty() && policy.is_host_allowed(&clean_host) {
+                NavigationDecision::AllowTrustedHttps
+            } else {
+                NavigationDecision::Reject
+            }
+        } else {
+            NavigationDecision::Reject
+        }
+    } else {
+        NavigationDecision::Reject
+    }
+}
 
 #[derive(Clone)]
 pub struct WatchdogRegistry(pub Arc<StdMutex<HashMap<String, CancellationToken>>>);
@@ -44,34 +167,7 @@ pub struct PartialStateRegistry {
     pub states: Arc<StdMutex<HashMap<String, PartialAcademicState>>>,
 }
 
-fn spawn_watchdog(app: AppHandle, window_label: String, token: CancellationToken) {
-    tauri::async_runtime::spawn(async move {
-        tokio::select! {
-            _ = tokio::time::sleep(std::time::Duration::from_secs(120)) => {
-                if let Some(win) = app.get_webview_window(&window_label) {
-                    let _ = win.destroy();
-                }
-                let _ = app.emit(
-                    "sso-callback-failed",
-                    "Quá thời gian đăng nhập (Timeout 120s)",
-                );
-                let _ = app.emit_to(
-                    "main",
-                    "portal-sync-failed",
-                    "Quá thời gian đăng nhập (Timeout 120s)",
-                );
-                let _ = app.emit_to(
-                    "main",
-                    "wecode-sync-failed",
-                    "Quá thời gian đăng nhập (Timeout 120s)",
-                );
-            }
-            _ = token.cancelled() => {
-                // Task hủy ngay lập tức khi nhận callback sớm
-            }
-        }
-    });
-}
+
 
 pub const INJECTED_PORTAL_SCRIPT: &str = include_str!("../../../injected_portal_script.js");
 pub const PORTAL_HARVESTER_SCRIPT: &str = include_str!("../../../scripts/portal_harvester.js");
@@ -879,6 +975,10 @@ struct PortalIngestionPayload {
 }
 
 pub fn parse_callback_fragment(fragment: &str) -> Result<(String, String), String> {
+    if fragment.len() > MAX_SSO_PAYLOAD_SIZE {
+        return Err("Callback fragment exceeds maximum allowed size".to_string());
+    }
+
     let decoded = decode(fragment)
         .map_err(|e| format!("URL decode error: {e}"))?
         .into_owned();
@@ -893,6 +993,9 @@ pub fn parse_callback_fragment(fragment: &str) -> Result<(String, String), Strin
 
     let data_str = if let Some(idx) = decoded.find("data=") {
         let after_data = &decoded[idx + "data=".len()..];
+        if after_data.len() > MAX_SSO_PAYLOAD_SIZE {
+            return Err("Callback data exceeds maximum allowed size".to_string());
+        }
         if after_data.starts_with('%') {
             decode(after_data)
                 .unwrap_or(std::borrow::Cow::Borrowed(after_data))
@@ -903,6 +1006,10 @@ pub fn parse_callback_fragment(fragment: &str) -> Result<(String, String), Strin
     } else {
         String::new()
     };
+
+    if data_str.len() > MAX_SSO_PAYLOAD_SIZE {
+        return Err("Callback data exceeds maximum allowed size".to_string());
+    }
 
     Ok((target, data_str))
 }
@@ -960,14 +1067,32 @@ pub fn handle_partial_checkpoint_sync(
     window_label: &str,
     fragment: &str,
 ) -> Result<(), String> {
+    if fragment.len() > MAX_SSO_PAYLOAD_SIZE {
+        return Err("Partial checkpoint fragment exceeds maximum allowed size".to_string());
+    }
+
     let target = extract_query_param(fragment, "target");
     let stage = extract_query_param(fragment, "stage");
+
+    // Validate target allowlist
+    match target.as_str() {
+        "portal_meta" | "portal_courses" | "wecode_submissions" | "academic" => {}
+        _ => return Err(format!("Invalid partial checkpoint target: {target}")),
+    }
+
     let data_str = if let Some(idx) = fragment.find("data=") {
         let raw = &fragment[idx + "data=".len()..];
+        if raw.len() > MAX_SSO_PAYLOAD_SIZE {
+            return Err("Partial checkpoint data exceeds maximum allowed size".to_string());
+        }
         decode(raw).unwrap_or(std::borrow::Cow::Borrowed(raw)).into_owned()
     } else {
         String::new()
     };
+
+    if data_str.len() > MAX_SSO_PAYLOAD_SIZE {
+        return Err("Partial checkpoint data exceeds maximum allowed size".to_string());
+    }
 
     let parsed_data: serde_json::Value = if !data_str.is_empty() && data_str != "unknown" {
         serde_json::from_str(&data_str).map_err(|e| format!("JSON parse error in partial data: {e}"))?
@@ -977,43 +1102,34 @@ pub fn handle_partial_checkpoint_sync(
 
     // Support Portal Harvester v2.1 (Chunked Scheme Protocol)
     if target == "portal_meta" {
-        match serde_json::from_value::<crate::services::portal_harvester::PortalMetaPayload>(parsed_data.clone()) {
-            Ok(meta) => {
-                let harvester_reg = get_portal_harvester_registry_static();
-                let _ = harvester_reg.handle_meta(window_label, meta);
-                println!("[SSO Checkpoint] Portal meta received for window: {window_label}");
-            }
-            Err(e) => {
-                eprintln!("[SSO Checkpoint] Failed to parse portal meta payload: {e}");
-            }
-        }
+        let meta = serde_json::from_value::<crate::services::portal_harvester::PortalMetaPayload>(parsed_data.clone())
+            .map_err(|e| format!("Failed to parse portal meta payload: {e}"))?;
+        let harvester_reg = get_portal_harvester_registry_static();
+        let _ = harvester_reg.handle_meta(window_label, meta);
+        println!("[SSO Checkpoint] Portal meta received for window: {window_label}");
     } else if target == "portal_courses" {
-        let batch_idx: usize = extract_query_param(fragment, "batch_idx").parse().unwrap_or(0);
-        match serde_json::from_value::<Vec<crate::services::portal_harvester::AcademicCourseItem>>(parsed_data.clone()) {
-            Ok(chunk) => {
-                let harvester_reg = get_portal_harvester_registry_static();
-                let chunk_len = chunk.len();
-                let _ = harvester_reg.handle_course_batch(window_label, batch_idx, chunk);
-                println!("[SSO Checkpoint] Portal course batch {batch_idx} ({chunk_len} courses) received for window: {window_label}");
-            }
-            Err(e) => {
-                eprintln!("[SSO Checkpoint] Failed to parse portal courses batch {batch_idx}: {e}");
-            }
-        }
+        let batch_idx: usize = extract_query_param(fragment, "batch_idx")
+            .parse()
+            .map_err(|e| format!("Invalid batch_idx: {e}"))?;
+        let chunk = serde_json::from_value::<Vec<crate::services::portal_harvester::AcademicCourseItem>>(parsed_data.clone())
+            .map_err(|e| format!("Failed to parse portal courses batch: {e}"))?;
+        let harvester_reg = get_portal_harvester_registry_static();
+        let chunk_len = chunk.len();
+        let _ = harvester_reg.handle_course_batch(window_label, batch_idx, chunk);
+        println!("[SSO Checkpoint] Portal course batch {batch_idx} ({chunk_len} courses) received for window: {window_label}");
     } else if target == "wecode_submissions" {
-        let batch_idx: usize = extract_query_param(fragment, "batch_idx").parse().unwrap_or(0);
-        let total_batches: usize = extract_query_param(fragment, "total_batches").parse().unwrap_or(0);
-        match serde_json::from_value::<Vec<crate::commands::wecode::WecodeSubmissionDto>>(parsed_data.clone()) {
-            Ok(chunk) => {
-                let wecode_reg = get_wecode_harvester_registry_static();
-                let chunk_len = chunk.len();
-                let _ = wecode_reg.handle_batch(window_label, batch_idx, total_batches, chunk);
-                println!("[SSO Checkpoint] Wecode submission batch {batch_idx} ({chunk_len} subs) received for window: {window_label}");
-            }
-            Err(e) => {
-                eprintln!("[SSO Checkpoint] Failed to parse wecode submissions batch {batch_idx}: {e}");
-            }
-        }
+        let batch_idx: usize = extract_query_param(fragment, "batch_idx")
+            .parse()
+            .map_err(|e| format!("Invalid batch_idx: {e}"))?;
+        let total_batches: usize = extract_query_param(fragment, "total_batches")
+            .parse()
+            .map_err(|e| format!("Invalid total_batches: {e}"))?;
+        let chunk = serde_json::from_value::<Vec<crate::commands::wecode::WecodeSubmissionDto>>(parsed_data.clone())
+            .map_err(|e| format!("Failed to parse wecode submissions batch: {e}"))?;
+        let wecode_reg = get_wecode_harvester_registry_static();
+        let chunk_len = chunk.len();
+        let _ = wecode_reg.handle_batch(window_label, batch_idx, total_batches, chunk);
+        println!("[SSO Checkpoint] Wecode submission batch {batch_idx} ({chunk_len} subs) received for window: {window_label}");
     }
 
     if let Ok(mut guard) = registry.states.lock() {
@@ -1101,20 +1217,32 @@ pub fn cleanup_window_session(
     app_handle: &AppHandle,
     window_label: &str,
 ) {
-    if let Ok(mut states) = partial_registry.states.lock() {
-        states.remove(window_label);
-    }
-    let harvester_reg = get_portal_harvester_registry_static();
-    if let Ok(mut sessions) = harvester_reg.sessions.lock() {
-        sessions.remove(window_label);
-    }
-    let wecode_reg = get_wecode_harvester_registry_static();
-    if let Ok(mut sessions) = wecode_reg.sessions.lock() {
-        sessions.remove(window_label);
-    }
-    watchdog_registry.cancel(window_label);
-    if let Some(w) = app_handle.get_webview_window(window_label) {
-        let _ = w.destroy();
+    let sso_reg = get_or_init_registry(Some(app_handle));
+    let session_id_opt = {
+        if let Ok(inner) = sso_reg.inner.lock() {
+            inner.label_to_session.get(window_label).cloned()
+        } else {
+            None
+        }
+    };
+    if let Some(session_id) = session_id_opt {
+        let _ = cleanup_sso_session(app_handle, &session_id, CleanupReason::Cancelled);
+    } else {
+        if let Ok(mut states) = partial_registry.states.lock() {
+            states.remove(window_label);
+        }
+        let harvester_reg = get_portal_harvester_registry_static();
+        if let Ok(mut sessions) = harvester_reg.sessions.lock() {
+            sessions.remove(window_label);
+        }
+        let wecode_reg = get_wecode_harvester_registry_static();
+        if let Ok(mut sessions) = wecode_reg.sessions.lock() {
+            sessions.remove(window_label);
+        }
+        watchdog_registry.cancel(window_label);
+        if let Some(w) = app_handle.get_webview_window(window_label) {
+            let _ = w.destroy();
+        }
     }
 }
 
@@ -1123,25 +1251,48 @@ pub fn handle_callback_payload_sync(
     target: &str,
     data_str: &str,
 ) -> Result<serde_json::Value, String> {
+    if data_str.len() > MAX_SSO_PAYLOAD_SIZE {
+        return Err("Callback data exceeds maximum allowed size".to_string());
+    }
     match target {
         "portal_profile" => {
             let profile: crate::commands::academic::StudentProfilePayload =
                 serde_json::from_str(data_str).map_err(|e| format!("Parse profile error: {e}"))?;
-            let state = app.state::<SharedDb>();
-            crate::commands::academic::save_student_profile_internal(app, &state, profile.clone())?;
+            if let Some(pools) = app.try_state::<crate::db::DbPools>() {
+                let p = profile.clone();
+                pools.write_blocking(move |conn| {
+                    crate::commands::academic::execute_save_student_profile(conn, &p)
+                        .map_err(|e| crate::error::AppError::Database(rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e)))))
+                }).map_err(|e| e.to_string())?;
+                let _ = app.emit("student-profile-synced", &profile);
+            } else if let Some(state) = app.try_state::<SharedDb>() {
+                crate::commands::academic::save_student_profile_internal(app, &state, profile.clone())?;
+            } else {
+                return Err("Database state not initialized".to_string());
+            }
             let _ = app.emit_to("main", "portal-profile-synced", ());
             serde_json::to_value(&profile).map_err(|e| e.to_string())
         }
         "portal_transcript" => {
             let data: TranscriptDataPayload =
                 serde_json::from_str(data_str).map_err(|e| format!("Parse transcript error: {e}"))?;
-            let state = app.state::<SharedDb>();
-            crate::commands::academic::ingest_full_academic_payload_internal(
-                app,
-                &state,
-                data.transcript.clone(),
-                data.drl.clone(),
-            )?;
+            if let Some(pools) = app.try_state::<crate::db::DbPools>() {
+                let t = data.transcript.clone();
+                let d = data.drl.clone();
+                pools.write_blocking(move |conn| {
+                    crate::commands::academic::ingest_full_academic_payload_on_conn(conn, t, d)
+                        .map_err(|e| crate::error::AppError::Database(rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e)))))
+                }).map_err(|e| e.to_string())?;
+            } else if let Some(state) = app.try_state::<SharedDb>() {
+                crate::commands::academic::ingest_full_academic_payload_internal(
+                    app,
+                    &state,
+                    data.transcript.clone(),
+                    data.drl.clone(),
+                )?;
+            } else {
+                return Err("Database state not initialized".to_string());
+            }
             let _ = app.emit_to("main", "academic-data-synced", ());
             serde_json::to_value(&data).map_err(|e| e.to_string())
         }
@@ -1164,14 +1315,34 @@ pub fn handle_callback_payload_sync(
                 assignments_to_save = list;
             }
 
-            let state = app.state::<SharedDb>();
-            if let Ok(conn) = state.lock() {
-                for a in &assignments_to_save {
-                    let _ = conn.execute(
-                        "INSERT INTO wecode_assignments (id, name) VALUES (?1, ?2)
-                         ON CONFLICT(id) DO UPDATE SET name = excluded.name",
-                        rusqlite::params![a.id, a.title],
-                    );
+            let to_save = assignments_to_save.clone();
+            if let Some(pools) = app.try_state::<crate::db::DbPools>() {
+                let _ = pools.write_blocking(move |conn| {
+                    let tx = conn.transaction()?;
+                    for a in &to_save {
+                        tx.execute(
+                            "INSERT INTO wecode_assignments (id, name) VALUES (?1, ?2)
+                             ON CONFLICT(id) DO UPDATE SET name = excluded.name",
+                            rusqlite::params![a.id, a.title],
+                        )?;
+                    }
+                    tx.commit()?;
+                    Ok(())
+                });
+            } else if let Some(state) = app.try_state::<SharedDb>() {
+                if let Ok(mut conn) = state.lock() {
+                    let _ = (|| -> Result<(), rusqlite::Error> {
+                        let tx = conn.transaction()?;
+                        for a in &assignments_to_save {
+                            tx.execute(
+                                "INSERT INTO wecode_assignments (id, name) VALUES (?1, ?2)
+                                 ON CONFLICT(id) DO UPDATE SET name = excluded.name",
+                                rusqlite::params![a.id, a.title],
+                            )?;
+                        }
+                        tx.commit()?;
+                        Ok(())
+                    })();
                 }
             }
 
@@ -1192,25 +1363,27 @@ pub fn handle_callback_payload_sync(
 
 #[tauri::command]
 pub async fn launch_portal_sso_sync(app: AppHandle) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window("uit-sso-login") {
-        let _ = window.show();
-        let _ = window.set_focus();
-        return Ok(());
-    }
+    let sso_session = SsoSession {
+        target: SsoTarget::Portal,
+        label: "uit-sso-login".to_string(),
+        is_silent: false,
+    };
+    let sso_registry = get_or_init_registry(Some(&app));
+    let action = ensure_sso_window(&app, sso_session)
+        .map_err(|e| format!("SSO session error: {e}"))?;
+
+    let session_id = match action {
+        WindowAction::Created(id) => id,
+        WindowAction::ReusedExisting(_) => {
+            return Ok(());
+        }
+    };
 
     let auth_url = WebviewUrl::External(
         "https://portal.uit.edu.vn/sinh-vien/bang-diem"
             .parse()
             .map_err(|e| format!("Invalid auth URL: {e}"))?,
     );
-
-    let watchdog_registry = if let Some(watchdog) = app.try_state::<WatchdogRegistry>() {
-        watchdog.inner().clone()
-    } else {
-        WatchdogRegistry::new()
-    };
-    let token = watchdog_registry.register("uit-sso-login");
-    spawn_watchdog(app.clone(), "uit-sso-login".to_string(), token);
 
     let partial_state_registry = if let Some(reg) = app.try_state::<PartialStateRegistry>() {
         reg.inner().clone()
@@ -1221,7 +1394,8 @@ pub async fn launch_portal_sso_sync(app: AppHandle) -> Result<(), String> {
     let app_handle = app.clone();
     let window_label = "uit-sso-login".to_string();
     let partial_for_nav = partial_state_registry.clone();
-    let watchdog_for_nav = watchdog_registry.clone();
+    let policy = RemoteOriginPolicy::for_portal();
+    let session_id_for_nav = session_id.clone();
 
     let window = WebviewWindowBuilder::new(&app, &window_label, auth_url)
         .title("Đăng nhập Cổng Thông Tin UIT")
@@ -1230,126 +1404,153 @@ pub async fn launch_portal_sso_sync(app: AppHandle) -> Result<(), String> {
         .always_on_top(true)
         .initialization_script(PORTAL_HARVESTER_SCRIPT)
         .on_navigation(move |url| {
-            let url_str = url.as_str();
+            match classify_remote_navigation(url, &policy) {
+                NavigationDecision::Reject => {
+                    eprintln!("[Security Boundary] uit-sso-login: Navigation rejected: {url}");
+                    false
+                }
+                NavigationDecision::InterceptDiarkSso => {
+                    let url_str = url.as_str();
 
-            // 1. Intercept Final Callback (Atomic Persist)
-            if url_str.starts_with("diark-sso://callback") {
-                let callback_fragment = url.fragment().or_else(|| url_str.strip_prefix("diark-sso://callback#"));
-                if let Some(fragment) = callback_fragment {
-                    match parse_callback_fragment(fragment) {
-                        Ok((target, data_str)) => {
-                            if target == "portal" {
-                                let status = extract_query_param(fragment, "status");
-                                if status == "success" {
-                                    println!("[SSO Final] Portal auto-sync completed via background API engine!");
-                                    let _ = app_handle.emit("academic-data-synced", ());
-                                    let _ = app_handle.emit("sso-callback-success", "portal");
-                                } else {
-                                    let harvester_reg = get_portal_harvester_registry_static();
-                                    let db_state = app_handle.state::<SharedDb>();
-                                    let db_arc = db_state.inner().clone();
-                                    match harvester_reg.commit_session(&window_label, db_arc) {
-                                        Ok(total_courses) => {
-                                            println!("[SSO Final] Portal Harvester committed {total_courses} courses successfully!");
+                    // 1. Intercept Final Callback (Atomic Persist)
+                    if url_str.starts_with("diark-sso://callback") {
+                        let callback_fragment = url.fragment().or_else(|| url_str.strip_prefix("diark-sso://callback#"));
+                        let mut cleanup_reason = CleanupReason::Success;
+                        if let Some(fragment) = callback_fragment {
+                            match parse_callback_fragment(fragment) {
+                                Ok((target, data_str)) => {
+                                    if target == "portal" {
+                                        let status = extract_query_param(fragment, "status");
+                                        if status == "success" {
+                                            println!("[SSO Final] Portal auto-sync completed via background API engine!");
                                             let _ = app_handle.emit("academic-data-synced", ());
                                             let _ = app_handle.emit("sso-callback-success", "portal");
+                                        } else {
+                                            let harvester_reg = get_portal_harvester_registry_static();
+                                            let commit_res = if let Some(pools) = app_handle.try_state::<crate::db::DbPools>() {
+                                                harvester_reg.commit_session_with_pools(&window_label, &pools)
+                                            } else if let Some(db_state) = app_handle.try_state::<SharedDb>() {
+                                                let db_arc = db_state.inner().clone();
+                                                harvester_reg.commit_session(&window_label, db_arc)
+                                            } else {
+                                                Err("Database state not initialized".to_string())
+                                            };
+                                            match commit_res {
+                                                Ok(total_courses) => {
+                                                    println!("[SSO Final] Portal Harvester committed {total_courses} courses successfully!");
+                                                    let _ = app_handle.emit("academic-data-synced", ());
+                                                    let _ = app_handle.emit("sso-callback-success", "portal");
+                                                }
+                                                Err(err) => {
+                                                    eprintln!("[SSO Final] ERROR in Portal Harvester commit: {err}");
+                                                    let _ = app_handle.emit("sso-callback-error", err.to_string());
+                                                    let _ = app_handle.emit_to("main", "portal-sync-failed", err.to_string());
+                                                    cleanup_reason = CleanupReason::Failed(err.to_string());
+                                                }
+                                            }
                                         }
-                                        Err(err) => {
-                                            eprintln!("[SSO Final] ERROR in Portal Harvester commit: {err}");
-                                            let _ = app_handle.emit("sso-callback-error", err.to_string());
-                                            let _ = app_handle.emit_to("main", "portal-sync-failed", err.to_string());
+                                    } else if target == "academic" || target == "portal_profile" || target == "portal_transcript" {
+                                        let final_payload = merge_with_partial_state(&partial_for_nav, &window_label, &data_str);
+                                        let course_count = final_payload.get("courses").and_then(|c| c.as_array()).map(|a| a.len()).unwrap_or(0);
+                                        let drl_count = final_payload.get("drl").and_then(|d| d.as_array()).map(|a| a.len()).unwrap_or(0);
+                                        let has_profile = final_payload.get("profile").is_some() || final_payload.get("student_id").is_some();
+                                        println!("[SSO Final] Ingesting academic payload: profile={has_profile}, courses={course_count}, drl={drl_count}");
+
+                                        match crate::commands::academic::ingest_full_academic_payload_sync(&app_handle, final_payload) {
+                                            Ok(_) => {
+                                                println!("[SSO Final] Academic sync successfully committed to SQLite!");
+                                                let _ = app_handle.emit("academic-data-synced", ());
+                                                let _ = app_handle.emit("sso-callback-success", "academic");
+                                            }
+                                            Err(err) => {
+                                                eprintln!("[SSO Final] ERROR ingesting academic payload: {err}");
+                                                let _ = app_handle.emit("sso-callback-error", err.to_string());
+                                                cleanup_reason = CleanupReason::Failed(err.to_string());
+                                            }
                                         }
+                                    } else {
+                                        eprintln!("[SSO Final] Disallowed callback target for portal: {target}");
+                                        let err_msg = format!("Disallowed target: {target}");
+                                        let _ = app_handle.emit("sso-callback-error", err_msg.clone());
+                                        cleanup_reason = CleanupReason::Failed(err_msg);
                                     }
                                 }
-                            } else {
-                                let final_payload = merge_with_partial_state(&partial_for_nav, &window_label, &data_str);
-                                let course_count = final_payload.get("courses").and_then(|c| c.as_array()).map(|a| a.len()).unwrap_or(0);
-                                let drl_count = final_payload.get("drl").and_then(|d| d.as_array()).map(|a| a.len()).unwrap_or(0);
-                                let has_profile = final_payload.get("profile").is_some() || final_payload.get("student_id").is_some();
-                                println!("[SSO Final] Ingesting academic payload: profile={has_profile}, courses={course_count}, drl={drl_count}");
-
-                                match crate::commands::academic::ingest_full_academic_payload_sync(&app_handle, final_payload) {
-                                    Ok(_) => {
-                                        println!("[SSO Final] Academic sync successfully committed to SQLite!");
-                                        let _ = app_handle.emit("academic-data-synced", ());
-                                        let _ = app_handle.emit("sso-callback-success", "academic");
-                                    }
-                                    Err(err) => {
-                                        eprintln!("[SSO Final] ERROR ingesting academic payload: {err}");
-                                        let _ = app_handle.emit("sso-callback-error", err.to_string());
-                                    }
+                                Err(err) => {
+                                    eprintln!("[SSO Final] ERROR parsing callback fragment: {err}");
+                                    let _ = app_handle.emit("sso-callback-error", err.to_string());
+                                    cleanup_reason = CleanupReason::Failed(err.to_string());
                                 }
                             }
                         }
-                        Err(err) => {
-                            eprintln!("[SSO Final] ERROR parsing callback fragment: {err}");
-                            let _ = app_handle.emit("sso-callback-error", err.to_string());
-                        }
+
+                        // Dọn dẹp in-memory registry và hủy cửa sổ
+                        let _ = cleanup_sso_session(&app_handle, &session_id_for_nav, cleanup_reason);
+                        return false;
                     }
+
+                    // 2. Intercept Partial Checkpoints (TUYỆT ĐỐI KHÔNG GHI PRODUCTION SQLITE, KHÔNG DESTROY)
+                    if url_str.starts_with("diark-sso://partial") {
+                        let partial_fragment = url.fragment().or_else(|| url_str.strip_prefix("diark-sso://partial#"));
+                        if let Some(fragment) = partial_fragment {
+                            let _ = handle_partial_checkpoint_sync(&partial_for_nav, &window_label, fragment);
+                        }
+                        return false; // Chặn iframe navigation thật
+                    }
+
+                    // 3. Intercept Failure
+                    if url_str.starts_with("diark-sso://failed") {
+                        let reason = extract_query_param(url_str, "reason");
+                        let _ = app_handle.emit("sso-callback-failed", &reason);
+                        let _ = app_handle.emit_to("main", "portal-sync-failed", &reason);
+                        let _ = cleanup_sso_session(&app_handle, &session_id_for_nav, CleanupReason::Failed(reason));
+                        return false;
+                    }
+
+                    false
                 }
-
-                // Dọn dẹp in-memory registry và hủy cửa sổ
-                cleanup_window_session(&partial_for_nav, &watchdog_for_nav, &app_handle, &window_label);
-                return false;
-            }
-
-            // 2. Intercept Partial Checkpoints (TUYỆT ĐỐI KHÔNG GHI PRODUCTION SQLITE, KHÔNG DESTROY)
-            if url_str.starts_with("diark-sso://partial") {
-                let partial_fragment = url.fragment().or_else(|| url_str.strip_prefix("diark-sso://partial#"));
-                if let Some(fragment) = partial_fragment {
-                    let _ = handle_partial_checkpoint_sync(&partial_for_nav, &window_label, fragment);
+                NavigationDecision::AllowTrustedHttps => {
+                    true
                 }
-                return false; // Chặn iframe navigation thật
             }
-
-            // 3. Intercept Failure
-            if url_str.starts_with("diark-sso://failed") {
-                let reason = extract_query_param(url_str, "reason");
-                let _ = app_handle.emit("sso-callback-failed", &reason);
-                let _ = app_handle.emit_to("main", "portal-sync-failed", &reason);
-                cleanup_window_session(&partial_for_nav, &watchdog_for_nav, &app_handle, &window_label);
-                return false;
-            }
-
-            // 4. Chặn bất kỳ scheme nội bộ diark-sso:// nào khác không bị rò rỉ ra WebView
-            if url_str.starts_with("diark-sso://") {
-                return false;
-            }
-
-            // 5. Pass-through các trang nội bộ cần scrape
-            if url_str.contains("/sinh-vien/") || url_str.contains("/trang-chu") || url_str.contains("/home") {
-                return true;
-            }
-
-            true
         })
-        .build()
-        .map_err(|e| e.to_string())?;
+        .build();
 
-    let _ = window.show();
+    let win = match window {
+        Ok(w) => w,
+        Err(e) => {
+            let _ = cleanup_sso_session(&app, &session_id, CleanupReason::BuildError);
+            return Err(format!("Failed to build portal webview: {e}"));
+        }
+    };
+
+    attach_window_process(&sso_registry, &session_id, &win);
+    let _ = win.show();
     Ok(())
 }
 
 #[tauri::command]
 pub async fn launch_wecode_sso_sync(app: AppHandle) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window("wecode-sso-login") {
-        let _ = window.show();
-        let _ = window.set_focus();
-        return Ok(());
-    }
+    let sso_session = SsoSession {
+        target: SsoTarget::Wecode,
+        label: "wecode-sso-login".to_string(),
+        is_silent: false,
+    };
+    let sso_registry = get_or_init_registry(Some(&app));
+    let action = ensure_sso_window(&app, sso_session)
+        .map_err(|e| format!("SSO session error: {e}"))?;
+
+    let session_id = match action {
+        WindowAction::Created(id) => id,
+        WindowAction::ReusedExisting(_) => {
+            return Ok(());
+        }
+    };
 
     let auth_url = WebviewUrl::External(
         WECODE_LOGIN_URL
             .parse()
             .map_err(|e| format!("Invalid Wecode URL: {e}"))?,
     );
-
-    let token = if let Some(watchdog) = app.try_state::<WatchdogRegistry>() {
-        watchdog.register("wecode-sso-login")
-    } else {
-        CancellationToken::new()
-    };
-    spawn_watchdog(app.clone(), "wecode-sso-login".to_string(), token);
 
     let redirect_attempts = Arc::new(AtomicU8::new(0));
     let redirect_attempts_for_nav = redirect_attempts.clone();
@@ -1361,6 +1562,8 @@ pub async fn launch_wecode_sso_sync(app: AppHandle) -> Result<(), String> {
         PartialStateRegistry::default()
     };
     let partial_for_nav = partial_state_registry.clone();
+    let policy = RemoteOriginPolicy::for_wecode();
+    let session_id_for_nav = session_id.clone();
 
     let window = WebviewWindowBuilder::new(&app, "wecode-sso-login", auth_url)
         .title("Đồng bộ Wecode Submissions")
@@ -1369,139 +1572,200 @@ pub async fn launch_wecode_sso_sync(app: AppHandle) -> Result<(), String> {
         .always_on_top(true)
         .initialization_script(WECODE_HARVESTER_SCRIPT)
         .on_navigation(move |url| {
-            let url_str = url.as_str();
-
-            // 1. Intercept Partial Submissions Checkpoint (TUYỆT ĐỐI KHÔNG GHI DIRECT TRÁNH RỜI RẠC)
-            if url_str.starts_with("diark-sso://partial") {
-                let partial_fragment = url.fragment().or_else(|| url_str.strip_prefix("diark-sso://partial#"));
-                if let Some(fragment) = partial_fragment {
-                    let _ = handle_partial_checkpoint_sync(&partial_for_nav, "wecode-sso-login", fragment);
+            match classify_remote_navigation(url, &policy) {
+                NavigationDecision::Reject => {
+                    eprintln!("[Security Boundary] wecode-sso-login: Navigation rejected: {url}");
+                    false
                 }
-                return false; // Chặn navigation, giữ nguyên DOM & context cho các batch tiếp theo trong queue
-            }
+                NavigationDecision::InterceptDiarkSso => {
+                    let url_str = url.as_str();
 
-            // 2. Intercept Callback (Atomic Commit)
-            if url_str.starts_with(CALLBACK_SCHEME) {
-                let fragment_opt = url.fragment().or_else(|| url_str.strip_prefix("diark-sso://callback#"));
-                if let Some(fragment) = fragment_opt {
-                    let target = extract_query_param(fragment, "target");
-                    if target == "wecode" {
-                        let status = extract_query_param(fragment, "status");
-                        if status == "success" {
-                            println!("[SSO Final] Wecode auto-sync completed via background API engine!");
-                            let _ = app_for_nav.emit("wecode-submissions-synced", ());
-                            let _ = app_for_nav.emit("sso-callback-success", "wecode");
-                        } else {
-                            let wecode_reg = get_wecode_harvester_registry_static();
-                            let db_state = app_for_nav.state::<SharedDb>();
-                            let db_arc = db_state.inner().clone();
-                            match wecode_reg.commit_session("wecode-sso-login", db_arc) {
-                                Ok(count) => {
-                                    println!("[SSO Final] Wecode Harvester committed {count} submissions successfully!");
+                    // 1. Intercept Partial Submissions Checkpoint (TUYỆT ĐỐI KHÔNG GHI DIRECT TRÁNH RỜI RẠC)
+                    if url_str.starts_with("diark-sso://partial") {
+                        let partial_fragment = url.fragment().or_else(|| url_str.strip_prefix("diark-sso://partial#"));
+                        if let Some(fragment) = partial_fragment {
+                            let _ = handle_partial_checkpoint_sync(&partial_for_nav, "wecode-sso-login", fragment);
+                        }
+                        return false; // Chặn navigation, giữ nguyên DOM & context cho các batch tiếp theo trong queue
+                    }
+
+                    // 2. Intercept Callback (Atomic Commit)
+                    if url_str.starts_with(CALLBACK_SCHEME) {
+                        let fragment_opt = url.fragment().or_else(|| url_str.strip_prefix("diark-sso://callback#"));
+                        let mut cleanup_reason = CleanupReason::Success;
+                        if let Some(fragment) = fragment_opt {
+                            let target = extract_query_param(fragment, "target");
+                            if target == "wecode" {
+                                let status = extract_query_param(fragment, "status");
+                                if status == "success" {
+                                    println!("[SSO Final] Wecode auto-sync completed via background API engine!");
                                     let _ = app_for_nav.emit("wecode-submissions-synced", ());
                                     let _ = app_for_nav.emit("sso-callback-success", "wecode");
+                                } else {
+                                    let wecode_reg = get_wecode_harvester_registry_static();
+                                    let commit_res = if let Some(pools) = app_for_nav.try_state::<crate::db::DbPools>() {
+                                        wecode_reg.commit_session_with_pools("wecode-sso-login", &pools)
+                                    } else if let Some(db_state) = app_for_nav.try_state::<SharedDb>() {
+                                        let db_arc = db_state.inner().clone();
+                                        wecode_reg.commit_session("wecode-sso-login", db_arc)
+                                    } else {
+                                        Err("Database state not initialized".to_string())
+                                    };
+                                    match commit_res {
+                                        Ok(count) => {
+                                            println!("[SSO Final] Wecode Harvester committed {count} submissions successfully!");
+                                            let _ = app_for_nav.emit("wecode-submissions-synced", ());
+                                            let _ = app_for_nav.emit("sso-callback-success", "wecode");
+                                        }
+                                        Err(err) => {
+                                            eprintln!("[SSO Final] ERROR in Wecode Harvester commit: {err}");
+                                            let _ = app_for_nav.emit("sso-callback-error", err.to_string());
+                                            let _ = app_for_nav.emit_to("main", "wecode-sync-failed", err.to_string());
+                                            cleanup_reason = CleanupReason::Failed(err.to_string());
+                                        }
+                                    }
                                 }
-                                Err(err) => {
-                                    eprintln!("[SSO Final] ERROR in Wecode Harvester commit: {err}");
-                                    let _ = app_for_nav.emit("sso-callback-error", err.to_string());
-                                    let _ = app_for_nav.emit_to("main", "wecode-sync-failed", err.to_string());
+                            } else if target == "wecode_assignments" || target == "wecode_submissions" {
+                                if let Ok((t, data_str)) = parse_callback_fragment(fragment) {
+                                    let _ = handle_callback_payload_sync(&app_for_nav, &t, &data_str);
                                 }
+                            } else {
+                                eprintln!("[SSO Final] Disallowed callback target for wecode: {target}");
+                                let err_msg = format!("Disallowed target: {target}");
+                                let _ = app_for_nav.emit("sso-callback-error", err_msg.clone());
+                                cleanup_reason = CleanupReason::Failed(err_msg);
                             }
                         }
-                    } else {
-                        // Legacy callback handling
-                        if let Ok((t, data_str)) = parse_callback_fragment(fragment) {
-                            let _ = handle_callback_payload_sync(&app_for_nav, &t, &data_str);
+                        let _ = cleanup_sso_session(&app_for_nav, &session_id_for_nav, cleanup_reason);
+                        return false;
+                    }
+
+                    // 3. Intercept Callback Failed
+                    if url_str.starts_with(CALLBACK_FAIL_SCHEME) {
+                        let reason = extract_query_param(url_str, "reason");
+                        let _ = app_for_nav.emit("sso-callback-failed", &reason);
+                        let _ = app_for_nav.emit_to("main", "wecode-sync-failed", &reason);
+                        let _ = cleanup_sso_session(&app_for_nav, &session_id_for_nav, CleanupReason::Failed(reason));
+                        return false;
+                    }
+
+                    false
+                }
+                NavigationDecision::AllowTrustedHttps => {
+                    let url_str = url.as_str();
+                    // Redirect-loop guard cho trang login
+                    if url_str.contains(WECODE_LOGIN_MARKER) {
+                        let attempts = redirect_attempts_for_nav.fetch_add(1, Ordering::SeqCst);
+                        if attempts >= MAX_LOGIN_REDIRECT_ATTEMPTS {
+                            let _ = app_for_nav.emit("sso-callback-failed", "Quá số lần chuyển hướng đăng nhập (phát hiện vòng lặp)");
+                            let _ = app_for_nav.emit_to(
+                                "main",
+                                "wecode-sync-failed",
+                                "Quá số lần chuyển hướng đăng nhập (phát hiện vòng lặp)".to_string(),
+                            );
+                            let _ = cleanup_sso_session(&app_for_nav, &session_id_for_nav, CleanupReason::Failed("REDIRECT_LOOP".to_string()));
+                            return false;
                         }
                     }
-                }
-                close_wecode_window(&app_for_nav);
-                return false;
-            }
 
-            // 3. Intercept Callback Failed
-            if url_str.starts_with(CALLBACK_FAIL_SCHEME) {
-                let reason = extract_query_param(url_str, "reason");
-                let _ = app_for_nav.emit("sso-callback-failed", &reason);
-                let _ = app_for_nav.emit_to("main", "wecode-sync-failed", &reason);
-                close_wecode_window(&app_for_nav);
-                return false;
-            }
-
-            // 4. Chặn rò rỉ bất kỳ diark-sso scheme nào
-            if url_str.starts_with("diark-sso://") {
-                return false;
-            }
-
-            // 5. Redirect-loop guard cho trang login
-            if url_str.contains(WECODE_LOGIN_MARKER) {
-                let attempts = redirect_attempts_for_nav.fetch_add(1, Ordering::SeqCst);
-                if attempts >= MAX_LOGIN_REDIRECT_ATTEMPTS {
-                    let _ = app_for_nav.emit("sso-callback-failed", "Quá số lần chuyển hướng đăng nhập (phát hiện vòng lặp)");
-                    let _ = app_for_nav.emit_to(
-                        "main",
-                        "wecode-sync-failed",
-                        "Quá số lần chuyển hướng đăng nhập (phát hiện vòng lặp)".to_string(),
-                    );
-                    close_wecode_window(&app_for_nav);
-                    return false;
+                    true
                 }
             }
-
-            true
         })
-        .build()
-        .map_err(|e| e.to_string())?;
+        .build();
 
-    let _ = window.show();
+    let win = match window {
+        Ok(w) => w,
+        Err(e) => {
+            let _ = cleanup_sso_session(&app, &session_id, CleanupReason::BuildError);
+            return Err(format!("Failed to build wecode webview: {e}"));
+        }
+    };
+
+    attach_window_process(&sso_registry, &session_id, &win);
+    let _ = win.show();
     Ok(())
 }
 
-
+#[allow(dead_code)]
 fn close_silent_window(
     app: &AppHandle,
     window_label: &str,
     partial_registry: &PartialStateRegistry,
 ) {
-    let harvester_reg = get_portal_harvester_registry_static();
-    if let Ok(mut sessions) = harvester_reg.sessions.lock() {
-        sessions.remove(window_label);
-    }
-    let wecode_reg = get_wecode_harvester_registry_static();
-    if let Ok(mut sessions) = wecode_reg.sessions.lock() {
-        sessions.remove(window_label);
-    }
-    if let Ok(mut states) = partial_registry.states.lock() {
-        states.remove(window_label);
-    }
-    if let Some(window) = app.get_webview_window(window_label) {
-        let _ = window.destroy();
+    let sso_reg = get_or_init_registry(Some(app));
+    let session_id_opt = {
+        if let Ok(inner) = sso_reg.inner.lock() {
+            inner.label_to_session.get(window_label).cloned()
+        } else {
+            None
+        }
+    };
+    if let Some(session_id) = session_id_opt {
+        let _ = cleanup_sso_session(app, &session_id, CleanupReason::Cancelled);
+    } else {
+        let harvester_reg = get_portal_harvester_registry_static();
+        if let Ok(mut sessions) = harvester_reg.sessions.lock() {
+            sessions.remove(window_label);
+        }
+        let wecode_reg = get_wecode_harvester_registry_static();
+        if let Ok(mut sessions) = wecode_reg.sessions.lock() {
+            sessions.remove(window_label);
+        }
+        if let Ok(mut states) = partial_registry.states.lock() {
+            states.remove(window_label);
+        }
+        if let Some(window) = app.get_webview_window(window_label) {
+            let _ = window.destroy();
+        }
     }
 }
 
+#[allow(dead_code)]
 fn close_wecode_window(app: &AppHandle) {
-    let partial_state_registry = if let Some(reg) = app.try_state::<PartialStateRegistry>() {
-        reg.inner().clone()
-    } else {
-        PartialStateRegistry::default()
+    let sso_reg = get_or_init_registry(Some(app));
+    let session_id_opt = {
+        if let Ok(inner) = sso_reg.inner.lock() {
+            inner.label_to_session.get("wecode-sso-login").cloned()
+        } else {
+            None
+        }
     };
-    if let Some(watchdog) = app.try_state::<WatchdogRegistry>() {
-        watchdog.cancel("wecode-sso-login");
+    if let Some(session_id) = session_id_opt {
+        let _ = cleanup_sso_session(app, &session_id, CleanupReason::Cancelled);
+    } else {
+        let partial_state_registry = if let Some(reg) = app.try_state::<PartialStateRegistry>() {
+            reg.inner().clone()
+        } else {
+            PartialStateRegistry::default()
+        };
+        close_silent_window(app, "wecode-sso-login", &partial_state_registry);
     }
-    close_silent_window(app, "wecode-sso-login", &partial_state_registry);
 }
 
 #[tauri::command]
 pub async fn launch_portal_silent_sync(app: AppHandle) -> Result<(), String> {
     let window_label = "portal-silent-sync".to_string();
-
-    let partial_state_registry = if let Some(reg) = app.try_state::<PartialStateRegistry>() {
-        reg.inner().clone()
-    } else {
-        PartialStateRegistry::default()
+    let sso_registry = get_or_init_registry(Some(&app));
+    let sso_session = SsoSession {
+        target: SsoTarget::Portal,
+        label: window_label.clone(),
+        is_silent: true,
     };
 
-    close_silent_window(&app, &window_label, &partial_state_registry);
+    let action = ensure_sso_window(&app, sso_session)
+        .map_err(|e| format!("Failed to ensure SSO session: {e}"))?;
+
+    let session_id = match action {
+        WindowAction::Created(id) => id,
+        WindowAction::ReusedExisting(_) => {
+            return Err("PORTAL_SYNC_ALREADY_RUNNING".to_string());
+        }
+    };
+
+    let rx = sso_registry
+        .take_receiver(&session_id)
+        .ok_or_else(|| "Failed to obtain SSO completion receiver".to_string())?;
 
     let auth_url = WebviewUrl::External(
         "https://portal.uit.edu.vn/sinh-vien/bang-diem"
@@ -1509,143 +1773,146 @@ pub async fn launch_portal_silent_sync(app: AppHandle) -> Result<(), String> {
             .map_err(|e| format!("Invalid auth URL: {e}"))?,
     );
 
-    let (tx, rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
-    let tx_arc = Arc::new(StdMutex::new(Some(tx)));
+    let partial_state_registry = if let Some(reg) = app.try_state::<PartialStateRegistry>() {
+        reg.inner().clone()
+    } else {
+        PartialStateRegistry::default()
+    };
 
-    // 120s Watchdog
-    let tx_watchdog = tx_arc.clone();
-    let app_watchdog = app.clone();
-    let label_watchdog = window_label.clone();
-    let partial_watchdog = partial_state_registry.clone();
-    tauri::async_runtime::spawn(async move {
-        tokio::time::sleep(std::time::Duration::from_secs(120)).await;
-        if let Ok(mut lock) = tx_watchdog.lock() {
-            if let Some(sender) = lock.take() {
-                close_silent_window(&app_watchdog, &label_watchdog, &partial_watchdog);
-                let _ = sender.send(Err("TIMEOUT".to_string()));
-            }
-        }
-    });
-
-    let tx_nav = tx_arc.clone();
     let app_nav = app.clone();
     let label_nav = window_label.clone();
     let partial_for_nav = partial_state_registry.clone();
+    let policy = RemoteOriginPolicy::for_portal();
+    let session_id_for_nav = session_id.clone();
 
     let window = WebviewWindowBuilder::new(&app, &window_label, auth_url)
         .title("Diark Portal Silent Sync")
         .visible(false)
         .initialization_script(PORTAL_HARVESTER_SCRIPT)
         .on_navigation(move |url| {
-            let url_str = url.as_str();
-
-            // Detect expired auth / login redirect
-            if url_str.contains("login.microsoftonline.com")
-                || url_str.contains("/login")
-                || url_str.contains("/dang-nhap")
-                || (url_str.contains("microsoft") && !url_str.contains("diark-sso"))
-            {
-                if let Ok(mut lock) = tx_nav.lock() {
-                    if let Some(sender) = lock.take() {
-                        let _ = sender.send(Err("AUTH_EXPIRED".to_string()));
-                    }
+            match classify_remote_navigation(url, &policy) {
+                NavigationDecision::Reject => {
+                    eprintln!("[Security Boundary] portal-silent-sync: Navigation rejected: {url}");
+                    false
                 }
-                close_silent_window(&app_nav, &label_nav, &partial_for_nav);
-                return false;
-            }
+                NavigationDecision::InterceptDiarkSso => {
+                    let url_str = url.as_str();
 
-            // 1. Intercept Final Callback (Atomic Persist)
-            if url_str.starts_with("diark-sso://callback") {
-                let callback_fragment = url.fragment().or_else(|| url_str.strip_prefix("diark-sso://callback#"));
-                let mut outcome = Ok(());
-                if let Some(fragment) = callback_fragment {
-                    match parse_callback_fragment(fragment) {
-                        Ok((target, data_str)) => {
-                            if target == "portal" {
-                                let status = extract_query_param(fragment, "status");
-                                if status == "success" {
-                                    println!("[Portal Silent] Portal auto-sync completed via background API engine!");
-                                    let _ = app_nav.emit("academic-data-synced", ());
-                                } else {
-                                    let harvester_reg = get_portal_harvester_registry_static();
-                                    let db_state = app_nav.state::<SharedDb>();
-                                    let db_arc = db_state.inner().clone();
-                                    match harvester_reg.commit_session(&label_nav, db_arc) {
-                                        Ok(total_courses) => {
-                                            println!("[Portal Silent] Portal Harvester committed {total_courses} courses successfully!");
+                    // 1. Intercept Final Callback (Atomic Persist)
+                    if url_str.starts_with("diark-sso://callback") {
+                        let callback_fragment = url.fragment().or_else(|| url_str.strip_prefix("diark-sso://callback#"));
+                        let mut cleanup_reason = CleanupReason::Success;
+                        if let Some(fragment) = callback_fragment {
+                            match parse_callback_fragment(fragment) {
+                                Ok((target, data_str)) => {
+                                    if target == "portal" {
+                                        let status = extract_query_param(fragment, "status");
+                                        if status == "success" {
+                                            println!("[Portal Silent] Portal auto-sync completed via background API engine!");
                                             let _ = app_nav.emit("academic-data-synced", ());
+                                        } else {
+                                            let harvester_reg = get_portal_harvester_registry_static();
+                                            let commit_res = if let Some(pools) = app_nav.try_state::<crate::db::DbPools>() {
+                                                harvester_reg.commit_session_with_pools(&label_nav, &pools)
+                                            } else if let Some(db_state) = app_nav.try_state::<SharedDb>() {
+                                                let db_arc = db_state.inner().clone();
+                                                harvester_reg.commit_session(&label_nav, db_arc)
+                                            } else {
+                                                Err("Database state not initialized".to_string())
+                                            };
+                                            match commit_res {
+                                                Ok(total_courses) => {
+                                                    println!("[Portal Silent] Portal Harvester committed {total_courses} courses successfully!");
+                                                    let _ = app_nav.emit("academic-data-synced", ());
+                                                }
+                                                Err(err) => {
+                                                    eprintln!("[Portal Silent] ERROR in Portal Harvester commit: {err}");
+                                                    cleanup_reason = CleanupReason::Failed(err.to_string());
+                                                }
+                                            }
                                         }
-                                        Err(err) => {
-                                            eprintln!("[Portal Silent] ERROR in Portal Harvester commit: {err}");
-                                            outcome = Err(format!("SERVER_ERROR: {err}"));
+                                    } else if target == "academic" || target == "portal_profile" || target == "portal_transcript" {
+                                        let final_payload = merge_with_partial_state(&partial_for_nav, &label_nav, &data_str);
+                                        match crate::commands::academic::ingest_full_academic_payload_sync(&app_nav, final_payload) {
+                                            Ok(_) => {
+                                                println!("[Portal Silent] Academic sync successfully committed to SQLite!");
+                                                let _ = app_nav.emit("academic-data-synced", ());
+                                            }
+                                            Err(err) => {
+                                                eprintln!("[Portal Silent] ERROR ingesting academic payload: {err}");
+                                                cleanup_reason = CleanupReason::Failed(err.to_string());
+                                            }
                                         }
+                                    } else {
+                                        cleanup_reason = CleanupReason::Failed(format!("Disallowed target for portal silent sync: {target}"));
                                     }
                                 }
-                            } else {
-                                let final_payload = merge_with_partial_state(&partial_for_nav, &label_nav, &data_str);
-                                match crate::commands::academic::ingest_full_academic_payload_sync(&app_nav, final_payload) {
-                                    Ok(_) => {
-                                        println!("[Portal Silent] Academic sync successfully committed to SQLite!");
-                                        let _ = app_nav.emit("academic-data-synced", ());
-                                    }
-                                    Err(err) => {
-                                        eprintln!("[Portal Silent] ERROR ingesting academic payload: {err}");
-                                        outcome = Err(format!("SERVER_ERROR: {err}"));
-                                    }
+                                Err(err) => {
+                                    eprintln!("[Portal Silent] ERROR parsing callback: {err}");
+                                    cleanup_reason = CleanupReason::Failed(err.to_string());
                                 }
                             }
                         }
-                        Err(err) => {
-                            eprintln!("[Portal Silent] ERROR parsing callback fragment: {err}");
-                            outcome = Err(format!("SERVER_ERROR: {err}"));
+
+                        let _ = cleanup_sso_session(&app_nav, &session_id_for_nav, cleanup_reason);
+                        return false;
+                    }
+
+                    // 2. Intercept Partial Checkpoint
+                    if url_str.starts_with("diark-sso://partial") {
+                        let partial_fragment = url.fragment().or_else(|| url_str.strip_prefix("diark-sso://partial#"));
+                        if let Some(fragment) = partial_fragment {
+                            let _ = handle_partial_checkpoint_sync(&partial_for_nav, &label_nav, fragment);
                         }
+                        return false;
                     }
-                }
 
-                if let Ok(mut lock) = tx_nav.lock() {
-                    if let Some(sender) = lock.take() {
-                        let _ = sender.send(outcome);
+                    // 3. Intercept Failure
+                    if url_str.starts_with("diark-sso://failed") {
+                        let reason = extract_query_param(url_str, "reason");
+                        let _ = cleanup_sso_session(&app_nav, &session_id_for_nav, CleanupReason::Failed(reason));
+                        return false;
                     }
-                }
-                close_silent_window(&app_nav, &label_nav, &partial_for_nav);
-                return false;
-            }
 
-            // 2. Intercept Partial Checkpoints
-            if url_str.starts_with("diark-sso://partial") {
-                let partial_fragment = url.fragment().or_else(|| url_str.strip_prefix("diark-sso://partial#"));
-                if let Some(fragment) = partial_fragment {
-                    let _ = handle_partial_checkpoint_sync(&partial_for_nav, &label_nav, fragment);
+                    false
                 }
-                return false;
-            }
-
-            // 3. Intercept Failure
-            if url_str.starts_with("diark-sso://failed") {
-                let reason = extract_query_param(url_str, "reason");
-                if let Ok(mut lock) = tx_nav.lock() {
-                    if let Some(sender) = lock.take() {
-                        let _ = sender.send(Err(format!("SERVER_ERROR: {reason}")));
+                NavigationDecision::AllowTrustedHttps => {
+                    let url_str = url.as_str();
+                    // Detect expired auth / login redirect
+                    if url_str.contains("login.microsoftonline.com")
+                        || url_str.contains("/login")
+                        || url_str.contains("/dang-nhap")
+                        || (url_str.contains("microsoft") && !url_str.contains("diark-sso"))
+                    {
+                        let _ = cleanup_sso_session(&app_nav, &session_id_for_nav, CleanupReason::AuthExpired);
+                        return false;
                     }
+
+                    true
                 }
-                close_silent_window(&app_nav, &label_nav, &partial_for_nav);
-                return false;
             }
-
-            if url_str.starts_with("diark-sso://") {
-                return false;
-            }
-
-            true
         })
         .build();
 
-    if let Err(e) = window {
-        return Err(format!("Failed to build silent portal webview: {e}"));
-    }
+    let win = match window {
+        Ok(w) => w,
+        Err(e) => {
+            let _ = cleanup_sso_session(&app, &session_id, CleanupReason::BuildError);
+            return Err(format!("Failed to build silent portal webview: {e}"));
+        }
+    };
+
+    attach_window_process(&sso_registry, &session_id, &win);
 
     match rx.await {
-        Ok(result) => result,
+        Ok(result) => match result {
+            Ok(SsoOutcome::Success) => Ok(()),
+            Ok(SsoOutcome::AuthExpired) => Err("AUTH_EXPIRED".to_string()),
+            Ok(SsoOutcome::TimedOut) => Err("TIMEOUT".to_string()),
+            Ok(SsoOutcome::Failed(reason)) => Err(format!("SERVER_ERROR: {reason}")),
+            Ok(SsoOutcome::Cancelled) => Err("CANCELLED".to_string()),
+            Err(e) => Err(e.to_string()),
+        },
         Err(_) => Err("CANCELLED".to_string()),
     }
 }
@@ -1653,14 +1920,26 @@ pub async fn launch_portal_silent_sync(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub async fn launch_wecode_silent_sync(app: AppHandle) -> Result<(), String> {
     let window_label = "wecode-silent-sync".to_string();
-
-    let partial_state_registry = if let Some(reg) = app.try_state::<PartialStateRegistry>() {
-        reg.inner().clone()
-    } else {
-        PartialStateRegistry::default()
+    let sso_registry = get_or_init_registry(Some(&app));
+    let sso_session = SsoSession {
+        target: SsoTarget::Wecode,
+        label: window_label.clone(),
+        is_silent: true,
     };
 
-    close_silent_window(&app, &window_label, &partial_state_registry);
+    let action = ensure_sso_window(&app, sso_session)
+        .map_err(|e| format!("Failed to ensure SSO session: {e}"))?;
+
+    let session_id = match action {
+        WindowAction::Created(id) => id,
+        WindowAction::ReusedExisting(_) => {
+            return Err("WECODE_SYNC_ALREADY_RUNNING".to_string());
+        }
+    };
+
+    let rx = sso_registry
+        .take_receiver(&session_id)
+        .ok_or_else(|| "Failed to obtain SSO completion receiver".to_string())?;
 
     let auth_url = WebviewUrl::External(
         WECODE_LOGIN_URL
@@ -1668,152 +1947,176 @@ pub async fn launch_wecode_silent_sync(app: AppHandle) -> Result<(), String> {
             .map_err(|e| format!("Invalid Wecode URL: {e}"))?,
     );
 
-    let (tx, rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
-    let tx_arc = Arc::new(StdMutex::new(Some(tx)));
+    let partial_state_registry = if let Some(reg) = app.try_state::<PartialStateRegistry>() {
+        reg.inner().clone()
+    } else {
+        PartialStateRegistry::default()
+    };
 
-    // 120s Watchdog
-    let tx_watchdog = tx_arc.clone();
-    let app_watchdog = app.clone();
-    let label_watchdog = window_label.clone();
-    let partial_watchdog = partial_state_registry.clone();
-    tauri::async_runtime::spawn(async move {
-        tokio::time::sleep(std::time::Duration::from_secs(120)).await;
-        if let Ok(mut lock) = tx_watchdog.lock() {
-            if let Some(sender) = lock.take() {
-                close_silent_window(&app_watchdog, &label_watchdog, &partial_watchdog);
-                let _ = sender.send(Err("TIMEOUT".to_string()));
-            }
-        }
-    });
-
-    let tx_nav = tx_arc.clone();
     let app_nav = app.clone();
     let label_nav = window_label.clone();
     let partial_for_nav = partial_state_registry.clone();
+    let policy = RemoteOriginPolicy::for_wecode();
+    let session_id_for_nav = session_id.clone();
 
     let window = WebviewWindowBuilder::new(&app, &window_label, auth_url)
         .title("Diark Wecode Silent Sync")
         .visible(false)
         .initialization_script(WECODE_HARVESTER_SCRIPT)
         .on_navigation(move |url| {
-            let url_str = url.as_str();
+            match classify_remote_navigation(url, &policy) {
+                NavigationDecision::Reject => {
+                    eprintln!("[Security Boundary] wecode-silent-sync: Navigation rejected: {url}");
+                    false
+                }
+                NavigationDecision::InterceptDiarkSso => {
+                    let url_str = url.as_str();
 
-            // Detect expired auth: redirecting to login page
-            if url_str.contains(WECODE_LOGIN_MARKER) || (url_str.contains("/login") && !url_str.contains("diark-sso")) {
-                if let Ok(mut lock) = tx_nav.lock() {
-                    if let Some(sender) = lock.take() {
-                        let _ = sender.send(Err("AUTH_EXPIRED".to_string()));
+                    // Intercept Partial Submissions Checkpoint
+                    if url_str.starts_with("diark-sso://partial") {
+                        let partial_fragment = url.fragment().or_else(|| url_str.strip_prefix("diark-sso://partial#"));
+                        if let Some(fragment) = partial_fragment {
+                            let _ = handle_partial_checkpoint_sync(&partial_for_nav, &label_nav, fragment);
+                        }
+                        return false;
                     }
-                }
-                close_silent_window(&app_nav, &label_nav, &partial_for_nav);
-                return false;
-            }
 
-            // Intercept Partial Submissions Checkpoint
-            if url_str.starts_with("diark-sso://partial") {
-                let partial_fragment = url.fragment().or_else(|| url_str.strip_prefix("diark-sso://partial#"));
-                if let Some(fragment) = partial_fragment {
-                    let _ = handle_partial_checkpoint_sync(&partial_for_nav, &label_nav, fragment);
-                }
-                return false;
-            }
-
-            // Intercept Callback (Atomic Commit)
-            if url_str.starts_with(CALLBACK_SCHEME) {
-                let fragment_opt = url.fragment().or_else(|| url_str.strip_prefix("diark-sso://callback#"));
-                let mut outcome = Ok(());
-                if let Some(fragment) = fragment_opt {
-                    let target = extract_query_param(fragment, "target");
-                    if target == "wecode" {
-                        let status = extract_query_param(fragment, "status");
-                        if status == "success" {
-                            println!("[Wecode Silent] Wecode auto-sync completed via background API engine!");
-                            let _ = app_nav.emit("wecode-submissions-synced", ());
-                        } else {
-                            let wecode_reg = get_wecode_harvester_registry_static();
-                            let db_state = app_nav.state::<SharedDb>();
-                            let db_arc = db_state.inner().clone();
-                            match wecode_reg.commit_session(&label_nav, db_arc) {
-                                Ok(count) => {
-                                    println!("[Wecode Silent] Wecode Harvester committed {count} submissions successfully!");
+                    // Intercept Callback (Atomic Commit)
+                    if url_str.starts_with(CALLBACK_SCHEME) {
+                        let fragment_opt = url.fragment().or_else(|| url_str.strip_prefix("diark-sso://callback#"));
+                        let mut cleanup_reason = CleanupReason::Success;
+                        if let Some(fragment) = fragment_opt {
+                            let target = extract_query_param(fragment, "target");
+                            if target == "wecode" {
+                                let status = extract_query_param(fragment, "status");
+                                if status == "success" {
+                                    println!("[Wecode Silent] Wecode auto-sync completed via background API engine!");
                                     let _ = app_nav.emit("wecode-submissions-synced", ());
+                                } else {
+                                    let wecode_reg = get_wecode_harvester_registry_static();
+                                    let commit_res = if let Some(pools) = app_nav.try_state::<crate::db::DbPools>() {
+                                        wecode_reg.commit_session_with_pools(&label_nav, &pools)
+                                    } else if let Some(db_state) = app_nav.try_state::<SharedDb>() {
+                                        let db_arc = db_state.inner().clone();
+                                        wecode_reg.commit_session(&label_nav, db_arc)
+                                    } else {
+                                        Err("Database state not initialized".to_string())
+                                    };
+                                    match commit_res {
+                                        Ok(count) => {
+                                            println!("[Wecode Silent] Wecode Harvester committed {count} submissions successfully!");
+                                            let _ = app_nav.emit("wecode-submissions-synced", ());
+                                        }
+                                        Err(err) => {
+                                            eprintln!("[Wecode Silent] ERROR in Wecode Harvester commit: {err}");
+                                            cleanup_reason = CleanupReason::Failed(err.to_string());
+                                        }
+                                    }
                                 }
-                                Err(err) => {
-                                    eprintln!("[Wecode Silent] ERROR in Wecode Harvester commit: {err}");
-                                    outcome = Err(format!("SERVER_ERROR: {err}"));
+                            } else if target == "wecode_assignments" || target == "wecode_submissions" {
+                                if let Ok((t, data_str)) = parse_callback_fragment(fragment) {
+                                    let _ = handle_callback_payload_sync(&app_nav, &t, &data_str);
                                 }
+                            } else {
+                                cleanup_reason = CleanupReason::Failed(format!("Disallowed target for wecode silent sync: {target}"));
                             }
                         }
-                    } else {
-                        if let Ok((t, data_str)) = parse_callback_fragment(fragment) {
-                            let _ = handle_callback_payload_sync(&app_nav, &t, &data_str);
-                        }
+
+                        let _ = cleanup_sso_session(&app_nav, &session_id_for_nav, cleanup_reason);
+                        return false;
                     }
-                }
 
-                if let Ok(mut lock) = tx_nav.lock() {
-                    if let Some(sender) = lock.take() {
-                        let _ = sender.send(outcome);
+                    // Intercept Callback Failed
+                    if url_str.starts_with(CALLBACK_FAIL_SCHEME) {
+                        let reason = extract_query_param(url_str, "reason");
+                        let _ = cleanup_sso_session(&app_nav, &session_id_for_nav, CleanupReason::Failed(reason));
+                        return false;
                     }
-                }
-                close_silent_window(&app_nav, &label_nav, &partial_for_nav);
-                return false;
-            }
 
-            // Intercept Callback Failed
-            if url_str.starts_with(CALLBACK_FAIL_SCHEME) {
-                let reason = extract_query_param(url_str, "reason");
-                if let Ok(mut lock) = tx_nav.lock() {
-                    if let Some(sender) = lock.take() {
-                        let _ = sender.send(Err(format!("SERVER_ERROR: {reason}")));
+                    false
+                }
+                NavigationDecision::AllowTrustedHttps => {
+                    let url_str = url.as_str();
+                    // Detect expired auth: redirecting to login page
+                    if url_str.contains(WECODE_LOGIN_MARKER) || (url_str.contains("/login") && !url_str.contains("diark-sso")) {
+                        let _ = cleanup_sso_session(&app_nav, &session_id_for_nav, CleanupReason::AuthExpired);
+                        return false;
                     }
+
+                    true
                 }
-                close_silent_window(&app_nav, &label_nav, &partial_for_nav);
-                return false;
             }
-
-            // Prevent custom scheme leaks
-            if url_str.starts_with("diark-sso://") {
-                return false;
-            }
-
-            true
         })
         .build();
 
-    if let Err(e) = window {
-        return Err(format!("Failed to build silent wecode webview: {e}"));
-    }
+    let win = match window {
+        Ok(w) => w,
+        Err(e) => {
+            let _ = cleanup_sso_session(&app, &session_id, CleanupReason::BuildError);
+            return Err(format!("Failed to build silent wecode webview: {e}"));
+        }
+    };
+
+    attach_window_process(&sso_registry, &session_id, &win);
 
     match rx.await {
-        Ok(result) => result,
+        Ok(result) => match result {
+            Ok(SsoOutcome::Success) => Ok(()),
+            Ok(SsoOutcome::AuthExpired) => Err("AUTH_EXPIRED".to_string()),
+            Ok(SsoOutcome::TimedOut) => Err("TIMEOUT".to_string()),
+            Ok(SsoOutcome::Failed(reason)) => Err(format!("SERVER_ERROR: {reason}")),
+            Ok(SsoOutcome::Cancelled) => Err("CANCELLED".to_string()),
+            Err(e) => Err(e.to_string()),
+        },
         Err(_) => Err("CANCELLED".to_string()),
     }
 }
 
+#[allow(dead_code)]
 fn close_moodle_window(app: &AppHandle) {
-    let partial_state_registry = if let Some(reg) = app.try_state::<PartialStateRegistry>() {
-        reg.inner().clone()
-    } else {
-        PartialStateRegistry::default()
+    let sso_reg = get_or_init_registry(Some(app));
+    let session_id_opt = {
+        if let Ok(inner) = sso_reg.inner.lock() {
+            inner.label_to_session.get("moodle-sso-login").cloned()
+        } else {
+            None
+        }
     };
-    if let Some(watchdog) = app.try_state::<WatchdogRegistry>() {
-        watchdog.cancel("moodle-sso-login");
+    if let Some(session_id) = session_id_opt {
+        let _ = cleanup_sso_session(app, &session_id, CleanupReason::Cancelled);
+    } else {
+        let partial_state_registry = if let Some(reg) = app.try_state::<PartialStateRegistry>() {
+            reg.inner().clone()
+        } else {
+            PartialStateRegistry::default()
+        };
+        close_silent_window(app, "moodle-sso-login", &partial_state_registry);
     }
-    close_silent_window(app, "moodle-sso-login", &partial_state_registry);
 }
 
 #[tauri::command]
 pub async fn launch_moodle_silent_sync(app: AppHandle) -> Result<(), String> {
     let window_label = "moodle-silent-sync".to_string();
-
-    let partial_state_registry = if let Some(reg) = app.try_state::<PartialStateRegistry>() {
-        reg.inner().clone()
-    } else {
-        PartialStateRegistry::default()
+    let sso_registry = get_or_init_registry(Some(&app));
+    let sso_session = SsoSession {
+        target: SsoTarget::Moodle,
+        label: window_label.clone(),
+        is_silent: true,
     };
 
-    close_silent_window(&app, &window_label, &partial_state_registry);
+    let action = ensure_sso_window(&app, sso_session)
+        .map_err(|e| format!("Failed to ensure SSO session: {e}"))?;
+
+    let session_id = match action {
+        WindowAction::Created(id) => id,
+        WindowAction::ReusedExisting(_) => {
+            return Err("MOODLE_SYNC_ALREADY_RUNNING".to_string());
+        }
+    };
+
+    let rx = sso_registry
+        .take_receiver(&session_id)
+        .ok_or_else(|| "Failed to obtain SSO completion receiver".to_string())?;
 
     let auth_url = WebviewUrl::External(
         MOODLE_MY_URL
@@ -1821,111 +2124,111 @@ pub async fn launch_moodle_silent_sync(app: AppHandle) -> Result<(), String> {
             .map_err(|e| format!("Invalid Moodle URL: {e}"))?,
     );
 
-    let (tx, rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
-    let tx_arc = Arc::new(StdMutex::new(Some(tx)));
-
-    // 120s Watchdog Invariant
-    let tx_watchdog = tx_arc.clone();
-    let app_watchdog = app.clone();
-    let label_watchdog = window_label.clone();
-    let partial_watchdog = partial_state_registry.clone();
-    tauri::async_runtime::spawn(async move {
-        tokio::time::sleep(std::time::Duration::from_secs(120)).await;
-        if let Ok(mut lock) = tx_watchdog.lock() {
-            if let Some(sender) = lock.take() {
-                close_silent_window(&app_watchdog, &label_watchdog, &partial_watchdog);
-                let _ = sender.send(Err("TIMEOUT".to_string()));
-            }
-        }
-    });
-
-    let tx_nav = tx_arc.clone();
     let app_nav = app.clone();
-    let label_nav = window_label.clone();
-    let partial_for_nav = partial_state_registry.clone();
+    let policy = RemoteOriginPolicy::for_moodle();
+    let session_id_for_nav = session_id.clone();
 
     let window = WebviewWindowBuilder::new(&app, &window_label, auth_url)
         .title("Diark Moodle Silent Sync")
         .visible(false)
         .initialization_script(MOODLE_HARVESTER_SCRIPT)
         .on_navigation(move |url| {
-            let url_str = url.as_str();
-
-            // Detect expired auth: redirected to login
-            if url_str.contains("login.microsoftonline.com")
-                || (url_str.contains("/login") && !url_str.contains("diark-sso"))
-                || url_str.contains("/dang-nhap")
-            {
-                if let Ok(mut lock) = tx_nav.lock() {
-                    if let Some(sender) = lock.take() {
-                        let _ = sender.send(Err("AUTH_EXPIRED".to_string()));
-                    }
+            match classify_remote_navigation(url, &policy) {
+                NavigationDecision::Reject => {
+                    eprintln!("[Security Boundary] moodle-silent-sync: Navigation rejected: {url}");
+                    false
                 }
-                close_silent_window(&app_nav, &label_nav, &partial_for_nav);
-                return false;
-            }
+                NavigationDecision::InterceptDiarkSso => {
+                    let url_str = url.as_str();
 
-            // Intercept Callback (Atomic Commit)
-            if url_str.starts_with(CALLBACK_SCHEME) {
-                let fragment_opt = url.fragment().or_else(|| url_str.strip_prefix("diark-sso://callback#"));
-                if let Some(fragment) = fragment_opt {
-                    let target = extract_query_param(fragment, "target");
-                    if target == "moodle" {
-                        println!("[Moodle Silent] Moodle sync completed via background API engine!");
-                        let total_courses: usize = extract_query_param(fragment, "total_courses")
-                            .parse()
-                            .unwrap_or(0);
-                        let _ = app_nav.emit("moodle-data-synced", total_courses);
-                        let _ = app_nav.emit("sso-callback-success", "moodle");
+                    // Intercept Callback (Atomic Commit)
+                    if url_str.starts_with(CALLBACK_SCHEME) {
+                        let fragment_opt = url.fragment().or_else(|| url_str.strip_prefix("diark-sso://callback#"));
+                        let mut cleanup_reason = CleanupReason::Success;
+                        if let Some(fragment) = fragment_opt {
+                            let target = extract_query_param(fragment, "target");
+                            if target == "moodle" {
+                                println!("[Moodle Silent] Moodle sync completed via background API engine!");
+                                let total_courses: usize = extract_query_param(fragment, "total_courses")
+                                    .parse()
+                                    .unwrap_or(0);
+                                let _ = app_nav.emit("moodle-data-synced", total_courses);
+                                let _ = app_nav.emit("sso-callback-success", "moodle");
+                            } else {
+                                cleanup_reason = CleanupReason::Failed(format!("Disallowed target for moodle silent sync: {target}"));
+                            }
+                        }
+
+                        let _ = cleanup_sso_session(&app_nav, &session_id_for_nav, cleanup_reason);
+                        return false;
                     }
-                }
 
-                if let Ok(mut lock) = tx_nav.lock() {
-                    if let Some(sender) = lock.take() {
-                        let _ = sender.send(Ok(()));
+                    // Intercept Callback Failed
+                    if url_str.starts_with(CALLBACK_FAIL_SCHEME) {
+                        let reason = extract_query_param(url_str, "reason");
+                        let _ = cleanup_sso_session(&app_nav, &session_id_for_nav, CleanupReason::Failed(reason));
+                        return false;
                     }
-                }
-                close_silent_window(&app_nav, &label_nav, &partial_for_nav);
-                return false;
-            }
 
-            // Intercept Callback Failed
-            if url_str.starts_with(CALLBACK_FAIL_SCHEME) {
-                let reason = extract_query_param(url_str, "reason");
-                if let Ok(mut lock) = tx_nav.lock() {
-                    if let Some(sender) = lock.take() {
-                        let _ = sender.send(Err(format!("SERVER_ERROR: {reason}")));
+                    false
+                }
+                NavigationDecision::AllowTrustedHttps => {
+                    let url_str = url.as_str();
+                    // Detect expired auth: redirected to login
+                    if url_str.contains("login.microsoftonline.com")
+                        || (url_str.contains("/login") && !url_str.contains("diark-sso"))
+                        || url_str.contains("/dang-nhap")
+                    {
+                        let _ = cleanup_sso_session(&app_nav, &session_id_for_nav, CleanupReason::AuthExpired);
+                        return false;
                     }
+
+                    true
                 }
-                close_silent_window(&app_nav, &label_nav, &partial_for_nav);
-                return false;
             }
-
-            if url_str.starts_with("diark-sso://") {
-                return false;
-            }
-
-            true
         })
         .build();
 
-    if let Err(e) = window {
-        return Err(format!("Failed to build silent moodle webview: {e}"));
-    }
+    let win = match window {
+        Ok(w) => w,
+        Err(e) => {
+            let _ = cleanup_sso_session(&app, &session_id, CleanupReason::BuildError);
+            return Err(format!("Failed to build silent moodle webview: {e}"));
+        }
+    };
+
+    attach_window_process(&sso_registry, &session_id, &win);
 
     match rx.await {
-        Ok(result) => result,
+        Ok(result) => match result {
+            Ok(SsoOutcome::Success) => Ok(()),
+            Ok(SsoOutcome::AuthExpired) => Err("AUTH_EXPIRED".to_string()),
+            Ok(SsoOutcome::TimedOut) => Err("TIMEOUT".to_string()),
+            Ok(SsoOutcome::Failed(reason)) => Err(format!("SERVER_ERROR: {reason}")),
+            Ok(SsoOutcome::Cancelled) => Err("CANCELLED".to_string()),
+            Err(e) => Err(e.to_string()),
+        },
         Err(_) => Err("CANCELLED".to_string()),
     }
 }
 
 #[tauri::command]
 pub async fn launch_moodle_sso_sync(app: AppHandle) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window("moodle-sso-login") {
-        let _ = window.show();
-        let _ = window.set_focus();
-        return Ok(());
-    }
+    let sso_session = SsoSession {
+        target: SsoTarget::Moodle,
+        label: "moodle-sso-login".to_string(),
+        is_silent: false,
+    };
+    let sso_registry = get_or_init_registry(Some(&app));
+    let action = ensure_sso_window(&app, sso_session)
+        .map_err(|e| format!("SSO session error: {e}"))?;
+
+    let session_id = match action {
+        WindowAction::Created(id) => id,
+        WindowAction::ReusedExisting(_) => {
+            return Ok(());
+        }
+    };
 
     let auth_url = WebviewUrl::External(
         MOODLE_MY_URL
@@ -1933,14 +2236,9 @@ pub async fn launch_moodle_sso_sync(app: AppHandle) -> Result<(), String> {
             .map_err(|e| format!("Invalid Moodle URL: {e}"))?,
     );
 
-    let token = if let Some(watchdog) = app.try_state::<WatchdogRegistry>() {
-        watchdog.register("moodle-sso-login")
-    } else {
-        CancellationToken::new()
-    };
-    spawn_watchdog(app.clone(), "moodle-sso-login".to_string(), token);
-
     let app_for_nav = app.clone();
+    let policy = RemoteOriginPolicy::for_moodle();
+    let session_id_for_nav = session_id.clone();
 
     let window = WebviewWindowBuilder::new(&app, "moodle-sso-login", auth_url)
         .title("Đồng bộ Courses UIT (Moodle)")
@@ -1949,54 +2247,73 @@ pub async fn launch_moodle_sso_sync(app: AppHandle) -> Result<(), String> {
         .always_on_top(true)
         .initialization_script(MOODLE_HARVESTER_SCRIPT)
         .on_navigation(move |url| {
-            let url_str = url.as_str();
-
-            if url_str.starts_with(CALLBACK_SCHEME) {
-                let fragment_opt = url.fragment().or_else(|| url_str.strip_prefix("diark-sso://callback#"));
-                if let Some(fragment) = fragment_opt {
-                    let target = extract_query_param(fragment, "target");
-                    if target == "moodle" {
-                        println!("[SSO Moodle] Moodle sync completed via interactive window!");
-                        let total_courses: usize = extract_query_param(fragment, "total_courses")
-                            .parse()
-                            .unwrap_or(0);
-                        let _ = app_for_nav.emit("moodle-data-synced", total_courses);
-                        let _ = app_for_nav.emit(
-                            "moodle-sync-progress",
-                            serde_json::json!({
-                                "current": total_courses,
-                                "total": total_courses,
-                                "course_name": "Hoàn tất đồng bộ",
-                                "percent": 100.0,
-                                "is_final": true
-                            }),
-                        );
-                        let _ = app_for_nav.emit("sso-callback-success", "moodle");
-                    }
+            match classify_remote_navigation(url, &policy) {
+                NavigationDecision::Reject => {
+                    eprintln!("[Security Boundary] moodle-sso-login: Navigation rejected: {url}");
+                    false
                 }
-                close_moodle_window(&app_for_nav);
-                return false;
-            }
+                NavigationDecision::InterceptDiarkSso => {
+                    let url_str = url.as_str();
 
-            if url_str.starts_with(CALLBACK_FAIL_SCHEME) {
-                let reason = extract_query_param(url_str, "reason");
-                let _ = app_for_nav.emit("sso-callback-error", reason.to_string());
-                close_moodle_window(&app_for_nav);
-                return false;
-            }
+                    if url_str.starts_with(CALLBACK_SCHEME) {
+                        let fragment_opt = url.fragment().or_else(|| url_str.strip_prefix("diark-sso://callback#"));
+                        let mut cleanup_reason = CleanupReason::Success;
+                        if let Some(fragment) = fragment_opt {
+                            let target = extract_query_param(fragment, "target");
+                            if target == "moodle" {
+                                println!("[SSO Moodle] Moodle sync completed via interactive window!");
+                                let total_courses: usize = extract_query_param(fragment, "total_courses")
+                                    .parse()
+                                    .unwrap_or(0);
+                                let _ = app_for_nav.emit("moodle-data-synced", total_courses);
+                                let _ = app_for_nav.emit(
+                                    "moodle-sync-progress",
+                                    serde_json::json!({
+                                        "current": total_courses,
+                                        "total": total_courses,
+                                        "course_name": "Hoàn tất đồng bộ",
+                                        "percent": 100.0,
+                                        "is_final": true
+                                    }),
+                                );
+                                let _ = app_for_nav.emit("sso-callback-success", "moodle");
+                            } else {
+                                eprintln!("[SSO Moodle] Disallowed callback target for moodle: {target}");
+                                let err_msg = format!("Disallowed target: {target}");
+                                let _ = app_for_nav.emit("sso-callback-error", err_msg.clone());
+                                cleanup_reason = CleanupReason::Failed(err_msg);
+                            }
+                        }
+                        let _ = cleanup_sso_session(&app_for_nav, &session_id_for_nav, cleanup_reason);
+                        return false;
+                    }
 
-            if url_str.starts_with("diark-sso://") {
-                return false;
-            }
+                    if url_str.starts_with(CALLBACK_FAIL_SCHEME) {
+                        let reason = extract_query_param(url_str, "reason");
+                        let _ = app_for_nav.emit("sso-callback-error", reason.to_string());
+                        let _ = cleanup_sso_session(&app_for_nav, &session_id_for_nav, CleanupReason::Failed(reason));
+                        return false;
+                    }
 
-            true
+                    false
+                }
+                NavigationDecision::AllowTrustedHttps => {
+                    true
+                }
+            }
         })
         .build();
 
-    if let Err(e) = window {
-        return Err(format!("Failed to build moodle SSO webview: {e}"));
-    }
+    let win = match window {
+        Ok(w) => w,
+        Err(e) => {
+            let _ = cleanup_sso_session(&app, &session_id, CleanupReason::BuildError);
+            return Err(format!("Failed to build moodle SSO webview: {e}"));
+        }
+    };
 
+    attach_window_process(&sso_registry, &session_id, &win);
+    let _ = win.show();
     Ok(())
 }
 

@@ -232,6 +232,47 @@ pub fn spawn_daily_briefing_scheduler(
     });
 }
 
+pub fn spawn_daily_briefing_scheduler_with_pools(
+    app: AppHandle,
+    pools: crate::db::DbPools,
+) {
+    tauri::async_runtime::spawn(async move {
+        let mut last_briefing_date = String::new();
+        let mut last_briefing_slot = String::new();
+
+        loop {
+            // Ngủ 15 phút giữa các lần kiểm tra
+            tokio::time::sleep(std::time::Duration::from_secs(900)).await;
+
+            let now = Local::now();
+            let date_str = now.format("%Y-%m-%d").to_string();
+            let hour = now.hour();
+
+            // Khung giờ sáng (08:00 - 08:30) hoặc tối (20:00 - 20:30)
+            let current_slot = if hour == 8 {
+                "morning"
+            } else if hour == 20 {
+                "evening"
+            } else {
+                ""
+            };
+
+            if !current_slot.is_empty() {
+                // Kiểm tra xem đã bắn cho slot này trong ngày chưa
+                if date_str != last_briefing_date || current_slot != last_briefing_slot {
+                    let app_clone = app.clone();
+                    let _ = pools.write(move |conn| {
+                        dispatch_daily_briefing(&app_clone, conn)
+                            .map_err(|e| crate::error::AppError::Database(rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e)))))
+                    }).await;
+                    last_briefing_date = date_str;
+                    last_briefing_slot = current_slot.to_string();
+                }
+            }
+        }
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

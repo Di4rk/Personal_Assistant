@@ -136,51 +136,81 @@ pub fn lookup_catalog_name_by_slug(slug: &str) -> Option<String> {
 
 use std::sync::LazyLock;
 
-static H1_SEL: LazyLock<Selector> = LazyLock::new(|| Selector::parse("h1").unwrap_or_else(|_| Selector::parse("*").expect("valid selector")));
-static H3_SEL: LazyLock<Selector> = LazyLock::new(|| Selector::parse("h3").unwrap_or_else(|_| Selector::parse("*").expect("valid selector")));
-static H4_SEL: LazyLock<Selector> = LazyLock::new(|| Selector::parse("h4").unwrap_or_else(|_| Selector::parse("*").expect("valid selector")));
-static TR_SEL: LazyLock<Selector> = LazyLock::new(|| Selector::parse("tr").unwrap_or_else(|_| Selector::parse("*").expect("valid selector")));
-static TH_SEL: LazyLock<Selector> = LazyLock::new(|| Selector::parse("th").unwrap_or_else(|_| Selector::parse("*").expect("valid selector")));
-static TD_SEL: LazyLock<Selector> = LazyLock::new(|| Selector::parse("td").unwrap_or_else(|_| Selector::parse("*").expect("valid selector")));
-static B_SEL: LazyLock<Selector> = LazyLock::new(|| Selector::parse("b").unwrap_or_else(|_| Selector::parse("*").expect("valid selector")));
-static P_SEL: LazyLock<Selector> = LazyLock::new(|| Selector::parse("p").unwrap_or_else(|_| Selector::parse("*").expect("valid selector")));
+static H1_SEL: LazyLock<Result<Selector, String>> =
+    LazyLock::new(|| Selector::parse("h1").map_err(|e| format!("Invalid selector 'h1': {e:?}")));
+static H3_SEL: LazyLock<Result<Selector, String>> =
+    LazyLock::new(|| Selector::parse("h3").map_err(|e| format!("Invalid selector 'h3': {e:?}")));
+static H4_SEL: LazyLock<Result<Selector, String>> =
+    LazyLock::new(|| Selector::parse("h4").map_err(|e| format!("Invalid selector 'h4': {e:?}")));
+static TR_SEL: LazyLock<Result<Selector, String>> =
+    LazyLock::new(|| Selector::parse("tr").map_err(|e| format!("Invalid selector 'tr': {e:?}")));
+static TH_SEL: LazyLock<Result<Selector, String>> =
+    LazyLock::new(|| Selector::parse("th").map_err(|e| format!("Invalid selector 'th': {e:?}")));
+static TD_SEL: LazyLock<Result<Selector, String>> =
+    LazyLock::new(|| Selector::parse("td").map_err(|e| format!("Invalid selector 'td': {e:?}")));
+static B_SEL: LazyLock<Result<Selector, String>> =
+    LazyLock::new(|| Selector::parse("b").map_err(|e| format!("Invalid selector 'b': {e:?}")));
+static P_SEL: LazyLock<Result<Selector, String>> =
+    LazyLock::new(|| Selector::parse("p").map_err(|e| format!("Invalid selector 'p': {e:?}")));
 
-static RE_YEAR: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"20\d{2}").unwrap_or_else(|_| Regex::new(".*").expect("valid regex")));
-static RE_COHORT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)kh[oó][aá][\s\-]+(\d+)").unwrap_or_else(|_| Regex::new(".*").expect("valid regex")));
-static RE_CREDITS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)Số\s+tín\s+chỉ\s+đào\s+tạo:\s*(?:tối\s+thiểu\s*)?([0-9]+(?:\.[0-9]+)?)").unwrap_or_else(|_| Regex::new(".*").expect("valid regex")));
-static RE_SEM: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"Học kỳ\s+(\d+)").unwrap_or_else(|_| Regex::new(".*").expect("valid regex")));
-static RE_MAJOR: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)ngành\s+([^(]+)").unwrap_or_else(|_| Regex::new(".*").expect("valid regex")));
+static RE_YEAR: LazyLock<Result<Regex, String>> =
+    LazyLock::new(|| Regex::new(r"20\d{2}").map_err(|e| format!("Invalid regex 'RE_YEAR': {e:?}")));
+static RE_COHORT: LazyLock<Result<Regex, String>> =
+    LazyLock::new(|| Regex::new(r"(?i)kh[oó][aá][\s\-]+(\d+)").map_err(|e| format!("Invalid regex 'RE_COHORT': {e:?}")));
+static RE_CREDITS: LazyLock<Result<Regex, String>> =
+    LazyLock::new(|| Regex::new(r"(?i)Số\s+tín\s+chỉ\s+đào\s+tạo:\s*(?:tối\s+thiểu\s*)?([0-9]+(?:\.[0-9]+)?)").map_err(|e| format!("Invalid regex 'RE_CREDITS': {e:?}")));
+static RE_SEM: LazyLock<Result<Regex, String>> =
+    LazyLock::new(|| Regex::new(r"Học kỳ\s+(\d+)").map_err(|e| format!("Invalid regex 'RE_SEM': {e:?}")));
+static RE_MAJOR: LazyLock<Result<Regex, String>> =
+    LazyLock::new(|| Regex::new(r"(?i)ngành\s+([^(]+)").map_err(|e| format!("Invalid regex 'RE_MAJOR': {e:?}")));
 
-static RE_RSC_H1: LazyLock<Regex> = LazyLock::new(|| {
+static RE_RSC_H1: LazyLock<Result<Regex, String>> = LazyLock::new(|| {
     Regex::new(r#"\["\$","h1",null,\{[^}]*?"children":"([^"]+)""#)
-        .unwrap_or_else(|_| Regex::new(".*").expect("valid regex"))
+        .map_err(|e| format!("Invalid regex 'RE_RSC_H1': {e:?}"))
 });
-static RE_RSC_TITLE: LazyLock<Regex> = LazyLock::new(|| {
+static RE_RSC_TITLE: LazyLock<Result<Regex, String>> = LazyLock::new(|| {
     Regex::new(r#""children":"([^"]+?)\s*—\s*Cổng thông tin UIT""#)
-        .unwrap_or_else(|_| Regex::new(".*").expect("valid regex"))
+        .map_err(|e| format!("Invalid regex 'RE_RSC_TITLE': {e:?}"))
 });
 
 /// Phân giải Next.js RSC payload của Cổng thông tin UIT thành cấu trúc dữ liệu CTĐT.
 /// Áp dụng thuật toán Heading-to-Sibling Traversal để tìm table.table-bordered kế tiếp.
 pub fn parse_curriculum_stream(rsc_content: &str, slug: &str) -> AppResult<ParsedCurriculum> {
+    let h1_sel = H1_SEL.as_ref().map_err(|e| AppError::CurriculumParse(e.clone()))?;
+    let h3_sel = H3_SEL.as_ref().map_err(|e| AppError::CurriculumParse(e.clone()))?;
+    let h4_sel = H4_SEL.as_ref().map_err(|e| AppError::CurriculumParse(e.clone()))?;
+    let tr_sel = TR_SEL.as_ref().map_err(|e| AppError::CurriculumParse(e.clone()))?;
+    let th_sel = TH_SEL.as_ref().map_err(|e| AppError::CurriculumParse(e.clone()))?;
+    let td_sel = TD_SEL.as_ref().map_err(|e| AppError::CurriculumParse(e.clone()))?;
+    let b_sel = B_SEL.as_ref().map_err(|e| AppError::CurriculumParse(e.clone()))?;
+    let p_sel = P_SEL.as_ref().map_err(|e| AppError::CurriculumParse(e.clone()))?;
+
+    let re_year = RE_YEAR.as_ref().map_err(|e| AppError::CurriculumParse(e.clone()))?;
+    let re_cohort = RE_COHORT.as_ref().map_err(|e| AppError::CurriculumParse(e.clone()))?;
+    let re_credits = RE_CREDITS.as_ref().map_err(|e| AppError::CurriculumParse(e.clone()))?;
+    let re_sem = RE_SEM.as_ref().map_err(|e| AppError::CurriculumParse(e.clone()))?;
+    let re_major = RE_MAJOR.as_ref().map_err(|e| AppError::CurriculumParse(e.clone()))?;
+    let re_rsc_h1 = RE_RSC_H1.as_ref().map_err(|e| AppError::CurriculumParse(e.clone()))?;
+    let re_rsc_title = RE_RSC_TITLE.as_ref().map_err(|e| AppError::CurriculumParse(e.clone()))?;
+
     let document = Html::parse_document(rsc_content);
 
     // 1. Phân giải tiêu đề & khóa từ catalog.json hoặc RSC payload
     let catalog_name = lookup_catalog_name_by_slug(slug);
 
     let mut page_title = String::new();
-    if let Some(h1) = document.select(&H1_SEL).next() {
+    if let Some(h1) = document.select(h1_sel).next() {
         page_title = h1.text().collect::<String>().trim().to_string();
     }
     if page_title.is_empty() {
-        if let Some(caps) = RE_RSC_H1.captures(rsc_content) {
+        if let Some(caps) = re_rsc_h1.captures(rsc_content) {
             if let Some(m) = caps.get(1) {
                 page_title = m.as_str().trim().to_string();
             }
         }
     }
     if page_title.is_empty() {
-        if let Some(caps) = RE_RSC_TITLE.captures(rsc_content) {
+        if let Some(caps) = re_rsc_title.captures(rsc_content) {
             if let Some(m) = caps.get(1) {
                 page_title = m.as_str().trim().to_string();
             }
@@ -188,24 +218,29 @@ pub fn parse_curriculum_stream(rsc_content: &str, slug: &str) -> AppResult<Parse
     }
 
     let cohort_year = {
-        RE_YEAR.find_iter(&page_title)
+        re_year
+            .find_iter(&page_title)
             .filter_map(|m| m.as_str().parse::<i32>().ok())
             .last()
             .or_else(|| {
-                RE_YEAR.find_iter(slug).filter_map(|m| m.as_str().parse::<i32>().ok()).last()
+                re_year
+                    .find_iter(slug)
+                    .filter_map(|m| m.as_str().parse::<i32>().ok())
+                    .last()
             })
     };
 
     let cohort_num = {
-        RE_COHORT.captures(&page_title)
-            .or_else(|| RE_COHORT.captures(slug))
+        re_cohort
+            .captures(&page_title)
+            .or_else(|| re_cohort.captures(slug))
             .and_then(|c| c.get(1))
             .and_then(|m| m.as_str().parse::<i32>().ok())
     };
 
     // 2. Phân giải tổng tín chỉ từ Mục 1.4 nếu có
     let mut total_credits_opt = None;
-    if let Some(caps) = RE_CREDITS.captures(rsc_content) {
+    if let Some(caps) = re_credits.captures(rsc_content) {
         if let Some(m) = caps.get(1) {
             total_credits_opt = m.as_str().parse::<f64>().ok();
         }
@@ -213,7 +248,7 @@ pub fn parse_curriculum_stream(rsc_content: &str, slug: &str) -> AppResult<Parse
 
     // 3. Phân giải Bảng 3.1: Chỉ tiêu các khối kiến thức qua Heading-to-Sibling Traversal
     let mut rules: Vec<CurriculumRule> = Vec::new();
-    for h3 in document.select(&H3_SEL) {
+    for h3 in document.select(h3_sel) {
         let h3_text = h3.text().collect::<String>();
         if h3_text.contains("3.1") {
             // Traversal tìm table kế tiếp
@@ -221,8 +256,8 @@ pub fn parse_curriculum_stream(rsc_content: &str, slug: &str) -> AppResult<Parse
                 if let Some(sibling_elem) = ElementRef::wrap(sibling) {
                     let tag = sibling_elem.value().name();
                     if tag == "table" {
-                        for tr in sibling_elem.select(&TR_SEL) {
-                            let tds: Vec<_> = tr.select(&TD_SEL).collect();
+                        for tr in sibling_elem.select(tr_sel) {
+                            let tds: Vec<_> = tr.select(td_sel).collect();
                             if tds.len() >= 2 {
                                 let block_raw = tds[0].text().collect::<String>().trim().to_string();
                                 let credits_str = tds[1].text().collect::<String>().trim().to_string();
@@ -253,18 +288,18 @@ pub fn parse_curriculum_stream(rsc_content: &str, slug: &str) -> AppResult<Parse
 
     // 4. Phân giải Kế hoạch giảng dạy mẫu (Mục 4.2) để mapping recommended_semester cho từng môn học
     let mut course_to_semester: HashMap<String, i32> = HashMap::new();
-    for p in document.select(&P_SEL) {
-        if let Some(b) = p.select(&B_SEL).next() {
+    for p in document.select(p_sel) {
+        if let Some(b) = p.select(b_sel).next() {
             let b_text = b.text().collect::<String>();
             if b_text.contains("Học kỳ") {
-                if let Some(caps) = RE_SEM.captures(&b_text) {
+                if let Some(caps) = re_sem.captures(&b_text) {
                     if let Some(sem_val) = caps.get(1).and_then(|m| m.as_str().parse::<i32>().ok()) {
                         for sibling in p.next_siblings() {
                             if let Some(sibling_elem) = ElementRef::wrap(sibling) {
                                 let tag = sibling_elem.value().name();
                                 if tag == "table" {
-                                    for tr in sibling_elem.select(&TR_SEL) {
-                                        let tds: Vec<_> = tr.select(&TD_SEL).collect();
+                                    for tr in sibling_elem.select(tr_sel) {
+                                        let tds: Vec<_> = tr.select(td_sel).collect();
                                         if !tds.is_empty() {
                                             let code = tds[0].text().collect::<String>().trim().to_uppercase();
                                             if !code.is_empty() && !code.starts_with("MÃ") {
@@ -289,7 +324,7 @@ pub fn parse_curriculum_stream(rsc_content: &str, slug: &str) -> AppResult<Parse
     let mut courses: Vec<CurriculumCourse> = Vec::new();
     let mut seen_course_keys: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
 
-    for h4 in document.select(&H4_SEL) {
+    for h4 in document.select(h4_sel) {
         let block_name = h4.text().collect::<String>().trim().to_string();
         if block_name.is_empty() {
             continue;
@@ -308,8 +343,8 @@ pub fn parse_curriculum_stream(rsc_content: &str, slug: &str) -> AppResult<Parse
                     let mut th_col = None;
                     let mut type_col = None;
 
-                    if let Some(header_tr) = sibling_elem.select(&TR_SEL).next() {
-                        for (idx, th) in header_tr.select(&TH_SEL).enumerate() {
+                    if let Some(header_tr) = sibling_elem.select(tr_sel).next() {
+                        for (idx, th) in header_tr.select(th_sel).enumerate() {
                             let txt = th.text().collect::<String>().trim().to_lowercase();
                             if txt.contains("mã mh") || txt.contains("mã môn") {
                                 code_col = Some(idx);
@@ -328,8 +363,8 @@ pub fn parse_curriculum_stream(rsc_content: &str, slug: &str) -> AppResult<Parse
                     }
 
                     // Duyệt các dòng dữ liệu
-                    for tr in sibling_elem.select(&TR_SEL) {
-                        let tds: Vec<_> = tr.select(&TD_SEL).collect();
+                    for tr in sibling_elem.select(tr_sel) {
+                        let tds: Vec<_> = tr.select(td_sel).collect();
                         if tds.is_empty() {
                             continue;
                         }
@@ -442,7 +477,7 @@ pub fn parse_curriculum_stream(rsc_content: &str, slug: &str) -> AppResult<Parse
     let major_name = if let Some(cat_name) = catalog_name {
         cat_name
     } else if !page_title.is_empty() {
-        if let Some(caps) = RE_MAJOR.captures(&page_title) {
+        if let Some(caps) = re_major.captures(&page_title) {
             caps.get(1).map(|m| m.as_str().trim().to_string()).unwrap_or(page_title)
         } else {
             page_title
@@ -619,7 +654,42 @@ pub fn save_parsed_curriculum(conn: &Connection, parsed: &ParsedCurriculum) -> A
     Ok(())
 }
 
-/// Tải và đồng bộ CTĐT từ Portal UIT theo slug qua HTTP GET RSC stream
+/// Tải và đồng bộ CTĐT từ Portal UIT theo slug qua HTTP GET RSC stream và lưu qua DbPools.
+pub async fn sync_curriculum_by_slug_with_pools(pools: &crate::db::schema::DbPools, slug: &str) -> AppResult<ParsedCurriculum> {
+    let url = format!("https://portal.uit.edu.vn/chuong-trinh-dao-tao/{}", slug);
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(AppError::Http)?;
+
+    let res = client
+        .get(&url)
+        .header("RSC", "1")
+        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        .send()
+        .await
+        .map_err(AppError::Http)?;
+
+    if !res.status().is_success() {
+        return Err(AppError::CurriculumParse(format!(
+            "Portal trả về mã lỗi HTTP {} cho slug {}",
+            res.status(),
+            slug
+        )));
+    }
+
+    let payload = res.text().await.map_err(AppError::Http)?;
+    let parsed = parse_curriculum_stream(&payload, slug)?;
+
+    let parsed_clone = parsed.clone();
+    pools
+        .write(move |conn| save_parsed_curriculum(conn, &parsed_clone))
+        .await?;
+
+    Ok(parsed)
+}
+
+/// Tải và đồng bộ CTĐT từ Portal UIT theo slug qua HTTP GET RSC stream (backward-compat với SharedDb).
 pub async fn sync_curriculum_by_slug(conn_pool: &crate::db::schema::SharedDb, slug: &str) -> AppResult<ParsedCurriculum> {
     let url = format!("https://portal.uit.edu.vn/chuong-trinh-dao-tao/{}", slug);
     let client = reqwest::Client::builder()
@@ -738,5 +808,25 @@ mod tests {
         assert_eq!(parsed.total_credits, 126.0);
         assert_eq!(parsed.cohort_year, Some(2025));
         assert_eq!(parsed.cohort_num, Some(20));
+    }
+
+    #[test]
+    fn test_curriculum_harvester_static_patterns_validity() {
+        assert!(H1_SEL.is_ok(), "H1_SEL must parse successfully");
+        assert!(H3_SEL.is_ok(), "H3_SEL must parse successfully");
+        assert!(H4_SEL.is_ok(), "H4_SEL must parse successfully");
+        assert!(TR_SEL.is_ok(), "TR_SEL must parse successfully");
+        assert!(TH_SEL.is_ok(), "TH_SEL must parse successfully");
+        assert!(TD_SEL.is_ok(), "TD_SEL must parse successfully");
+        assert!(B_SEL.is_ok(), "B_SEL must parse successfully");
+        assert!(P_SEL.is_ok(), "P_SEL must parse successfully");
+
+        assert!(RE_YEAR.is_ok(), "RE_YEAR must compile successfully");
+        assert!(RE_COHORT.is_ok(), "RE_COHORT must compile successfully");
+        assert!(RE_CREDITS.is_ok(), "RE_CREDITS must compile successfully");
+        assert!(RE_SEM.is_ok(), "RE_SEM must compile successfully");
+        assert!(RE_MAJOR.is_ok(), "RE_MAJOR must compile successfully");
+        assert!(RE_RSC_H1.is_ok(), "RE_RSC_H1 must compile successfully");
+        assert!(RE_RSC_TITLE.is_ok(), "RE_RSC_TITLE must compile successfully");
     }
 }

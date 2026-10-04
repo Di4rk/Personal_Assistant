@@ -1,4 +1,26 @@
-use rusqlite::{Connection, OptionalExtension, Result as SqlResult};
+use crate::error::AppError;
+use rusqlite::{params, Connection, OptionalExtension, Result as SqlResult};
+
+/// In-memory representation of existing note metadata in SQLite without full content body.
+#[derive(Debug, Clone)]
+pub struct VaultNoteIndexRow {
+    pub rowid_key: i64,
+    pub id: String,
+    pub title: String,
+    pub tags: Option<String>,
+    pub file_mtime: i64,
+    pub note_type: Option<String>,
+    pub external_uri: Option<String>,
+}
+
+/// Transactional payload for updating FTS5 entries in memory during an active write transaction.
+#[derive(Debug, Clone)]
+pub struct VaultIndexUpdate {
+    pub rowid_key: i64,
+    pub title: String,
+    pub prose: String,
+    pub code: String,
+}
 
 /// Helper to safely check if a column exists in a given table.
 pub fn column_exists(conn: &Connection, table: &str, column: &str) -> Result<bool, String> {
@@ -28,7 +50,7 @@ pub fn ensure_column(conn: &Connection, table: &str, column_name: &str, column_d
     Ok(())
 }
 
-/// Checks whether vault_fts needs to be rebuilt (e.g. from legacy 2-column to 3-column prose/code).
+/// Checks whether vault_fts needs to be rebuilt (e.g. missing prose/code or missing contentless_delete=1).
 pub fn vault_fts_needs_rebuild(conn: &Connection) -> Result<bool, String> {
     let sql: Option<String> = conn
         .query_row(
@@ -41,12 +63,20 @@ pub fn vault_fts_needs_rebuild(conn: &Connection) -> Result<bool, String> {
 
     match sql {
         None => Ok(false), // Bảng chưa tồn tại, init_vault_tables sẽ tạo mới
-        Some(ddl) => Ok(!ddl.contains("prose") || !ddl.contains("code")),
+        Some(ddl) => Ok(
+            !ddl.contains("prose")
+                || !ddl.contains("code")
+                || !ddl.contains("contentless_delete=1"),
+        ),
     }
 }
 
-/// Re-indexes all existing notes from vault_notes into the newly recreated vault_fts.
+/// Re-indexes all existing notes from vault_notes into the newly recreated vault_fts if content_cache is available.
 pub fn reindex_all_notes_to_fts(conn: &Connection) -> Result<(), String> {
+    if !column_exists(conn, "vault_notes", "content_cache")? {
+        return Ok(());
+    }
+
     let mut stmt = conn
         .prepare("SELECT rowid_key, title, content_cache FROM vault_notes")
         .map_err(|e| format!("Failed to prepare notes for reindexing: {e}"))?;
@@ -77,13 +107,49 @@ pub fn reindex_all_notes_to_fts(conn: &Connection) -> Result<(), String> {
     Ok(())
 }
 
-/// Migrates vault_fts if it exists with legacy schema (missing prose or code columns).
-pub fn migrate_vault_fts_if_needed(conn: &Connection) -> Result<(), String> {
-    if !vault_fts_needs_rebuild(conn)? {
+/// Migrates vault_notes by dropping content_cache and rebuilding vault_fts with contentless_delete=1.
+/// Runs inside an atomic transaction. If migration fails at any step, the transaction rolls back.
+pub fn migrate_vault_cache_to_contentless_delete(conn: &mut Connection) -> Result<(), AppError> {
+    let table_exists: bool = conn
+        .query_row(
+            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='vault_notes'",
+            [],
+            |r| r.get::<_, i64>(0),
+        )
+        .map(|c| c > 0)
+        .unwrap_or(false);
+
+    if !table_exists {
         return Ok(());
     }
 
-    conn.execute_batch(
+    let has_content_cache = column_exists(conn, "vault_notes", "content_cache")
+        .map_err(AppError::Vault)?;
+    let fts_needs_rebuild = vault_fts_needs_rebuild(conn)
+        .map_err(AppError::Vault)?;
+
+    if !has_content_cache && !fts_needs_rebuild {
+        return Ok(());
+    }
+
+    let tx = conn.transaction()?;
+
+    let mut existing_notes = Vec::new();
+    if has_content_cache {
+        let mut stmt = tx.prepare("SELECT rowid_key, title, content_cache FROM vault_notes")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?;
+        for r in rows {
+            existing_notes.push(r?);
+        }
+    }
+
+    tx.execute_batch(
         r#"
         DROP TABLE IF EXISTS vault_fts;
         CREATE VIRTUAL TABLE vault_fts USING fts5(
@@ -91,15 +157,42 @@ pub fn migrate_vault_fts_if_needed(conn: &Connection) -> Result<(), String> {
             prose,
             code,
             content='',
+            contentless_delete=1,
             tokenize='unicode61 remove_diacritics 2'
         );
         "#,
-    )
-    .map_err(|e| format!("Failed to recreate 3-column vault_fts: {e}"))?;
+    )?;
 
-    // Tự động re-index toàn bộ notes đang có trong DB vào FTS5 mới
-    reindex_all_notes_to_fts(conn)?;
+    if !existing_notes.is_empty() {
+        let mut insert_stmt = tx.prepare(
+            "INSERT INTO vault_fts(rowid, title, prose, code) VALUES (?1, ?2, ?3, ?4)",
+        )?;
+        for (rowid, title, content_cache) in &existing_notes {
+            let (prose, code) = crate::modules::vault::scanner::split_prose_and_code(content_cache);
+            insert_stmt.execute(params![rowid, title, prose, code])?;
+        }
+
+        let fts_count: i64 = tx.query_row("SELECT count(*) FROM vault_fts", [], |r| r.get(0))?;
+        if fts_count != existing_notes.len() as i64 {
+            return Err(AppError::Vault(format!(
+                "FTS verification failed: expected {} entries, got {}",
+                existing_notes.len(),
+                fts_count
+            )));
+        }
+    }
+
+    if has_content_cache {
+        tx.execute_batch("ALTER TABLE vault_notes DROP COLUMN content_cache;")?;
+    }
+
+    tx.commit()?;
     Ok(())
+}
+
+/// Migrates vault_fts if it exists with legacy schema (missing prose/code or contentless_delete=1).
+pub fn migrate_vault_fts_if_needed(conn: &mut Connection) -> Result<(), String> {
+    migrate_vault_cache_to_contentless_delete(conn).map_err(|e| e.to_string())
 }
 
 /// Verifies that SQLite was compiled with FTS5 support.
@@ -121,7 +214,7 @@ pub fn check_fts5_support(conn: &Connection) -> SqlResult<()> {
 /// Initializes vault tables for notes metadata, wikilinks graph, and FTS5 full-text indexing.
 pub fn init_vault_tables(conn: &Connection) -> SqlResult<()> {
     check_fts5_support(conn)?;
-    // 1. Metadata table with surrogate integer key for FTS5 rowid mapping
+    // 1. Metadata table with surrogate integer key for FTS5 rowid mapping (no content_cache)
     conn.execute(
         r#"
         CREATE TABLE IF NOT EXISTS vault_notes (
@@ -131,7 +224,6 @@ pub fn init_vault_tables(conn: &Connection) -> SqlResult<()> {
             tags TEXT,                                 -- JSON string array: '["icpc"]'
             frontmatter_json TEXT,                     -- Raw metadata JSON
             file_mtime INTEGER NOT NULL,              -- Unix timestamp for incremental sync
-            content_cache TEXT NOT NULL DEFAULT '',    -- Needed for FTS5 contentless 'delete'
             updated_at INTEGER NOT NULL,
             -- Giá trị mặc định 'GENERAL' phải khớp với enum NoteType bên TypeScript types.ts
             note_type TEXT DEFAULT 'GENERAL',
@@ -180,7 +272,6 @@ pub fn init_vault_tables(conn: &Connection) -> SqlResult<()> {
     };
 
     if needs_migration {
-        // Table existed with old schema (source_id, target_id); migrate it
         conn.execute_batch(
             r#"
             DROP TABLE IF EXISTS vault_links;
@@ -205,11 +296,7 @@ pub fn init_vault_tables(conn: &Connection) -> SqlResult<()> {
         [],
     )?;
 
-    // 3. FTS5 Virtual Table (Contentless, Multi-column: title, prose, code)
-    migrate_vault_fts_if_needed(conn).map_err(|e| {
-        rusqlite::Error::UserFunctionError(e.into())
-    })?;
-
+    // 3. Ensure FTS5 Virtual Table exists (Contentless, Multi-column: title, prose, code, contentless_delete=1)
     conn.execute_batch(
         r#"
         CREATE VIRTUAL TABLE IF NOT EXISTS vault_fts USING fts5(
@@ -217,6 +304,7 @@ pub fn init_vault_tables(conn: &Connection) -> SqlResult<()> {
             prose,
             code,
             content='',
+            contentless_delete=1,
             tokenize='unicode61 remove_diacritics 2'
         );
         "#,
@@ -231,8 +319,8 @@ mod tests {
 
     #[test]
     fn test_init_vault_tables_succeeds() {
-        let conn = Connection::open_in_memory().expect("in-memory db should open");
-        init_vault_tables(&conn).expect("vault tables must initialize successfully");
+        let mut conn = Connection::open_in_memory().expect("in-memory db should open");
+        init_vault_tables(&mut conn).expect("vault tables must initialize successfully");
 
         // Verify vault_notes, vault_links, and vault_fts exist
         let count: i64 = conn
@@ -243,26 +331,31 @@ mod tests {
             )
             .expect("query sqlite_master");
         assert_eq!(count, 3);
+        assert!(!column_exists(&conn, "vault_notes", "content_cache").unwrap());
     }
 
     #[test]
     fn test_init_vault_tables_migration_idempotency() {
-        let conn = Connection::open_in_memory().expect("in-memory db should open");
+        let mut conn = Connection::open_in_memory().expect("in-memory db should open");
         // First run
-        init_vault_tables(&conn).expect("first init must succeed");
+        init_vault_tables(&mut conn).expect("first init must succeed");
         // Second run (idempotency check)
-        init_vault_tables(&conn).expect("second init must succeed without duplicate column error");
+        init_vault_tables(&mut conn).expect("second init must succeed without duplicate column error");
 
         // Verify columns exist
         assert!(column_exists(&conn, "vault_notes", "note_type").unwrap());
         assert!(column_exists(&conn, "vault_notes", "external_uri").unwrap());
+        assert!(!column_exists(&conn, "vault_notes", "content_cache").unwrap());
     }
 
     #[test]
     fn test_fts5_legacy_migration() {
-        let conn = Connection::open_in_memory().expect("in-memory db");
+        let mut conn = Connection::open_in_memory().expect("in-memory db");
         // Initialize base vault tables first so vault_notes exists
-        init_vault_tables(&conn).expect("base init");
+        init_vault_tables(&mut conn).expect("base init");
+
+        // Manually add content_cache to simulate legacy table
+        ensure_column(&conn, "vault_notes", "content_cache", "content_cache TEXT NOT NULL DEFAULT ''").expect("add content_cache");
 
         // Manually simulate legacy 2-column vault_fts (v0.5)
         conn.execute_batch(
@@ -292,12 +385,12 @@ mod tests {
         assert!(vault_fts_needs_rebuild(&conn).expect("check rebuild"));
 
         // Run migration
-        migrate_vault_fts_if_needed(&conn).expect("migration must succeed");
+        migrate_vault_fts_if_needed(&mut conn).expect("migration must succeed");
 
         // Verify it no longer needs rebuild
         assert!(!vault_fts_needs_rebuild(&conn).expect("check rebuild"));
 
-        // Verify schema is 3 columns (title, prose, code)
+        // Verify schema is 3 columns (title, prose, code) with contentless_delete=1
         let sql: String = conn
             .query_row(
                 "SELECT sql FROM sqlite_master WHERE type='table' AND name='vault_fts'",
@@ -305,7 +398,10 @@ mod tests {
                 |r| r.get(0),
             )
             .expect("query ddl");
-        assert!(sql.contains("prose") && sql.contains("code"));
+        assert!(sql.contains("prose") && sql.contains("code") && sql.contains("contentless_delete=1"));
+
+        // Verify content_cache is dropped
+        assert!(!column_exists(&conn, "vault_notes", "content_cache").unwrap());
 
         // Verify the existing note was reindexed into 3 columns
         let fts_count: i64 = conn
@@ -313,11 +409,58 @@ mod tests {
             .expect("query fts count");
         assert_eq!(fts_count, 1);
 
-        // Verify inserting 4 parameters (rowid, title, prose, code) succeeds
-        conn.execute(
-            "INSERT INTO vault_fts(rowid, title, prose, code) VALUES (999, 'Test Title', 'Test Prose', 'Test Code')",
-            [],
-        )
-        .expect("insert into migrated vault_fts");
+        // Verify searching for prose works
+        let match_count: i64 = conn
+            .query_row("SELECT count(*) FROM vault_fts WHERE vault_fts MATCH 'Hello'", [], |r| r.get(0))
+            .expect("match query");
+        assert_eq!(match_count, 1);
+
+        // Verify deleting by rowid succeeds directly on contentless table!
+        conn.execute("DELETE FROM vault_fts WHERE rowid = 1", []).expect("delete by rowid");
+        let count_after: i64 = conn
+            .query_row("SELECT count(*) FROM vault_fts", [], |r| r.get(0))
+            .expect("count after delete");
+        assert_eq!(count_after, 0);
+    }
+
+    #[test]
+    fn test_sqlite_version_and_contentless_delete_support() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        let version: String = conn
+            .query_row("SELECT sqlite_version()", [], |r| r.get(0))
+            .expect("query sqlite version");
+        println!("\n>>> Bundled SQLite Version: {} <<<\n", version);
+
+        let res = conn.execute_batch(
+            r#"
+            CREATE VIRTUAL TABLE test_contentless_fts USING fts5(
+                title,
+                prose,
+                code,
+                content='',
+                contentless_delete=1,
+                tokenize='unicode61 remove_diacritics 2'
+            );
+            INSERT INTO test_contentless_fts(rowid, title, prose, code) VALUES(1, 'Title 1', 'Prose 1', 'Code 1');
+            INSERT INTO test_contentless_fts(rowid, title, prose, code) VALUES(2, 'Title 2', 'Prose 2', 'Code 2');
+            "#,
+        );
+        assert!(res.is_ok(), "Creating contentless_delete=1 table must succeed: {:?}", res);
+
+        // Verify query matches
+        let count: i64 = conn
+            .query_row("SELECT count(*) FROM test_contentless_fts WHERE test_contentless_fts MATCH 'Prose'", [], |r| r.get(0))
+            .expect("query match");
+        assert_eq!(count, 2);
+
+        // Verify DELETE by rowid without old text works!
+        let del_res = conn.execute("DELETE FROM test_contentless_fts WHERE rowid = 1", []);
+        assert!(del_res.is_ok(), "Deleting from contentless table with contentless_delete=1 must succeed: {:?}", del_res);
+
+        // Verify match count decreased to 1
+        let count_after: i64 = conn
+            .query_row("SELECT count(*) FROM test_contentless_fts WHERE test_contentless_fts MATCH 'Prose'", [], |r| r.get(0))
+            .expect("query match after delete");
+        assert_eq!(count_after, 1);
     }
 }

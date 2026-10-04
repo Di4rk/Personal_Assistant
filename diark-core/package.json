@@ -1,24 +1,29 @@
 {
   "name": "diark-core",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "codegen:types": "quicktype -s json -o src/types/portal-generated.ts"
+    "codegen:types": "quicktype -s json -o src/types/portal-generated.ts",
+    "test": "node --test --experimental-strip-types tests/**/*.test.ts",
+    "lint:safety": "node scripts/code-safety-scan.mjs && tsc --noEmit",
+    "lint:panic": "node scripts/code-safety-scan.mjs --rust-only",
+    "lint:any": "node scripts/code-safety-scan.mjs --ts-only",
+    "benchmark": "node scripts/benchmark.mjs"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",
-    "@tauri-apps/api": "^2",
-    "@tauri-apps/plugin-autostart": "^2.5.1",
-    "@tauri-apps/plugin-dialog": "^2.7.3",
-    "@tauri-apps/plugin-notification": "^2.4.0",
-    "@tauri-apps/plugin-opener": "^2",
-    "@tauri-apps/plugin-process": "^2",
-    "@tauri-apps/plugin-updater": "^2",
+    "@tauri-apps/api": "^2.12.0",
+    "@tauri-apps/plugin-autostart": "^2.6.0",
+    "@tauri-apps/plugin-dialog": "^2.8.0",
+    "@tauri-apps/plugin-notification": "^2.5.0",
+    "@tauri-apps/plugin-opener": "^2.6.0",
+    "@tauri-apps/plugin-process": "^2.4.0",
+    "@tauri-apps/plugin-updater": "^2.13.0",
     "@visx/group": "^4.0.0",
     "@visx/scale": "^4.0.0",
     "@visx/shape": "^4.0.0",
@@ -32,7 +37,7 @@
     "zustand": "^5.0.15"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2",
+    "@tauri-apps/cli": "^2.12.0",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^4.6.0",

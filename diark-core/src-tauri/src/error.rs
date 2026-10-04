@@ -51,8 +51,26 @@ pub enum AppError {
     #[error("Lỗi I/O: {0}")]
     Io(#[from] std::io::Error),
 
+    #[error("Lỗi connection pool: {0}")]
+    Pool(#[from] r2d2::Error),
+
+    #[error("DbWriter channel bị đóng: {0}")]
+    WriterClosed(String),
+
     #[error("Lỗi Vault: {0}")]
     Vault(String),
+
+    #[error("Lỗi đồng bộ: {0}")]
+    Sync(String),
+}
+
+impl serde::Serialize for AppError {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
 }
 
 pub type AppResult<T> = Result<T, AppError>;

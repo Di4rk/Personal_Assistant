@@ -65,12 +65,15 @@ export const GraduationAuditCard: React.FC<GraduationAuditCardProps> = ({
   const [showAllCohorts, setShowAllCohorts] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // Trạng thái thu gọn card (lưu vào localStorage)
+  // Trạng thái thu gọn card — mặc định collapsed (true) để giảm visual noise ban đầu.
+  // Lưu preference vào localStorage để persist qua session.
   const [isCollapsed, setIsCollapsed] = useState<boolean>(() => {
     try {
-      return localStorage.getItem("academic_audit_collapsed") === "true";
+      const stored = localStorage.getItem("academic_audit_collapsed");
+      // Nếu chưa có preference, mặc định collapsed = true
+      return stored === null ? true : stored === "true";
     } catch {
-      return false;
+      return true;
     }
   });
 
@@ -85,7 +88,7 @@ export const GraduationAuditCard: React.FC<GraduationAuditCardProps> = ({
       try {
         localStorage.setItem("academic_audit_collapsed", String(next));
       } catch (e) {
-        console.warn("Lỗi lưu localStorage:", e);
+        console.warn("[GraduationAuditCard] Không thể lưu collapse state:", e);
       }
       return next;
     });

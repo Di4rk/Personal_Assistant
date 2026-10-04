@@ -276,8 +276,8 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 bg-zinc-900 border border-zinc-800 rounded-xl p-5">
         <div>
           <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-lg bg-violet-950/60 border border-violet-800/50 text-violet-400">
-              <GraduationCap className="w-5 h-5" />
+            <div className="p-2 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300">
+              <GraduationCap className="w-5 h-5" aria-hidden="true" />
             </div>
             <div>
               <h2 className="text-lg font-bold text-zinc-100">
@@ -292,8 +292,13 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
 
         <div className="flex flex-col sm:flex-row sm:items-center gap-3">
           {isPortalSyncing && (
-            <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-violet-950/50 border border-violet-800/40 text-xs text-violet-300 animate-pulse">
-              <RefreshCw className="w-3.5 h-3.5 animate-spin text-violet-400" />
+            <div
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-950/50 border border-emerald-800/40 text-xs text-emerald-300 animate-pulse"
+              role="status"
+              aria-live="polite"
+              aria-label="Đang đồng bộ dữ liệu"
+            >
+              <RefreshCw className="w-3.5 h-3.5 animate-spin text-emerald-400" aria-hidden="true" />
               <span>Đang cạo dữ liệu Cổng UIT ngầm...</span>
             </div>
           )}
@@ -307,8 +312,8 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
                   : "bg-zinc-800 border-zinc-700 text-zinc-300"
               }`}
             >
-              {scrapeFeedback.type === "success" && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />}
-              {scrapeFeedback.type === "error" && <AlertCircle className="w-3.5 h-3.5 text-rose-400 shrink-0" />}
+              {scrapeFeedback.type === "success" && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" aria-hidden="true" />}
+              {scrapeFeedback.type === "error" && <AlertCircle className="w-3.5 h-3.5 text-rose-400 shrink-0" aria-hidden="true" />}
               <span>{scrapeFeedback.text}</span>
             </div>
           )}
@@ -317,22 +322,25 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
             <button
               onClick={() => { void handleRefreshClick(); }}
               disabled={isPortalSyncing || isRefreshing}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors border focus:outline-none cursor-pointer ${
+              aria-label={isPortalSyncing ? "Đang đồng bộ dữ liệu từ Cổng UIT" : "Làm mới dữ liệu từ Cổng UIT"}
+              aria-busy={isPortalSyncing || isRefreshing}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors duration-150 border cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500 disabled:opacity-60 disabled:cursor-not-allowed ${
                 isPortalSyncing
-                  ? "bg-violet-950/60 border-violet-600/50 text-violet-300"
+                  ? "bg-emerald-950/60 border-emerald-700/50 text-emerald-300"
                   : "bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border-zinc-700"
               }`}
               title={isPortalSyncing ? "Đang cạo bảng điểm & DRL từ Cổng UIT ngầm..." : "Làm mới & cạo dữ liệu từ Cổng UIT"}
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${isPortalSyncing || isRefreshing ? "animate-spin text-violet-400" : ""}`} />
+              <RefreshCw className={`w-3.5 h-3.5 ${isPortalSyncing || isRefreshing ? "animate-spin text-emerald-400" : ""}`} aria-hidden="true" />
               <span>{isPortalSyncing ? "Đang cạo..." : "Làm mới"}</span>
             </button>
             <button
               type="button"
               onClick={() => setIsSyncPortalModalOpen(true)}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 active:bg-sky-700 text-white text-xs font-semibold shadow-sm transition-all cursor-pointer"
+              aria-label="Mở cửa sổ đăng nhập và đồng bộ Cổng UIT"
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-emerald-700 hover:bg-emerald-600 active:bg-emerald-800 text-white text-xs font-semibold shadow-sm transition-all duration-150 cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-400"
             >
-              <span className="text-white">⚡</span>
+              <span aria-hidden="true">⚡</span>
               <span>Đồng bộ Cổng UIT</span>
             </button>
           </div>
@@ -351,19 +359,13 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
         onSyncClick={handleSyncPortal}
       />
 
-      {/* 2.0 Exam Radar & Shift Countdown (v0.7.0) */}
-      <ExamRadarCard />
-
-      {/* 2.1 Degree Audit & Curriculum Progress Engine */}
-      <GraduationAuditCard onRefreshTrigger={() => { void handleRefresh(); }} />
-
       {error && (
-        <div className="rounded-lg bg-rose-950/40 border border-rose-800/50 p-3 text-xs text-rose-300">
+        <div className="rounded-lg bg-rose-950/40 border border-rose-800/50 p-3 text-xs text-rose-300" role="alert">
           {error}
         </div>
       )}
 
-      {/* 3. Main Split View: Left (Transcript) vs Right (Radar & Simulator) */}
+      {/* 3. Main Split View — ưu tiên Transcript lên trước (F-pattern cognitive priority) */}
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
         {/* === LEFT COLUMN: Transcript & Semesters (7 cols on XL) === */}
         <div className="xl:col-span-7 space-y-4">
@@ -384,32 +386,35 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
           />
         </div>
 
-        {/* === RIGHT COLUMN: Radar Chart & Graduation Simulator (5 cols on XL) === */}
+        {/* === RIGHT COLUMN: Radar Chart & GPA Simulator (5 cols on XL) === */}
         <div className="xl:col-span-5 space-y-6">
           {/* Radar Chart Card */}
           <div className="rounded-xl bg-zinc-900 border border-zinc-800 p-5 shadow-lg">
             <div className="flex items-center justify-between gap-3 border-b border-zinc-800 pb-3 mb-3">
               <div className="flex items-center gap-2">
-                <div className="p-1.5 rounded-lg bg-violet-950/60 border border-violet-800/50 text-violet-400">
-                  <Layers className="w-4 h-4" />
+                <div className="p-1.5 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300">
+                  <Layers className="w-4 h-4" aria-hidden="true" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-semibold text-zinc-100">
-                    Academic Radar Chart
-                  </h3>
-                  <p className="text-[11px] text-zinc-500">
+                  <h3 className="text-sm font-semibold text-zinc-100">Academic Radar Chart</h3>
+                  <p className="text-xs text-zinc-500">
                     Phân bố năng lực 4 khối kiến thức chuẩn UIT
                   </p>
                 </div>
               </div>
 
-              {/* Scope Switcher: Toàn khóa vs Học kỳ */}
-              <div className="flex items-center bg-zinc-950 border border-zinc-800 rounded-lg p-0.5 text-xs">
+              {/* Scope Switcher */}
+              <div
+                className="flex items-center bg-zinc-950 border border-zinc-800 rounded-lg p-0.5"
+                role="group"
+                aria-label="Phạm vi Radar"
+              >
                 <button
                   onClick={() => setRadarScope("all")}
-                  className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors cursor-pointer ${
+                  aria-pressed={radarScope === "all"}
+                  className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all duration-150 cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500 ${
                     radarScope === "all"
-                      ? "bg-violet-600 text-white shadow-sm"
+                      ? "bg-zinc-700 text-zinc-100 border border-zinc-600"
                       : "text-zinc-400 hover:text-zinc-200"
                   }`}
                 >
@@ -417,9 +422,10 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
                 </button>
                 <button
                   onClick={() => setRadarScope("semester")}
-                  className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors cursor-pointer ${
+                  aria-pressed={radarScope === "semester"}
+                  className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all duration-150 cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500 ${
                     radarScope === "semester"
-                      ? "bg-violet-600 text-white shadow-sm"
+                      ? "bg-zinc-700 text-zinc-100 border border-zinc-600"
                       : "text-zinc-400 hover:text-zinc-200"
                   }`}
                 >
@@ -431,8 +437,12 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
             {/* Render Pure SVG Radar */}
             <div className="py-2 flex items-center justify-center min-h-[300px]">
               {(radarScope === "all" ? isLoadingAllCourses : isLoadingCourses) ? (
-                <div className="flex flex-col items-center justify-center gap-2 text-xs text-zinc-500">
-                  <RefreshCw className="w-5 h-5 animate-spin text-violet-500" />
+                <div
+                  className="flex flex-col items-center justify-center gap-2 text-xs text-zinc-500"
+                  role="status"
+                  aria-label="Đang tải dữ liệu biểu đồ"
+                >
+                  <RefreshCw className="w-5 h-5 animate-spin text-emerald-500" aria-hidden="true" />
                   <span>Đang tải dữ liệu biểu đồ...</span>
                 </div>
               ) : (
@@ -456,7 +466,7 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
             </div>
           </div>
 
-          {/* Graduation Target Simulator Card */}
+          {/* GPA Simulator Card */}
           <GpaSimulatorCard
             currentGpaCredits={cumulativeStats.currentGpaCredits}
             currentEarnedCredits={cumulativeStats.currentEarnedCredits}
@@ -469,6 +479,10 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
           />
         </div>
       </div>
+
+      {/* 4. Exam Radar & Degree Audit — sau bảng điểm để giảm cognitive load ban đầu */}
+      <ExamRadarCard />
+      <GraduationAuditCard onRefreshTrigger={() => { void handleRefresh(); }} />
 
       <SyncPortalModal
         isOpen={isSyncPortalModalOpen}

@@ -86,9 +86,11 @@ pub fn parse_exam_timestamp(date_str: &str, start_time: &str) -> i64 {
 
     let naive_dt = NaiveDateTime::new(date, time);
     // Múi giờ UTC+7 (Asia/Ho_Chi_Minh)
-    let vn_offset = FixedOffset::east_opt(7 * 3600).unwrap_or_else(|| FixedOffset::east_opt(0).unwrap());
-    match vn_offset.from_local_datetime(&naive_dt).single() {
-        Some(dt) => dt.timestamp(),
+    match FixedOffset::east_opt(7 * 3600) {
+        Some(offset) => match offset.from_local_datetime(&naive_dt).single() {
+            Some(dt) => dt.timestamp(),
+            None => naive_dt.and_utc().timestamp() - 7 * 3600,
+        },
         None => naive_dt.and_utc().timestamp() - 7 * 3600,
     }
 }
@@ -623,5 +625,32 @@ mod tests {
         assert_eq!(all_exams[8].subject_code, "MA005");
         assert_eq!(all_exams[8].examination, "final_term");
         assert_eq!(all_exams[8].date_str, "13/07/2026");
+    }
+
+    #[test]
+    fn test_parse_exam_timestamp_ict_and_fallbacks() {
+        // 2026-12-25 09:30:00 ICT is 2026-12-25 02:30:00 UTC
+        let expected_utc_ts = NaiveDate::from_ymd_opt(2026, 12, 25)
+            .unwrap()
+            .and_hms_opt(2, 30, 0)
+            .unwrap()
+            .and_utc()
+            .timestamp();
+
+        let ts_ddmmyyyy = parse_exam_timestamp("25/12/2026", "09:30");
+        assert_eq!(ts_ddmmyyyy, expected_utc_ts);
+
+        let ts_iso = parse_exam_timestamp("2026-12-25", "09:30:00");
+        assert_eq!(ts_iso, expected_utc_ts);
+
+        // Fallback checks: must not panic on invalid inputs
+        let ts_fallback_date = parse_exam_timestamp("bad-date", "08:00");
+        assert!(ts_fallback_date > 0);
+
+        let ts_fallback_time = parse_exam_timestamp("25/12/2026", "bad-time");
+        assert!(ts_fallback_time > 0);
+
+        let ts_fallback_both = parse_exam_timestamp("bad-date", "bad-time");
+        assert!(ts_fallback_both > 0);
     }
 }

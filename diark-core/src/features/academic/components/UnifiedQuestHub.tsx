@@ -23,6 +23,7 @@ import {
 import type { WecodeAssignmentMeta, WecodeProblemRecord } from '../../../types/wecode';
 import { useSyncOrchestratorStore } from '../stores/syncOrchestratorStore';
 import { useTauriEvent } from '../../../hooks/useTauriEvent';
+import { useWindowVisibility } from '../../../hooks/useWindowVisibility';
 
 export type QuestUrgency = 'critical' | 'upcoming' | 'completed';
 export type QuestPlatform = 'all' | 'moodle' | 'wecode';
@@ -94,13 +95,17 @@ export const UnifiedQuestHub: React.FC = () => {
   const { requestSync, serviceState } = useSyncOrchestratorStore();
   const isSyncing = serviceState.moodle.isSyncing || serviceState.wecode.isSyncing;
 
-  // Real-time ticking clock every 30s
+  const isWindowVisible = useWindowVisibility();
+
+  // Real-time ticking clock every 30s (tạm dừng khi ẩn dưới khay)
   useEffect(() => {
+    if (!isWindowVisible) return;
+    setNowSec(Math.floor(Date.now() / 1000));
     const timer = setInterval(() => {
       setNowSec(Math.floor(Date.now() / 1000));
     }, 30000);
     return () => clearInterval(timer);
-  }, []);
+  }, [isWindowVisible]);
 
   const loadAllData = useCallback(async (showLoadingSpinner: boolean = true) => {
     if (showLoadingSpinner) setLoading(true);

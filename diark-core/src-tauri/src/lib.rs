@@ -6,10 +6,12 @@ pub mod modules;
 pub mod server;
 pub mod services;
 pub mod tray;
+#[path = "commands/webview_lifecycle.rs"]
+pub mod webview_lifecycle;
 
 use std::sync::{Arc, Mutex};
 
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
 use tokio::sync::watch;
 
@@ -146,219 +148,322 @@ macro_rules! registered_commands {
             commands::gemini::trigger_socratic_debug,
             commands::gemini::extract_moodle_tasks,
             commands::gemini::save_extracted_moodle_tasks,
+            // System, Hotkey & Autostart
+            commands::system::get_system_preferences,
+            commands::system::update_autostart_setting,
+            commands::system::update_start_minimized_setting,
+            commands::system::update_global_shortcut,
+            commands::system::suspend_hotkey,
+            commands::system::resume_hotkey,
+            commands::system::notify_ui_ready,
         ]
     };
 }
 
 pub fn run() {
-    let build_result = tauri::Builder::default()
-        .setup(|app| {
-            let app_data_dir = app.path().app_data_dir()?;
-            std::fs::create_dir_all(&app_data_dir)?;
+    let mut builder = tauri::Builder::default()
+        // D2: single-instance ĐẦU TIÊN
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = crate::tray::show_and_focus_main(&window);
+                let _ = app.emit("window-shown", ());
+            }
+        }))
+        // D1: Autostart với cờ --autostart
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec!["--autostart"]),
+        ))
+        // D3: Global shortcut handler gắn 1 lần với with_handler
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(crate::commands::system::global_hotkey_handler)
+                .build(),
+        )
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build());
 
-            // DB Migration: nếu tồn tại file cũ từ thời jarvis, tự động rename sang diàrk
-            // trước khi mở connection, đảm bảo dữ liệu người dùng không bị mất.
-            let legacy_db = app_data_dir.join("jarvis.sqlite3");
-            let db_path = app_data_dir.join("diark.sqlite3");
-            if legacy_db.exists() && !db_path.exists() {
-                println!("[diark] Migrating database: jarvis.sqlite3 → diark.sqlite3");
-                std::fs::rename(&legacy_db, &db_path)
-                    .map_err(|e| anyhow::anyhow!("DB migration failed: {e}"))?;
-                // Di chuyển cả WAL và SHM files nếu có
-                for ext in &["-wal", "-shm"] {
-                    let old = app_data_dir.join(format!("jarvis.sqlite3{ext}"));
-                    let new = app_data_dir.join(format!("diark.sqlite3{ext}"));
-                    if old.exists() {
-                        let _ = std::fs::rename(old, new);
-                    }
+    builder = builder.setup(|app| {
+        let app_data_dir = app.path().app_data_dir()?;
+        std::fs::create_dir_all(&app_data_dir)?;
+
+        // DB Migration: nếu tồn tại file cũ từ thời jarvis, tự động rename sang diàrk
+        // trước khi mở connection, đảm bảo dữ liệu người dùng không bị mất.
+        let legacy_db = app_data_dir.join("jarvis.sqlite3");
+        let db_path = app_data_dir.join("diark.sqlite3");
+        if legacy_db.exists() && !db_path.exists() {
+            println!("[diark] Migrating database: jarvis.sqlite3 → diark.sqlite3");
+            std::fs::rename(&legacy_db, &db_path)
+                .map_err(|e| anyhow::anyhow!("DB migration failed: {e}"))?;
+            // Di chuyển cả WAL và SHM files nếu có
+            for ext in &["-wal", "-shm"] {
+                let old = app_data_dir.join(format!("jarvis.sqlite3{ext}"));
+                let new = app_data_dir.join(format!("diark.sqlite3{ext}"));
+                if old.exists() {
+                    let _ = std::fs::rename(old, new);
                 }
             }
-            println!("[diark] DB path: {}", db_path.display());
+        }
+        println!("[diark] DB path: {}", db_path.display());
 
-            let conn = db::init_db(&db_path)?;
-            let shared_db: db::SharedDb = Arc::new(Mutex::new(conn));
-            app.manage(shared_db.clone());
-            app.manage(AppState { db: shared_db.clone() });
-            app.manage(crate::commands::portal_auth::WatchdogRegistry::new());
-            app.manage(crate::commands::portal_auth::PartialStateRegistry::default());
+        let conn = db::init_db(&db_path)?;
+        let pools = db::init_pools(&db_path)?;
 
-            let vault_watcher_state = crate::modules::vault::VaultWatcherState::default();
-            app.manage(vault_watcher_state.clone());
+        // Seed settings mặc định (D8: autostart_enabled = "false", start_minimized = "true", global_shortcut = "Alt+K")
+        {
+            let _ = conn.execute(
+                "INSERT OR IGNORE INTO settings (key, value) VALUES ('autostart_enabled', 'false')",
+                [],
+            );
+            let _ = conn.execute(
+                "INSERT OR IGNORE INTO settings (key, value) VALUES ('start_minimized', 'true')",
+                [],
+            );
+            let _ = conn.execute(
+                "INSERT OR IGNORE INTO settings (key, value) VALUES ('global_shortcut', 'Alt+K')",
+                [],
+            );
+        }
 
-            // HTTP client (15s timeout) — dùng chung giữa worker và IPC command
-            // trigger_cf_sync, tránh tạo nhiều pool connection mỗi khi user bấm sync.
-            let http_client = cf_worker::build_http_client()
-                .map_err(|e| anyhow::anyhow!("{e}"))?;
-            app.manage(http_client.clone());
+        // Đọc cấu hình khởi động 1 lần, rồi thả lock
+        let (shortcut_str, start_minimized, user_nickname) = {
+            let s_shortcut: String = conn
+                .query_row("SELECT value FROM settings WHERE key = 'global_shortcut'", [], |r| r.get(0))
+                .unwrap_or_else(|_| "Alt+K".to_string());
+            let s_minimized: bool = conn
+                .query_row("SELECT value FROM settings WHERE key = 'start_minimized'", [], |r| r.get(0))
+                .map(|v: String| v == "true")
+                .unwrap_or(true);
+            let s_nick: Option<String> = conn
+                .query_row("SELECT value FROM settings WHERE key = 'user_nickname'", [], |r| r.get(0))
+                .ok();
+            (s_shortcut, s_minimized, s_nick)
+        };
 
-            // SyncLock — flag AtomicBool dùng chung giữa background worker và
-            // IPC command trigger_cf_sync để tránh 2 luồng sync chạy cùng lúc.
-            let sync_lock = SyncLock::new();
-            app.manage(sync_lock.clone());
+        // Logic D7: Tính toán hiển thị lúc khởi động
+        let launched_by_autostart = std::env::args().any(|a| a == "--autostart");
+        let first_run = user_nickname.as_deref().unwrap_or("").trim().is_empty();
+        let should_show_initially = first_run || !(launched_by_autostart && start_minimized);
 
-            // Kênh shutdown: khi cửa sổ chính đóng, gửi tín hiệu `true` để worker
-            // tự thoát vòng lặp NGAY ở lượt select! kế tiếp, thay vì bị kill đột
-            // ngột giữa lúc đang giữ transaction SQLite dở dang (rủi ro corrupt DB).
-            let (shutdown_tx, shutdown_rx) = watch::channel(false);
-            app.manage(shutdown_tx);
+        // Parse và đăng ký shortcut lúc boot
+        let default_shortcut = crate::commands::system::parse_shortcut("Alt+K").unwrap_or_else(|_| {
+            Shortcut::new(
+                Some(tauri_plugin_global_shortcut::Modifiers::ALT),
+                tauri_plugin_global_shortcut::Code::KeyK,
+            )
+        });
+        let parsed_shortcut: Shortcut = crate::commands::system::parse_shortcut(&shortcut_str)
+            .unwrap_or(default_shortcut);
+        let mut hotkey_active = false;
+        match app.global_shortcut().register(parsed_shortcut) {
+            Ok(_) => {
+                hotkey_active = true;
+                println!(
+                    "[diark] Registered global shortcut: {}",
+                    crate::commands::system::canonicalize_shortcut(&parsed_shortcut)
+                );
+            }
+            Err(e) => {
+                eprintln!("[WARN] Failed to register global shortcut on boot: {e}");
+                let _ = app.emit(
+                    "hotkey-registration-failed",
+                    crate::commands::system::AppError::new(
+                        crate::commands::system::error_codes::HOTKEY_ALREADY_REGISTERED,
+                        format!("Phím tắt '{shortcut_str}' đang bị ứng dụng khác chiếm giữ."),
+                    ),
+                );
+            }
+        }
 
-            // Spawn CF sync worker chạy nền. tauri::async_runtime::spawn dùng chung
-            // tokio runtime với chính Tauri app - không cần tự tạo runtime riêng.
-            let worker_app_handle = app.handle().clone();
-            let worker_db = shared_db.clone();
-            let worker_client = http_client.clone();
-            let worker_lock = sync_lock.clone();
-            tauri::async_runtime::spawn(async move {
-                cf_worker::start_cf_sync_worker(
-                    worker_app_handle,
-                    worker_db,
-                    worker_client,
-                    worker_lock,
-                    DEFAULT_SYNC_INTERVAL_SECS,
-                    shutdown_rx,
-                )
-                .await;
-            });
+        app.manage(crate::commands::system::HotkeyState::new(parsed_shortcut, hotkey_active));
+        let window_gate = Arc::new(crate::commands::system::WindowGate::new(should_show_initially));
+        app.manage(window_gate.clone());
 
-            // Server HTTP cũ (nhận webhook từ Chrome extension) vẫn chạy song song -
-            // 2 nguồn ghi vào CÙNG 1 DB, dedup qua UNIQUE INDEX cf_submission_id đảm
-            // bảo dù cả 2 nguồn cùng bắt được 1 submission cũng không double-count XP.
-            let server_app = app.handle().clone();
-            let server_db = shared_db.clone();
-            tauri::async_runtime::spawn(async move {
-                server::run_server(server_app, server_db).await;
-            });
+        let shared_db: db::SharedDb = Arc::new(Mutex::new(conn));
+        app.manage(pools.clone());
+        app.manage(shared_db.clone());
+        app.manage(AppState { db: shared_db.clone() });
+        app.manage(crate::commands::portal_auth::WatchdogRegistry::new());
+        app.manage(crate::commands::portal_auth::PartialStateRegistry::default());
+        app.manage(crate::webview_lifecycle::SsoSessionRegistry::new());
 
-            // Portal Browser Bridge — Loopback sync server nhận payload từ
-            // Tampermonkey userscript trên student.uit.edu.vn.
-            // Chỉ bind 127.0.0.1, xác thực qua X-Diark-Sync-Token.
-            let sync_app_handle = app.handle().clone();
-            let sync_db = shared_db.clone();
-            tauri::async_runtime::spawn(async move {
-                crate::modules::academic::sync_server::start_sync_server(
-                    sync_app_handle,
-                    sync_db,
-                )
-                .await;
-            });
+        let vault_watcher_state = crate::modules::vault::VaultWatcherState::default();
+        app.manage(vault_watcher_state.clone());
 
-            // Vault Real-time Incremental Watcher: Tự động chạy nếu đã có vault_path trong settings
-            let auto_app = app.handle().clone();
-            let auto_db = shared_db.clone();
-            let auto_watcher = vault_watcher_state.clone();
-            tauri::async_runtime::spawn(async move {
-                let saved_path_opt = {
-                    if let Ok(conn) = auto_db.lock() {
-                        crate::db::settings::get_setting(&conn, "vault_path").ok().flatten()
-                    } else {
-                        None
-                    }
-                };
-                if let Some(path) = saved_path_opt {
-                    if std::path::Path::new(&path).exists() {
-                        println!("[Vault Watcher] Tự động khởi chạy watcher cho: {path}");
-                        let _ = crate::modules::vault::start_vault_watcher(auto_app, path, &auto_watcher, auto_db).await;
-                    }
-                }
-            });
+        // HTTP client (15s timeout)
+        let http_client = cf_worker::build_http_client()
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        app.manage(http_client.clone());
 
-            // Setup System Tray
-            crate::tray::setup_tray(app.handle())?;
+        let sync_lock = SyncLock::new();
+        app.manage(sync_lock.clone());
 
-            // Spawn Daily Briefing Scheduler (08:00 & 20:00)
-            crate::modules::system::spawn_daily_briefing_scheduler(app.handle().clone(), shared_db.clone());
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        app.manage(shutdown_tx);
 
-            // Periodic Idle WAL Checkpoint (chạy mỗi 15 phút = 900 giây)
-            let checkpoint_db = shared_db.clone();
-            tauri::async_runtime::spawn(async move {
-                let mut interval = tokio::time::interval(std::time::Duration::from_secs(900));
-                loop {
-                    interval.tick().await;
-                    if let Ok(conn) = checkpoint_db.lock() {
-                        let _ = conn.execute_batch("PRAGMA wal_checkpoint(PASSIVE);");
-                    }
-                }
-            });
+        let worker_app_handle = app.handle().clone();
+        let worker_pools = pools.clone();
+        let worker_client = http_client.clone();
+        let worker_lock = sync_lock.clone();
+        tauri::async_runtime::spawn(async move {
+            cf_worker::start_cf_sync_worker(
+                worker_app_handle,
+                worker_pools,
+                worker_client,
+                worker_lock,
+                DEFAULT_SYNC_INTERVAL_SECS,
+                shutdown_rx,
+            )
+            .await;
+        });
 
-            // Global Shortcut Alt+K
-            let shortcut: Result<Shortcut, _> = "Alt+K".parse();
-            match shortcut {
-                Ok(sc) => {
-                    let app_handle = app.handle().clone();
-                    match app.global_shortcut().register(sc) {
-                        Ok(_) => {
-                            let _ = app.global_shortcut().on_shortcut(sc, move |_app, _shortcut, _event| {
-                                if let Some(window) = app_handle.get_webview_window("main") {
-                                    let is_visible = window.is_visible().unwrap_or(false);
-                                    if is_visible {
-                                        let _ = window.hide();
-                                    } else {
-                                        let _ = crate::tray::show_and_focus_hud(&window);
-                                    }
-                                }
-                            });
-                        }
-                        Err(e) => {
-                            eprintln!("[WARN] Failed to register Alt+K global shortcut: {}", e);
-                        }
-                    }
-                }
-                Err(e) => {
-                    eprintln!("[WARN] Failed to parse Alt+K shortcut: {}", e);
+        let server_app = app.handle().clone();
+        let server_pools = pools.clone();
+        tauri::async_runtime::spawn(async move {
+            server::run_server(server_app, server_pools).await;
+        });
+
+        let sync_app_handle = app.handle().clone();
+        let sync_pools = pools.clone();
+        tauri::async_runtime::spawn(async move {
+            crate::modules::academic::sync_server::start_sync_server(
+                sync_app_handle,
+                sync_pools,
+            )
+            .await;
+        });
+
+        let auto_app = app.handle().clone();
+        let auto_pools = pools.clone();
+        let auto_watcher = vault_watcher_state.clone();
+        tauri::async_runtime::spawn(async move {
+            let saved_path_opt = {
+                auto_pools.read(|conn| {
+                    crate::db::settings::get_setting(conn, "vault_path").map_err(Into::into)
+                }).ok().flatten()
+            };
+            if let Some(path) = saved_path_opt {
+                if std::path::Path::new(&path).exists() {
+                    println!("[Vault Watcher] Tự động khởi chạy watcher cho: {path}");
+                    let _ = crate::modules::vault::start_vault_watcher_with_pools(auto_app, path, &auto_watcher, auto_pools).await;
                 }
             }
+        });
 
-            // Chặn sự kiện đóng cửa sổ (CloseRequested) trên main window để ẩn vào System Tray
-            if let Some(main_window) = app.get_webview_window("main") {
-                let nickname: String = {
-                    if let Ok(conn) = shared_db.lock() {
-                        conn.query_row(
-                            "SELECT value FROM settings WHERE key = 'user_nickname'",
-                            [],
-                            |row| row.get(0),
-                        ).unwrap_or_else(|_| "Diark".to_string())
-                    } else {
-                        "Diark".to_string()
-                    }
-                };
+        // Setup System Tray (chỉ vá, không dựng lại)
+        crate::tray::setup_tray(app.handle())?;
 
-                #[cfg(debug_assertions)]
-                let env_prefix = "[DEV] ";
-                #[cfg(not(debug_assertions))]
-                let env_prefix = "";
+        // Spawn Daily Briefing Scheduler (08:00 & 20:00)
+        crate::modules::system::spawn_daily_briefing_scheduler_with_pools(app.handle().clone(), pools.clone());
 
-                let _ = main_window.set_title(&format!("{env_prefix}{nickname} // OS"));
-                let _ = main_window.show();
+        // Periodic Maintenance & Idle WAL Checkpoint (chạy mỗi 15 phút = 900 giây)
+        let maintenance_pools = pools.clone();
+        tauri::async_runtime::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(900));
+            loop {
+                interval.tick().await;
+                let _ = maintenance_pools.maintenance().await;
+            }
+        });
 
-                let window_clone = main_window.clone();
-                main_window.on_window_event(move |event| {
-                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                        api.prevent_close();
-                        let _ = window_clone.hide();
-                    }
+        // Spawn fallback timeout 3s: nếu chưa nhận được notify_ui_ready và should_show_initially thì tự hiện
+        let app_timeout = app.handle().clone();
+        let gate_timeout = window_gate.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+            if gate_timeout.should_show_initially
+                && gate_timeout
+                    .shown
+                    .compare_exchange(
+                        false,
+                        true,
+                        std::sync::atomic::Ordering::SeqCst,
+                        std::sync::atomic::Ordering::SeqCst,
+                    )
+                    .is_ok()
+            {
+                if let Some(window) = app_timeout.get_webview_window("main") {
+                    let _ = crate::tray::show_and_focus_main(&window);
+                    let _ = app_timeout.emit("window-shown", ());
+                }
+            }
+        });
+
+        // Chặn sự kiện đóng cửa sổ (CloseRequested) trên main window để ẩn vào System Tray
+        if let Some(main_window) = app.get_webview_window("main") {
+            let nickname = user_nickname.unwrap_or_else(|| "Diark".to_string());
+            #[cfg(debug_assertions)]
+            let env_prefix = "[DEV] ";
+            #[cfg(not(debug_assertions))]
+            let env_prefix = "";
+
+            let _ = main_window.set_title(&format!("{env_prefix}{nickname} // OS"));
+
+            let window_clone = main_window.clone();
+            let app_handle_for_close = app.handle().clone();
+            main_window.on_window_event(move |event| {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    let _ = window_clone.hide();
+                    let _ = app_handle_for_close.emit("window-hidden", ());
+                }
+            });
+        }
+
+        Ok(())
+    });
+
+    let app = match builder
+        .invoke_handler(registered_commands!())
+        .build(tauri::generate_context!())
+    {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("[diark] Lỗi fatal khi build Tauri application: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    // 5.5 Thoát sạch (Clean exit sequence)
+    app.run(|app_handle, event| {
+        if let tauri::RunEvent::Exit = event {
+            println!("[diark] Clean exit sequence initiated...");
+            // 0. Thu hồi toàn bộ remote SSO webviews và phiên WebView2
+            if let Some(sso_reg) = app_handle.try_state::<crate::webview_lifecycle::SsoSessionRegistry>() {
+                crate::webview_lifecycle::cleanup_all_sso_sessions(
+                    app_handle,
+                    &sso_reg,
+                    crate::webview_lifecycle::CleanupReason::AppExit,
+                );
+            }
+
+            // 1. Tín hiệu shutdown background workers (CF poller, sync server, briefing)
+            if let Some(shutdown_tx) = app_handle.try_state::<watch::Sender<bool>>() {
+                let _ = shutdown_tx.send(true);
+            }
+
+            // 2. Dừng Vault watcher
+            if let Some(watcher_state) = app_handle.try_state::<crate::modules::vault::VaultWatcherState>() {
+                let _ = tauri::async_runtime::block_on(async {
+                    crate::modules::vault::stop_vault_watcher(&watcher_state).await
                 });
             }
 
-            Ok(())
-        })
-        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
-        .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--autostart"])))
-        .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
-        .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { .. } = event {
-                if let Some(shutdown_tx) = window.app_handle().try_state::<watch::Sender<bool>>() {
-                    let _ = shutdown_tx.send(true);
+            // 3. PRAGMA wal_checkpoint(TRUNCATE) (best-effort)
+            if let Some(pools) = app_handle.try_state::<crate::db::DbPools>() {
+                let _ = tauri::async_runtime::block_on(async {
+                    pools.checkpoint_truncate().await
+                });
+            } else if let Some(shared_db) = app_handle.try_state::<crate::db::SharedDb>() {
+                if let Ok(conn) = shared_db.lock() {
+                    let _ = crate::tray::checkpoint_wal(&conn);
                 }
             }
-        })
-        .invoke_handler(registered_commands!())
-        .run(tauri::generate_context!());
 
-    if let Err(e) = build_result {
-        eprintln!("[diark] Lỗi fatal khi khởi chạy Tauri application: {e}");
-        std::process::exit(1);
-    }
+            // 4. unregister_all() của global-shortcut (best-effort)
+            let _ = app_handle.global_shortcut().unregister_all();
+        }
+    });
 }

@@ -26,6 +26,7 @@ import {
   triggerDailyBriefing,
   type DailyBriefingDto,
 } from "../../../lib/tauri-client";
+import { useWindowVisibility } from "../../../hooks/useWindowVisibility";
 import { PORTAL_EXAM_SCHEDULE_SYNC_SCRIPT } from "../utils/browserSyncScripts";
 
 interface ExamRadarCardProps {
@@ -94,6 +95,7 @@ function formatExamTerm(term: string): string {
 }
 
 export const ExamRadarCard: React.FC<ExamRadarCardProps> = ({ className = "" }) => {
+  const isWindowVisible = useWindowVisibility();
   const [exams, setExams] = useState<AcademicExamRecord[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [nowTs, setNowTs] = useState<number>(Math.floor(Date.now() / 1000));
@@ -142,14 +144,16 @@ export const ExamRadarCard: React.FC<ExamRadarCardProps> = ({ className = "" }) 
 
   const nextExam = upcomingExams[0] || null;
 
-  // 2. Chỉ kích hoạt timer 1s khi THỰC SỰ có ca thi sắp tới — idle footprint tối thiểu
+  // 2. Chỉ kích hoạt timer 1s khi THỰC SỰ có ca thi sắp tới VÀ cửa sổ đang hiển thị — idle footprint tối thiểu
   useEffect(() => {
-    if (!nextExam) return;
+    if (!nextExam || !isWindowVisible) return;
+    // Cập nhật ngay timestamp khi vừa mở lại cửa sổ (không tích lũy tick cũ)
+    setNowTs(Math.floor(Date.now() / 1000));
     const timer = setInterval(() => {
       setNowTs(Math.floor(Date.now() / 1000));
     }, 1000);
     return () => clearInterval(timer);
-  }, [nextExam?.exam_timestamp]);
+  }, [nextExam?.exam_timestamp, isWindowVisible]);
 
   // 3. Countdown của ca thi gần nhất
   const countdown = useMemo(() => {

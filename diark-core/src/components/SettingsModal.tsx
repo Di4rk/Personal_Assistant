@@ -19,6 +19,7 @@ import {
 } from '../lib/tauri-client';
 import { listInstalledPlugins, togglePlugin } from '../lib/plugin-sdk';
 import { PluginMetaDto } from '../types/plugin';
+import { APP_VERSION } from '../constants/app';
 import {
   User,
   Blocks,
@@ -38,7 +39,19 @@ import {
   CheckCircle2,
   AlertCircle,
   ArrowUpCircle,
+  Power,
+  Keyboard,
+  RotateCcw,
+  AlertTriangle,
 } from 'lucide-react';
+import { listen } from '@tauri-apps/api/event';
+import {
+  getSystemPreferences,
+  updateAutostartSetting,
+  updateStartMinimizedSetting,
+  updateGlobalShortcut,
+} from '../services/systemService';
+import { ShortcutRecorder } from './ShortcutRecorder';
 
 interface SettingsModalProps {
   onResetGenesis?: () => void;
@@ -93,6 +106,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = () => {
   const [testGeminiResult, setTestGeminiResult] = useState<{ success: boolean; message: string } | null>(null);
   const [showApiKey, setShowApiKey] = useState(false);
 
+  // Tab: System preferences (Dynamic Hotkey & Autostart)
+  const [autostartEnabled, setAutostartEnabled] = useState<boolean>(false);
+  const [startMinimized, setStartMinimized] = useState<boolean>(true);
+  const [globalShortcut, setGlobalShortcut] = useState<string>('Alt+K');
+  const [hotkeyActive, setHotkeyActive] = useState<boolean>(true);
+  const [isUpdatingAutostart, setIsUpdatingAutostart] = useState<boolean>(false);
+  const [isUpdatingStartMinimized, setIsUpdatingStartMinimized] = useState<boolean>(false);
+  const [isResettingShortcut, setIsResettingShortcut] = useState<boolean>(false);
+  const [systemPrefError, setSystemPrefError] = useState<string | null>(null);
+
   // Listen to Escape key to close
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -145,7 +168,81 @@ export const SettingsModal: React.FC<SettingsModalProps> = () => {
         setIsCustomModel(!isPreset);
       })
       .catch((e) => console.error('Failed to get Gemini config:', e));
+
+    // Load System Preferences (Autostart & Hotkey)
+    getSystemPreferences()
+      .then((prefs) => {
+        setAutostartEnabled(prefs.autostartEnabled);
+        setStartMinimized(prefs.startMinimized);
+        setGlobalShortcut(prefs.globalShortcut);
+        setHotkeyActive(prefs.hotkeyActive);
+      })
+      .catch((e) => console.error('Failed to get system preferences:', e));
   }, [isOpen]);
+
+  // Listen to hotkey-registration-failed event from backend
+  useEffect(() => {
+    const unlistenPromise = listen<{ code: string; message: string }>(
+      'hotkey-registration-failed',
+      (event) => {
+        setHotkeyActive(false);
+        setSystemPrefError(`Cảnh báo phím tắt: ${event.payload.message || 'Không thể đăng ký phím tắt với hệ thống.'}`);
+      }
+    );
+    return () => {
+      unlistenPromise.then((unlisten) => unlisten());
+    };
+  }, []);
+
+  const handleToggleAutostart = async () => {
+    if (isUpdatingAutostart) return;
+    const nextVal = !autostartEnabled;
+    setIsUpdatingAutostart(true);
+    setSystemPrefError(null);
+    setAutostartEnabled(nextVal);
+    try {
+      await updateAutostartSetting(nextVal);
+    } catch (err: unknown) {
+      setAutostartEnabled(!nextVal); // rollback
+      const error = err as { message?: string };
+      setSystemPrefError(error.message || 'Thao tác cấu hình khởi động cùng hệ thống thất bại.');
+    } finally {
+      setIsUpdatingAutostart(false);
+    }
+  };
+
+  const handleToggleStartMinimized = async () => {
+    if (isUpdatingStartMinimized || !autostartEnabled) return;
+    const nextVal = !startMinimized;
+    setIsUpdatingStartMinimized(true);
+    setSystemPrefError(null);
+    setStartMinimized(nextVal);
+    try {
+      await updateStartMinimizedSetting(nextVal);
+    } catch (err: unknown) {
+      setStartMinimized(!nextVal); // rollback
+      const error = err as { message?: string };
+      setSystemPrefError(error.message || 'Thao tác cấu hình khởi động thu nhỏ thất bại.');
+    } finally {
+      setIsUpdatingStartMinimized(false);
+    }
+  };
+
+  const handleResetDefaultShortcut = async () => {
+    if (isResettingShortcut) return;
+    setIsResettingShortcut(true);
+    setSystemPrefError(null);
+    try {
+      const canonical = await updateGlobalShortcut('Alt+K');
+      setGlobalShortcut(canonical);
+      setHotkeyActive(true);
+    } catch (err: unknown) {
+      const error = err as { message?: string };
+      setSystemPrefError(error.message || 'Không thể khôi phục phím tắt mặc định.');
+    } finally {
+      setIsResettingShortcut(false);
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -267,9 +364,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = () => {
         {/* Left Column: Tab Navigation */}
         <div className="w-56 border-r border-slate-800 bg-slate-950/50 p-4 flex flex-col justify-between">
           <div>
-            <div className="mb-6 px-2">
-              <p className="font-mono text-[10px] uppercase tracking-widest text-cyan-400">Settings Hub</p>
-              <h2 className="font-mono text-lg font-bold tracking-wider text-slate-100">// CONFIG</h2>
+            <div className="mb-6 px-2 flex items-center gap-3">
+              <img
+                src="/app-icon.png"
+                alt="DIARK // OS Logo"
+                className="w-9 h-9 rounded-lg border border-cyan-500/40 object-cover shadow-sm shadow-cyan-950/40"
+              />
+              <div>
+                <p className="font-mono text-[10px] uppercase tracking-widest text-cyan-400">Settings Hub</p>
+                <h2 className="font-mono text-base font-bold tracking-wider text-slate-100">// CONFIG</h2>
+              </div>
             </div>
 
             <nav className="space-y-1">
@@ -341,7 +445,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = () => {
           </div>
 
           <div className="px-2 pt-4 border-t border-slate-800/80 font-mono text-[10px] text-slate-500">
-            DIARK // OS v1.0.0
+            DIARK // OS {APP_VERSION}
           </div>
         </div>
 
@@ -756,6 +860,120 @@ export const SettingsModal: React.FC<SettingsModalProps> = () => {
             {/* TAB 4: SYSTEM */}
             {activeTab === 'system' && (
               <div className="space-y-6">
+                {/* Hotkey Registration Warning Banner */}
+                {!hotkeyActive && (
+                  <div className="flex items-start gap-3 rounded-xl border border-amber-500/40 bg-amber-950/20 p-4 text-xs text-amber-300">
+                    <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-semibold text-amber-200">Cảnh báo: Phím tắt chưa thể kích hoạt</p>
+                      <p className="mt-1 text-slate-300 leading-relaxed">
+                        Phím tắt toàn cục ({globalShortcut}) đang bị ứng dụng khác chiếm dụng (ví dụ: Unikey, EVKey hoặc phần mềm khác). Bạn vẫn có thể mở Diark bằng cách nhấp đúp biểu tượng dưới khay hệ thống (System Tray).
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {systemPrefError && (
+                  <div className="flex items-center gap-2 rounded-xl border border-rose-500/30 bg-rose-950/20 p-3 text-xs text-rose-300">
+                    <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                    <span>{systemPrefError}</span>
+                  </div>
+                )}
+
+                {/* 1. Global Shortcut & HUD */}
+                <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-4 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="flex items-center gap-2 text-slate-200 font-semibold text-xs font-mono">
+                        <Keyboard className="w-4 h-4 text-cyan-400" />
+                        <span>PHÍM TẮT TOÀN CỤC (QUICK HUD)</span>
+                      </div>
+                      <p className="text-[11px] text-slate-400 mt-1">
+                        Bật/tắt nhanh giao diện Diark OS từ bất kỳ đâu trên máy tính.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleResetDefaultShortcut}
+                      disabled={isResettingShortcut}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white font-mono text-xs transition cursor-pointer disabled:opacity-50"
+                      title="Đặt lại về Alt+K"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      <span>{isResettingShortcut ? 'Đang khôi phục...' : 'Khôi phục mặc định'}</span>
+                    </button>
+                  </div>
+
+                  <div className="pt-2 border-t border-slate-800/80">
+                    <ShortcutRecorder
+                      currentShortcut={globalShortcut}
+                      onShortcutChanged={(canonical) => {
+                        setGlobalShortcut(canonical);
+                        setHotkeyActive(true);
+                        setSystemPrefError(null);
+                      }}
+                    />
+                  </div>
+                </div>
+
+                {/* 2. Autostart & Window Persistence */}
+                <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-4 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="flex items-center gap-2 text-slate-200 font-semibold text-xs font-mono">
+                        <Power className="w-4 h-4 text-emerald-400" />
+                        <span>KHỞI ĐỘNG CÙNG HỆ THỐNG</span>
+                      </div>
+                      <p className="text-[11px] text-slate-400 mt-1">
+                        Tự động khởi chạy ứng dụng khi đăng nhập Windows (Registry Run key).
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleToggleAutostart}
+                      disabled={isUpdatingAutostart}
+                      className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg font-mono text-xs font-bold border transition cursor-pointer disabled:opacity-50 ${
+                        autostartEnabled
+                          ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50'
+                          : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700'
+                      }`}
+                    >
+                      {isUpdatingAutostart ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <span>{autostartEnabled ? 'BẬT (ON)' : 'TẮT (OFF)'}</span>
+                      )}
+                    </button>
+                  </div>
+
+                  <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-semibold text-slate-300">Khởi động thu nhỏ vào khay (Start Minimized)</p>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        Khi bật tự động lúc khởi động máy, app sẽ ẩn dưới khay hệ thống thay vì bung toàn màn hình.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleToggleStartMinimized}
+                      disabled={!autostartEnabled || isUpdatingStartMinimized}
+                      className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg font-mono text-xs font-bold border transition cursor-pointer ${
+                        !autostartEnabled
+                          ? 'opacity-40 cursor-not-allowed bg-slate-900 border-slate-800 text-slate-600'
+                          : startMinimized
+                          ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/50'
+                          : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700'
+                      }`}
+                    >
+                      {isUpdatingStartMinimized ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <span>{startMinimized ? 'BẬT (ON)' : 'TẮT (OFF)'}</span>
+                      )}
+                    </button>
+                  </div>
+                </div>
+
                 {/* Demo Privacy Shield */}
                 <div className="flex items-center justify-between rounded-xl border border-amber-500/30 bg-amber-950/10 p-4">
                   <div>
@@ -825,7 +1043,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = () => {
                         <span>CẬP NHẬT HỆ THỐNG (AUTO-UPDATE)</span>
                       </div>
                       <p className="text-[11px] text-slate-400 mt-1">
-                        Kênh phát hành chính thức từ GitHub Releases. Phiên bản hiện tại: <span className="font-mono text-cyan-400">v1.0.0</span>
+                        Kênh phát hành chính thức từ GitHub Releases. Phiên bản hiện tại: <span className="font-mono text-cyan-400">{APP_VERSION}</span>
                       </p>
                     </div>
                     <button

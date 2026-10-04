@@ -541,6 +541,52 @@ impl PortalHarvesterRegistry {
 
         Ok(total_courses)
     }
+
+    pub fn commit_session_with_pools(
+        &self,
+        window_label: &str,
+        pools: &crate::db::DbPools,
+    ) -> Result<usize, String> {
+        let buffer = {
+            let mut guard = self.sessions.lock().map_err(|e| format!("Mutex poisoned: {e}"))?;
+            guard.remove(window_label).ok_or_else(|| {
+                format!("No harvester session found for window: {window_label}")
+            })?
+        };
+
+        let meta = buffer.meta.ok_or_else(|| {
+            "Meta payload missing from session buffer".to_string()
+        })?;
+
+        let profile = meta.profile.unwrap_or_default();
+        let drl_list = meta.drl_records.unwrap_or_default();
+        let expected_batches = meta.total_course_batches;
+        let received_batches = buffer.courses_batches.len();
+
+        let mut all_courses = Vec::new();
+        for i in 0..expected_batches {
+            if let Some(chunk) = buffer.courses_batches.get(&i) {
+                all_courses.extend(chunk.clone());
+            }
+        }
+
+        let total_courses = all_courses.len();
+
+        pools.write_blocking(move |conn| {
+            PortalIngestionEngine::commit_academic_records_on_conn(
+                conn,
+                profile,
+                drl_list,
+                all_courses,
+                meta.summary,
+                meta.avg_drl,
+                received_batches,
+                expected_batches,
+            ).map_err(|e| crate::error::AppError::Database(rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e)))))
+        }).map_err(|e| e.to_string())?;
+
+        Ok(total_courses)
+    }
 }
 
 pub struct PortalIngestionEngine;
@@ -548,6 +594,29 @@ pub struct PortalIngestionEngine;
 impl PortalIngestionEngine {
     pub fn commit_academic_records(
         db: Arc<Mutex<Connection>>,
+        profile: PortalProfilePayload,
+        drl_list: Vec<DrlItem>,
+        courses: Vec<AcademicCourseItem>,
+        summary: Option<PortalSummaryPayload>,
+        avg_drl: Option<f64>,
+        received_batches: usize,
+        expected_batches: usize,
+    ) -> Result<(), String> {
+        let mut conn = db.lock().map_err(|e| format!("Mutex poisoned: {}", e))?;
+        Self::commit_academic_records_on_conn(
+            &mut conn,
+            profile,
+            drl_list,
+            courses,
+            summary,
+            avg_drl,
+            received_batches,
+            expected_batches,
+        )
+    }
+
+    pub fn commit_academic_records_on_conn(
+        conn: &mut Connection,
         profile: PortalProfilePayload,
         drl_list: Vec<DrlItem>,
         courses: Vec<AcademicCourseItem>,
@@ -564,7 +633,6 @@ impl PortalIngestionEngine {
             ));
         }
 
-        let mut conn = db.lock().map_err(|e| format!("Mutex poisoned: {}", e))?;
         let tx = conn.transaction().map_err(|e| format!("Cannot begin transaction: {}", e))?;
 
         // 1. Đảm bảo bảng student_profile và academic_drl tồn tại
@@ -938,6 +1006,13 @@ impl PortalIngestionEngine {
         drl_payload: OfficialUitDrlPayload,
     ) -> Result<usize, String> {
         let mut conn = db.lock().map_err(|e| format!("DB lock error: {e}"))?;
+        Self::commit_drl_records_on_conn(&mut conn, drl_payload)
+    }
+
+    pub fn commit_drl_records_on_conn(
+        conn: &mut Connection,
+        drl_payload: OfficialUitDrlPayload,
+    ) -> Result<usize, String> {
         let tx = conn.transaction().map_err(|e| format!("Transaction error: {e}"))?;
 
         tx.execute(

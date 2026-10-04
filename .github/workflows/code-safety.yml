@@ -1,0 +1,52 @@
+name: Code Safety Gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  safety-gate:
+    name: Zero-Panic & Zero-Any Safety Verification
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11
+          run_install: false
+
+      - name: Install frontend dependencies
+        working-directory: diark-core
+        shell: pwsh
+        env:
+          PNPM_IGNORE_WORKSPACE: "true"
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Run Code Safety Scan & TypeScript Verification
+        working-directory: diark-core
+        run: pnpm run lint:safety
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Rust Cargo Check
+        working-directory: diark-core
+        run: cargo check --manifest-path src-tauri/Cargo.toml
+
+      - name: Rust Cargo Test
+        working-directory: diark-core
+        run: cargo test --manifest-path src-tauri/Cargo.toml

@@ -1,5 +1,5 @@
 import React from "react";
-import { Award, BookOpen, DownloadCloud, ShieldCheck, TrendingUp } from "lucide-react";
+import { BookOpen, DownloadCloud, ShieldCheck, TrendingUp, Cpu } from "lucide-react";
 import type { AcademicMacroMetricSSOT } from "../types";
 
 export interface AcademicSummaryCardsProps {
@@ -19,12 +19,26 @@ export const AcademicSummaryCards: React.FC<AcademicSummaryCardsProps> = ({
   const latestMetric = hasData ? metrics[metrics.length - 1] : null;
 
   const cGpa10 = latestMetric ? latestMetric.cumulativeGpa : 0;
-  
-  // Tính cGPA hệ 4: chuẩn ĐHQG-HCM cho 8.40 là 3.47, hoặc quy đổi tỷ lệ chuẩn
+
+  // cGPA Hệ 4: ưu tiên field cumulativeGpa4 từ backend (tính đúng từng môn).
+  // Nếu backend chưa expose field này, tạm fallback dùng thang ĐHQG-HCM approximate:
+  // không dùng magic multiplier — thay bằng bảng ngưỡng chuẩn theo quy chế.
   const cGpa4 = latestMetric
-    ? latestMetric.cumulativeGpa === 8.40
-      ? 3.47
-      : Number(((latestMetric.cumulativeGpa / 10) * 4 * 1.033).toFixed(2))
+    ? ("cumulativeGpa4" in latestMetric && typeof (latestMetric as Record<string, unknown>)["cumulativeGpa4"] === "number"
+        ? Number(((latestMetric as Record<string, unknown>)["cumulativeGpa4"] as number).toFixed(2))
+        : (() => {
+            const g = latestMetric.cumulativeGpa;
+            if (g >= 9.0) return 4.0;
+            if (g >= 8.5) return 3.7;
+            if (g >= 8.0) return 3.5;
+            if (g >= 7.0) return 3.0;
+            if (g >= 6.5) return 2.5;
+            if (g >= 5.5) return 2.0;
+            if (g >= 5.0) return 1.5;
+            if (g >= 4.0) return 1.0;
+            return 0.0;
+          })()
+      )
     : 0;
 
   const earnedCredits = latestMetric ? latestMetric.cumulativeCredits : 0;
@@ -66,7 +80,7 @@ export const AcademicSummaryCards: React.FC<AcademicSummaryCardsProps> = ({
             {hasData && cGpa10 > 0 ? cGpa10.toFixed(2) : "--"}
             <span className="text-xs font-normal text-zinc-500 ml-1">/ 10</span>
           </div>
-          <div className="text-[11px] text-zinc-500 mt-1 flex items-center justify-between">
+          <div className="text-xs text-zinc-500 mt-1 flex items-center justify-between">
             <span>Điểm TB tích lũy</span>
             {latestMetric ? (
               <span className="text-violet-400/80 font-medium">{latestMetric.rankLabel}</span>
@@ -80,13 +94,13 @@ export const AcademicSummaryCards: React.FC<AcademicSummaryCardsProps> = ({
         <div className="rounded-xl bg-zinc-900 border border-zinc-800 p-4 shadow-sm hover:border-zinc-700 transition-colors">
           <div className="flex items-center justify-between text-xs text-zinc-500 mb-1">
             <span className="font-medium">cGPA Hệ 4</span>
-            <Award className="w-4 h-4 text-indigo-400" />
+            <Cpu className="w-4 h-4 text-cyan-400" />
           </div>
-          <div className="text-2xl font-bold font-mono text-indigo-400">
+          <div className="text-2xl font-bold font-mono text-cyan-400">
             {hasData && cGpa4 > 0 ? cGpa4.toFixed(2) : "--"}
             <span className="text-xs font-normal text-zinc-500 ml-1">/ 4.0</span>
           </div>
-          <div className="text-[11px] text-zinc-500 mt-1">
+          <div className="text-xs text-zinc-500 mt-1">
             <span>Quy chế ĐHQG-HCM</span>
           </div>
         </div>
@@ -103,7 +117,7 @@ export const AcademicSummaryCards: React.FC<AcademicSummaryCardsProps> = ({
               / {totalCurriculumCredits} TC
             </span>
           </div>
-          <div className="text-[11px] text-zinc-500 mt-1 flex items-center justify-between">
+          <div className="text-xs text-zinc-500 mt-1 flex items-center justify-between">
             <span>Tiến độ CTĐT</span>
             <span className="text-emerald-400/90 font-mono font-medium">
               {hasData && totalCurriculumCredits > 0
@@ -123,7 +137,7 @@ export const AcademicSummaryCards: React.FC<AcademicSummaryCardsProps> = ({
             {hasData && avgDrl > 0 ? avgDrl : "--"}
             <span className="text-xs font-normal text-zinc-500 ml-1">/ 100</span>
           </div>
-          <div className="text-[11px] text-zinc-500 mt-1 flex items-center justify-between">
+          <div className="text-xs text-zinc-500 mt-1 flex items-center justify-between">
             <span>Đánh giá rèn luyện</span>
             <span className="text-amber-400/90 font-medium">
               {hasData ? (avgDrl > 0 ? `Hạng: ${drlRank}` : "Chưa đồng bộ DRL") : "Chưa có"}

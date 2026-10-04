@@ -509,10 +509,40 @@ pub fn ingest_full_academic_payload_sync(
     app: &tauri::AppHandle,
     final_payload: serde_json::Value,
 ) -> Result<(), String> {
-    use rusqlite::OptionalExtension;
+    if let Some(pools) = app.try_state::<crate::db::DbPools>() {
+        let payload_clone = final_payload.clone();
+        pools.write_blocking(move |conn| {
+            ingest_full_academic_payload_sync_on_conn(conn, &payload_clone)
+                .map_err(|e| crate::error::AppError::Database(rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e)))))
+        }).map_err(|e| e.to_string())?;
+    } else {
+        let state = app.state::<SharedDb>();
+        let mut conn = state.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
+        ingest_full_academic_payload_sync_on_conn(&mut conn, &final_payload)?;
+    }
 
-    let state = app.state::<SharedDb>();
-    let mut conn = state.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
+    let profile_opt: Option<StudentProfilePayload> = if let Some(p_val) = final_payload.get("profile") {
+        serde_json::from_value(p_val.clone()).ok()
+    } else if final_payload.get("student_id").is_some() {
+        serde_json::from_value(final_payload.clone()).ok()
+    } else {
+        None
+    };
+
+    if let Some(profile) = profile_opt {
+        let _ = app.emit("student-profile-synced", &profile);
+    }
+    let _ = app.emit("academic://sync-complete", ());
+    let _ = app.emit("academic-data-synced", ());
+
+    Ok(())
+}
+
+pub fn ingest_full_academic_payload_sync_on_conn(
+    conn: &mut rusqlite::Connection,
+    final_payload: &serde_json::Value,
+) -> Result<(), String> {
+    use rusqlite::OptionalExtension;
 
     let tx = conn.transaction().map_err(|e| format!("Transaction error: {e}"))?;
 
@@ -768,12 +798,6 @@ pub fn ingest_full_academic_payload_sync(
 
     tx.commit().map_err(|e| format!("Lỗi commit transaction: {e}"))?;
 
-    if let Some(profile) = profile_opt {
-        let _ = app.emit("student-profile-synced", &profile);
-    }
-    let _ = app.emit("academic://sync-complete", ());
-    let _ = app.emit("academic-data-synced", ());
-
     Ok(())
 }
 
@@ -792,14 +816,11 @@ pub struct AcademicMacroMetricSSOT {
     pub updated_at: i64,
 }
 
-pub fn ingest_full_academic_payload_internal(
-    app: &tauri::AppHandle,
-    state: &tauri::State<crate::db::SharedDb>,
+pub fn ingest_full_academic_payload_on_conn(
+    conn: &mut rusqlite::Connection,
     transcript: serde_json::Value,
     drl: serde_json::Value,
 ) -> Result<(), String> {
-    let mut conn = state.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
-
     // Chuyển đổi transcript và drl thành IngestionPayload
     let mut payload = if let Ok(dyn_payload) = serde_json::from_value::<crate::modules::academic::portal_ingestion::IngestionPayload>(transcript.clone()) {
         dyn_payload
@@ -821,7 +842,7 @@ pub fn ingest_full_academic_payload_internal(
         }
     }
 
-    crate::modules::academic::portal_ingestion::ingest_dynamic_academic_payload(&mut conn, payload)?;
+    crate::modules::academic::portal_ingestion::ingest_dynamic_academic_payload(conn, payload)?;
 
     // Đồng bộ total_degree_credits theo curriculum resolved từ settings
     let (curriculum_code, major_code) = {
@@ -835,7 +856,7 @@ pub fn ingest_full_academic_payload_internal(
         (get_val("curriculum_code"), get_val("major_code"))
     };
     if let Ok(res) = crate::modules::academic::curriculum_resolver::resolve_curriculum(
-        &conn,
+        conn,
         &curriculum_code,
         if major_code.is_empty() { None } else { Some(&major_code) },
     ) {
@@ -845,6 +866,27 @@ pub fn ingest_full_academic_payload_internal(
              ON CONFLICT(id) DO UPDATE SET total_degree_credits = excluded.total_degree_credits",
             rusqlite::params![res.total_credits, chrono::Utc::now().timestamp()],
         );
+    }
+
+    Ok(())
+}
+
+pub fn ingest_full_academic_payload_internal(
+    app: &tauri::AppHandle,
+    state: &tauri::State<crate::db::SharedDb>,
+    transcript: serde_json::Value,
+    drl: serde_json::Value,
+) -> Result<(), String> {
+    if let Some(pools) = app.try_state::<crate::db::DbPools>() {
+        let t = transcript.clone();
+        let d = drl.clone();
+        pools.write_blocking(move |conn| {
+            ingest_full_academic_payload_on_conn(conn, t, d)
+                .map_err(|e| crate::error::AppError::Database(rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e)))))
+        }).map_err(|e| e.to_string())?;
+    } else {
+        let mut conn = state.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
+        ingest_full_academic_payload_on_conn(&mut conn, transcript, drl)?;
     }
 
     let _ = app.emit("academic://sync-complete", ());

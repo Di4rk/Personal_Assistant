@@ -9,8 +9,9 @@ use serde::Deserialize;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::watch;
 
-use crate::db::{get_setting, ingest_cf_submissions_with_result, SharedDb, SyncResult};
+use crate::db::{get_setting, ingest_cf_submissions_with_result, DbPools, SharedDb, SyncResult};
 use crate::error::{AppError, AppResult};
+use tauri::Manager;
 
 const CF_API_BASE: &str = "https://codeforces.com/api/user.status";
 /// Chỉ cần lấy N submission gần nhất mỗi cycle - đủ để bắt kịp hoạt động
@@ -119,7 +120,7 @@ pub struct CfProblem {
 /// timer với reactor rồi nhường CPU hoàn toàn.
 pub async fn start_cf_sync_worker(
     app_handle: AppHandle,
-    db: SharedDb,
+    db: DbPools,
     client: Client,
     sync_lock: SyncLock,
     interval_secs: u64,
@@ -132,7 +133,7 @@ pub async fn start_cf_sync_worker(
     // polling begins. Missing handles remain a non-fatal idle state.
     // Acquire lock for initial sync — if already locked (race on startup), skip.
     if let Some(_guard) = sync_lock.try_acquire() {
-        match perform_sync(&app_handle, &client, &db, INITIAL_HISTORY_COUNT).await {
+        match perform_sync_with_pools(&app_handle, &client, &db, INITIAL_HISTORY_COUNT).await {
             Ok(_) | Err(AppError::HandleNotConfigured) => {}
             Err(AppError::RateLimited) | Err(AppError::ServiceUnavailable) => {
                 backoff_secs = (base_interval * 2).min(MAX_BACKOFF_SECS);
@@ -150,7 +151,7 @@ pub async fn start_cf_sync_worker(
                     continue;
                 };
 
-                match perform_sync(&app_handle, &client, &db, POLL_COUNT).await {
+                match perform_sync_with_pools(&app_handle, &client, &db, POLL_COUNT).await {
                     Ok(_) => {
                         // Thành công (dù có data mới hay không) -> reset về interval bình thường.
                         backoff_secs = base_interval;
@@ -204,13 +205,29 @@ pub fn build_http_client() -> AppResult<Client> {
 ///
 /// Lock (SyncGuard) KHÔNG được acquire ở đây — caller chịu trách nhiệm
 /// acquire trước khi gọi, đảm bảo logic lock rõ ràng và không bị double-acquire.
+/// Helper gọi HTTP và ghi DB, trả SyncResult để caller dùng lại.
+/// Backward-compatibility delegate retrieving DbPools from AppHandle when available.
 pub async fn perform_sync(
     app_handle: &AppHandle,
     client: &Client,
-    db: &SharedDb,
+    _db: &SharedDb,
     count: u32,
 ) -> AppResult<SyncResult> {
-    let handle = read_cf_handle(db)?;
+    if let Some(pools) = app_handle.try_state::<DbPools>() {
+        perform_sync_with_pools(app_handle, client, &pools, count).await
+    } else {
+        Err(AppError::HandleNotConfigured)
+    }
+}
+
+/// Thực hiện đồng bộ Codeforces qua DbPools (đọc setting qua read pool, ghi qua writer handle).
+pub async fn perform_sync_with_pools(
+    app_handle: &AppHandle,
+    client: &Client,
+    pools: &DbPools,
+    count: u32,
+) -> AppResult<SyncResult> {
+    let handle = read_cf_handle_from_pools(pools)?;
 
     let url = format!("{CF_API_BASE}?handle={handle}&from=1&count={count}");
     let response = client.get(&url).send().await?;
@@ -234,30 +251,30 @@ pub async fn perform_sync(
     let raw_submissions = body.result.unwrap_or_default();
 
     let (sync_result, affected_dates) = {
-        let mut conn = db.lock().map_err(|_| AppError::PoisonedLock)?;
-        let res = ingest_cf_submissions_with_result(&mut conn, &raw_submissions)?;
-        let dates = res.affected_dates.clone();
-        (res, dates)
-        // Guard conn tự động DROP tại đây. Không giữ lock sang bước async/spawn!
+        let subs = raw_submissions;
+        pools
+            .write(move |conn| {
+                let res = ingest_cf_submissions_with_result(conn, &subs)?;
+                let dates = res.affected_dates.clone();
+                Ok((res, dates))
+            })
+            .await?
     };
 
     if !affected_dates.is_empty() {
-        let db_arc = db.clone();
-        tauri::async_runtime::spawn_blocking(move || {
+        let pools_for_matrix = pools.clone();
+        tauri::async_runtime::spawn(async move {
             for date_str in affected_dates {
-                if let Ok(conn) = db_arc.lock() {
-                    if let Err(e) = crate::db::matrix::recompute_daily_matrix_for_date(&conn, &date_str) {
-                        eprintln!("[Matrix Sync Error] Failed date {date_str}: {e}");
-                    }
-                }
+                let _ = pools_for_matrix
+                    .write(move |conn| {
+                        crate::db::matrix::recompute_daily_matrix_for_date(conn, &date_str)
+                    })
+                    .await;
             }
         });
     }
 
     if sync_result.new_submissions_count > 0 {
-        // Emit THẲNG SyncResult làm payload - không tạo struct payload riêng,
-        // tránh việc 2 struct (kết quả DB và payload event) lệch nhau theo thời
-        // gian khi 1 trong 2 chỗ bị sửa mà quên sửa chỗ còn lại.
         app_handle.emit(EVENT_SYNC_COMPLETE, &sync_result)?;
         app_handle.emit(LEGACY_EVENT_SYNC, &sync_result)?;
 
@@ -272,7 +289,8 @@ pub async fn perform_sync(
     Ok(sync_result)
 }
 
-fn read_cf_handle(db: &SharedDb) -> AppResult<String> {
-    let conn = db.lock().map_err(|_| AppError::PoisonedLock)?;
-    get_setting(&conn, SETTING_KEY_CF_HANDLE)?.ok_or(AppError::HandleNotConfigured)
+fn read_cf_handle_from_pools(pools: &DbPools) -> AppResult<String> {
+    pools.read(|conn| {
+        get_setting(conn, SETTING_KEY_CF_HANDLE)?.ok_or(AppError::HandleNotConfigured)
+    })
 }

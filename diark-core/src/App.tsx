@@ -12,6 +12,8 @@ interface Toast {
 }
 
 let toastIdCounter = 0;
+// Lưu các timer cleanup để tránh memory leak khi toast bị dismiss trước timeout
+const toastTimers = new Map<number, ReturnType<typeof setTimeout>>();
 
 import { AcademicDashboard } from "./features/academic";
 import { VaultDashboard } from "./features/vault";
@@ -39,6 +41,7 @@ import {
   saveUserProfile,
   type UserProfileDto,
 } from "./lib/tauri-client";
+import { notifyUiReady } from "./services/systemService";
 
 type ProfileState =
   | { status: "loading" }
@@ -101,6 +104,25 @@ export default function App() {
   useEffect(() => {
     void loadPlugins();
   }, [loadPlugins]);
+
+  // Báo hiệu cho backend WindowGate rằng UI đã mount và render lần đầu ổn định (anti white-flash)
+  useEffect(() => {
+    let fired = false;
+    const rafId = requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (!fired) {
+          fired = true;
+          notifyUiReady().catch((err: unknown) => {
+            console.warn("[App] notifyUiReady failed:", err);
+          });
+        }
+      });
+    });
+    return () => {
+      fired = true;
+      cancelAnimationFrame(rafId);
+    };
+  }, []);
 
   useEffect(() => {
     const handleOpenSettings = (e: Event) => {
@@ -237,18 +259,14 @@ export default function App() {
       // Chỉ bắn toast khi có data mới thực sự
       if (payload.new_submissions_count > 0) {
         const message = `+${payload.new_submissions_count} submission mới, +${payload.new_submissions_count} XP hôm nay`;
-        const toast: Toast = {
-          id: ++toastIdCounter,
-          message,
-          isFirstAc: false, // full_ac_count not in SyncCompletePayload; use SyncResult event for that
-        };
+        const toastId = ++toastIdCounter;
+        const toast: Toast = { id: toastId, message, isFirstAc: false };
         setToasts((prev) => [...prev, toast]);
         const timer = setTimeout(() => {
-          setToasts((prev) => prev.filter((t) => t.id !== toast.id));
+          setToasts((prev) => prev.filter((t) => t.id !== toastId));
+          toastTimers.delete(toastId);
         }, 5000);
-        // Note: timer is intentionally not cleared here because toast cleanup
-        // is keyed by ID and the component stays mounted for the app lifetime.
-        void timer;
+        toastTimers.set(toastId, timer);
       }
     },
     [refetchAll]
@@ -266,15 +284,14 @@ export default function App() {
           ? `🎉 First AC! +${payload.total_daily_xp} XP hôm nay (${payload.new_submissions_count} submission mới)`
           : `+${payload.new_submissions_count} submission mới, +${payload.total_daily_xp} XP hôm nay`;
 
-      const toast: Toast = {
-        id: ++toastIdCounter,
-        message,
-        isFirstAc: payload.first_ac_count > 0,
-      };
+      const toastId = ++toastIdCounter;
+      const toast: Toast = { id: toastId, message, isFirstAc: payload.first_ac_count > 0 };
       setToasts((prev) => [...prev, toast]);
-      setTimeout(() => {
-        setToasts((prev) => prev.filter((t) => t.id !== toast.id));
+      const timer = setTimeout(() => {
+        setToasts((prev) => prev.filter((t) => t.id !== toastId));
+        toastTimers.delete(toastId);
       }, 5000);
+      toastTimers.set(toastId, timer);
     },
     [refetchAll]
   );
@@ -320,26 +337,28 @@ export default function App() {
 
   return (
     <div className="h-full overflow-y-auto overflow-x-hidden bg-zinc-950 text-zinc-100">
-      <header className="sticky top-0 z-40 flex items-center justify-between border-b border-slate-800 bg-slate-950/90 backdrop-blur-md px-6 py-4">
+      {/* Header chính: bg zinc-900 (đúng Surface card token), border zinc-800 */}
+      <header className="sticky top-0 z-40 flex items-center justify-between border-b border-zinc-800 bg-zinc-900/95 backdrop-blur-md px-6 py-3">
         <div>
           <h1 className="text-xl font-black tracking-wider text-white">
-            {profile.nickname.toUpperCase()} <span className="text-cyan-400">// OS</span>
+            {profile.nickname.toUpperCase()} <span className="text-emerald-400">// OS</span>
           </h1>
-          <p className="text-xs font-mono text-slate-400">{APP_SUBTITLE}</p>
+          <p className="text-xs font-mono text-zinc-500">{APP_SUBTITLE}</p>
         </div>
 
         <div className="flex items-center gap-4">
           {/* Navigation Tabs */}
-          <nav className="flex items-center bg-zinc-900 border border-zinc-800 rounded-lg p-1 text-xs">
+          <nav className="flex items-center bg-zinc-950 border border-zinc-800 rounded-lg p-1 text-xs" aria-label="Main navigation">
             <button
               onClick={() => setActiveTab("academic")}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium transition-colors cursor-pointer ${
+              aria-current={activeTab === "academic" ? "page" : undefined}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium transition-all duration-150 ease-out cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500 ${
                 activeTab === "academic"
-                  ? "bg-violet-600 text-white shadow-sm"
-                  : "text-zinc-400 hover:text-zinc-200"
+                  ? "bg-zinc-700 text-zinc-100 shadow-sm border border-zinc-600"
+                  : "text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800/50"
               }`}
             >
-              <GraduationCap className="w-3.5 h-3.5" />
+              <GraduationCap className="w-3.5 h-3.5" aria-hidden="true" />
               <span>Academic Radar</span>
             </button>
 
@@ -348,25 +367,28 @@ export default function App() {
               .filter((p) => p.isEnabled)
               .map((p) => {
                 const isSelected = activeTab === p.pluginId;
+                const iconEl =
+                  p.pluginId === "cp-codeforces" ? (
+                    <Code2 className="w-3.5 h-3.5" aria-hidden="true" />
+                  ) : p.pluginId === "uit-courses" ? (
+                    <BookOpen className="w-3.5 h-3.5" aria-hidden="true" />
+                  ) : p.pluginId === "uit-wecode" ? (
+                    <Terminal className="w-3.5 h-3.5" aria-hidden="true" />
+                  ) : (
+                    <Blocks className="w-3.5 h-3.5" aria-hidden="true" />
+                  );
                 return (
                   <button
                     key={p.pluginId}
                     onClick={() => setActiveTab(p.pluginId)}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium transition-colors cursor-pointer ${
+                    aria-current={isSelected ? "page" : undefined}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium transition-all duration-150 ease-out cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500 ${
                       isSelected
-                        ? "bg-violet-600 text-white shadow-sm"
-                        : "text-zinc-400 hover:text-zinc-200"
+                        ? "bg-zinc-700 text-zinc-100 shadow-sm border border-zinc-600"
+                        : "text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800/50"
                     }`}
                   >
-                    {p.pluginId === "cp-codeforces" ? (
-                      <Code2 className="w-3.5 h-3.5" />
-                    ) : p.pluginId === "uit-courses" ? (
-                      <BookOpen className="w-3.5 h-3.5" />
-                    ) : p.pluginId === "uit-wecode" ? (
-                      <Terminal className="w-3.5 h-3.5" />
-                    ) : (
-                      <Blocks className="w-3.5 h-3.5" />
-                    )}
+                    {iconEl}
                     <span>{p.name}</span>
                   </button>
                 );
@@ -374,13 +396,14 @@ export default function App() {
 
             <button
               onClick={() => setActiveTab("vault")}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium transition-colors cursor-pointer ${
+              aria-current={activeTab === "vault" ? "page" : undefined}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium transition-all duration-150 ease-out cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500 ${
                 activeTab === "vault"
-                  ? "bg-violet-600 text-white shadow-sm"
-                  : "text-zinc-400 hover:text-zinc-200"
+                  ? "bg-zinc-700 text-zinc-100 shadow-sm border border-zinc-600"
+                  : "text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800/50"
               }`}
             >
-              <FolderGit2 className="w-3.5 h-3.5" />
+              <FolderGit2 className="w-3.5 h-3.5" aria-hidden="true" />
               <span>Native Vault</span>
             </button>
           </nav>
@@ -388,14 +411,15 @@ export default function App() {
           {/* Settings Hub Button */}
           <button
             onClick={() => useSettingsStore.getState().openSettings()}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 text-xs font-mono text-slate-300 hover:text-cyan-400 transition-colors cursor-pointer"
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded border border-zinc-700 bg-zinc-900 hover:bg-zinc-800 text-xs font-mono text-zinc-400 hover:text-emerald-400 transition-colors duration-150 cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500"
             title="Cài đặt hệ thống (Settings Hub)"
+            aria-label="Mở Settings Hub"
           >
-            <Settings className="w-3.5 h-3.5" />
+            <Settings className="w-3.5 h-3.5" aria-hidden="true" />
             <span className="hidden sm:inline">Settings</span>
           </button>
 
-          <span className="rounded border border-slate-700 bg-slate-900 px-2 py-0.5 font-mono text-xs text-cyan-400">
+          <span className="rounded border border-zinc-700 bg-zinc-900 px-2 py-0.5 font-mono text-xs text-emerald-400" aria-label={`Phiên bản ${APP_VERSION}`}>
             {APP_VERSION}
           </span>
         </div>

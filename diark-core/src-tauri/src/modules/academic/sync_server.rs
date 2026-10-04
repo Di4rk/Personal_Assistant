@@ -18,7 +18,7 @@ use tauri::{AppHandle, Emitter};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
-use crate::db::SharedDb;
+use crate::db::DbPools;
 
 /// Danh sách port thử theo thứ tự ưu tiên.
 /// Nếu 41718 bị chiếm (app chạy nhiều instance), thử 41719, 41720.
@@ -28,10 +28,9 @@ const CANDIDATE_PORTS: [u16; 3] = [41718, 41719, 41720];
 /// 65536 bytes = 64 KiB — đủ cho transcript 30 môn học JSON.
 const MAX_REQUEST_BYTES: usize = 65536;
 
-/// State tối giản mà sync server cần: chỉ truy cập vào SharedDb.
-/// Không cần Arc<AppState> đầy đủ vì server không cần các state khác.
+/// State tối giản mà sync server cần: truy cập vào DbPools.
 pub struct SyncServerState {
-    pub db: SharedDb,
+    pub db: DbPools,
     /// Rate limiter đơn giản: đếm số request trong cửa sổ 1 giây hiện tại.
     pub req_count: AtomicU64,
     /// Thời điểm bắt đầu cửa sổ đếm hiện tại (protects by Mutex thông qua read access).
@@ -47,7 +46,7 @@ const MAX_REQUESTS_PER_SECOND: u64 = 10;
 /// Emit Tauri events:
 /// - `sync-server-status` → `"ONLINE:<port>"` khi bind thành công
 /// - `sync-server-status` → `"PORT_BIND_FAILED"` khi không bind được port nào
-pub async fn start_sync_server(app: AppHandle, db: SharedDb) {
+pub async fn start_sync_server(app: AppHandle, db: DbPools) {
     let mut listener_opt: Option<TcpListener> = None;
     let mut bound_port: u16 = 0;
 
@@ -233,16 +232,14 @@ async fn handle_connection(
 
     // --- Phase 6: Xác thực Sync Token ---
     let state_for_token = Arc::clone(&state);
-    let expected_token = tokio::task::spawn_blocking(move || -> Result<String, String> {
-        let conn_guard = state_for_token
-            .db
-            .lock()
-            .map_err(|_| "DB mutex bị poisoned".to_string())?;
-        crate::db::settings::get_or_create_sync_token(&conn_guard)
-            .map_err(|e| format!("Lỗi đọc sync token: {e}"))
-    })
-    .await
-    .map_err(|e| format!("JoinError reading token: {e}"))??;
+    let expected_token = state_for_token
+        .db
+        .write(|conn| {
+            crate::db::settings::get_or_create_sync_token(conn)
+                .map_err(|e| crate::error::AppError::Vault(e.to_string()))
+        })
+        .await
+        .map_err(|e| format!("Lỗi đọc sync token: {e}"))?;
 
     let provided_token = token_opt.as_deref().unwrap_or("");
     if provided_token != expected_token {
@@ -266,15 +263,16 @@ async fn handle_connection(
 
         let app_handle = app.clone();
         let state_for_profile = Arc::clone(&state);
+        let payload_clone = payload.clone();
 
-        let save_result = tokio::task::spawn_blocking(move || -> Result<(), String> {
-            let mut conn = state_for_profile.db.lock().map_err(|e| e.to_string())?;
-            crate::commands::academic::execute_save_student_profile(&mut conn, &payload)?;
-            app_handle.emit("student-profile-synced", &payload).map_err(|e| e.to_string())?;
-            Ok(())
-        })
-        .await
-        .map_err(|e| format!("JoinError saving student profile: {e}"))?;
+        let save_result = state_for_profile
+            .db
+            .write(move |conn| {
+                crate::commands::academic::execute_save_student_profile(conn, &payload_clone)
+                    .map_err(crate::error::AppError::Vault)?;
+                Ok(())
+            })
+            .await;
 
         if let Err(e) = save_result {
             eprintln!("[SyncServer] Student profile commit error: {}", e);
@@ -282,6 +280,7 @@ async fn handle_connection(
             return Ok(());
         }
 
+        let _ = app_handle.emit("student-profile-synced", &payload);
         println!("[SyncServer] ✅ Student profile sync thành công — đã emit student-profile-synced.");
         send_json_response(
             &mut stream,
@@ -311,18 +310,18 @@ async fn handle_connection(
         return Ok(());
     }
 
-    // --- Phase 8: Offload blocking DB writes sang dedicated blocking pool ---
+    // --- Phase 8: Ghi DB nguyên tử qua DbPools writer ---
     let state_for_db = Arc::clone(&state);
-    let commit_result = tokio::task::spawn_blocking(move || -> Result<(), String> {
-        let mut conn = state_for_db.db.lock().map_err(|e| e.to_string())?;
-        crate::modules::academic::portal_ingestion::ingest_dynamic_academic_payload(
-            &mut conn,
-            payload,
-        )
-        .map_err(|e| format!("Ingestion commit error: {}", e))
-    })
-    .await
-    .map_err(|e| format!("JoinError in spawn_blocking: {}", e))?;
+    let commit_result = state_for_db
+        .db
+        .write(move |conn| {
+            crate::modules::academic::portal_ingestion::ingest_dynamic_academic_payload(
+                conn,
+                payload,
+            )
+            .map_err(crate::error::AppError::Vault)
+        })
+        .await;
 
     if let Err(e) = commit_result {
         eprintln!("[SyncServer] DB commit error: {}", e);
