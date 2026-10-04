@@ -87,9 +87,9 @@ windows-sys = { version = "0.52", features = [
 tempfile = "3"
 
 [profile.release]
-# Tối ưu size + tốc độ cho bản release, quan trọng vì mày cần app nhẹ
+# Tối ưu size + tốc độ cho bản release (ThinLTO đa luồng cho CPU 16-thread)
 panic = "abort"
-codegen-units = 1
-lto = true
+codegen-units = 16
+lto = "thin"
 opt-level = "s"
 strip = true
