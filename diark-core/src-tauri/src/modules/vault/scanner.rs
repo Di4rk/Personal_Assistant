@@ -2,8 +2,8 @@
 //!
 //! Follows Karpathy simplicity principles:
 //! - Direct file walking with walkdir, skipping `.git`, `.obsidian`, `node_modules`.
-//! - Read-before-write FTS5 lifecycle for contentless virtual table:
-//!   Delete existing rowid from FTS5 using old title & content_cache, then update table & reinsert FTS5.
+//! - Contentless FTS5 lifecycle with contentless_delete=1:
+//!   Delete existing rowid from FTS5 directly by rowid, then update table & reinsert FTS5.
 //! - Extracts YAML frontmatter and [[wikilinks]].
 
 use std::collections::{HashMap, HashSet};
@@ -15,6 +15,7 @@ use regex::Regex;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 
+use crate::db::vault_schema::{VaultIndexUpdate, VaultNoteIndexRow};
 use crate::error::{AppError, AppResult};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -318,35 +319,38 @@ pub fn scan_and_sync_vault(conn: &mut Connection, root_path: &Path) -> AppResult
         )));
     }
 
-    // 1. Fetch existing notes metadata from DB: id -> (rowid_key, file_mtime, title, content_cache)
-    let mut existing_notes: HashMap<String, (i64, i64, String, String)> = HashMap::new();
+    // 1. Fetch existing notes metadata from DB: id -> VaultNoteIndexRow (without content body)
+    let mut existing_notes: HashMap<String, VaultNoteIndexRow> = HashMap::new();
     {
         let mut stmt = conn.prepare(
-            "SELECT id, rowid_key, file_mtime, title, content_cache FROM vault_notes",
+            "SELECT rowid_key, id, title, tags, file_mtime, note_type, external_uri FROM vault_notes",
         )?;
         let rows = stmt.query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, i64>(1)?,
-                row.get::<_, i64>(2)?,
-                row.get::<_, String>(3)?,
-                row.get::<_, String>(4)?,
-            ))
+            Ok(VaultNoteIndexRow {
+                rowid_key: row.get(0)?,
+                id: row.get(1)?,
+                title: row.get(2)?,
+                tags: row.get(3)?,
+                file_mtime: row.get(4)?,
+                note_type: row.get(5)?,
+                external_uri: row.get(6)?,
+            })
         })?;
 
         for r in rows {
-            let (id, rowid_key, file_mtime, title, content_cache) = r?;
-            existing_notes.insert(id, (rowid_key, file_mtime, title, content_cache));
+            let note = r?;
+            existing_notes.insert(note.id.clone(), note);
         }
     }
 
     let mut seen_ids: HashSet<String> = HashSet::new();
     let mut to_insert: Vec<VaultNoteParsed> = Vec::new();
-    let mut to_update: Vec<(i64, String, String, VaultNoteParsed)> = Vec::new(); // (rowid_key, old_title, old_content, new_parsed)
+    let mut to_update: Vec<(VaultIndexUpdate, VaultNoteParsed)> = Vec::new();
 
     let root_canonical = root_path.canonicalize().map_err(AppError::from)?;
 
-    // 2. Walk directory
+    // 2. Walk directory using unified VaultWatchPolicy
+    let policy = crate::modules::vault::watcher::VaultWatchPolicy::default();
     for entry in walkdir::WalkDir::new(root_path)
         .follow_links(false)
         .into_iter()
@@ -354,12 +358,9 @@ pub fn scan_and_sync_vault(conn: &mut Connection, root_path: &Path) -> AppResult
             if e.depth() == 0 {
                 return true;
             }
-            let file_name = e.file_name().to_string_lossy();
-            // Skip hidden or system directories
-            !(file_name.starts_with('.')
-                || file_name == "node_modules"
-                || file_name == ".git"
-                || file_name == ".obsidian")
+            let file_name = e.file_name();
+            // Skip ignored directories by exact component match
+            !policy.ignored_dir_names.contains(file_name)
         })
     {
         let entry = match entry {
@@ -372,7 +373,7 @@ pub fn scan_and_sync_vault(conn: &mut Connection, root_path: &Path) -> AppResult
         }
 
         let path = entry.path();
-        if path.extension().and_then(|s| s.to_str()) != Some("md") {
+        if !crate::modules::vault::watcher::is_indexable_md_file(root_path, path, &policy) {
             continue;
         }
 
@@ -403,10 +404,8 @@ pub fn scan_and_sync_vault(conn: &mut Connection, root_path: &Path) -> AppResult
             .unwrap_or(0);
 
         // Check if note exists in DB
-        if let Some(&(rowid_key, db_mtime, ref old_title, ref old_content)) =
-            existing_notes.get(&rel_path)
-        {
-            if db_mtime >= current_mtime {
+        if let Some(existing) = existing_notes.get(&rel_path) {
+            if existing.file_mtime >= current_mtime {
                 // Unmodified, skip
                 continue;
             }
@@ -424,10 +423,16 @@ pub fn scan_and_sync_vault(conn: &mut Connection, root_path: &Path) -> AppResult
                 .map(|s| s.to_string_lossy().to_string())
                 .unwrap_or_else(|| rel_path.clone());
 
+            let (prose, code) = split_prose_and_code(&content);
+            let index_update = VaultIndexUpdate {
+                rowid_key: existing.rowid_key,
+                title: title.clone(),
+                prose,
+                code,
+            };
+
             to_update.push((
-                rowid_key,
-                old_title.clone(),
-                old_content.clone(),
+                index_update,
                 VaultNoteParsed {
                     id: rel_path,
                     title,
@@ -465,23 +470,23 @@ pub fn scan_and_sync_vault(conn: &mut Connection, root_path: &Path) -> AppResult
     }
 
     // 3. Find deleted notes (exist in DB but not in seen_ids)
-    let to_delete: Vec<(String, i64, String, String)> = existing_notes
+    let to_delete: Vec<(String, i64)> = existing_notes
         .into_iter()
         .filter(|(id, _)| !seen_ids.contains(id))
-        .map(|(id, (rowid, _, title, content))| (id, rowid, title, content))
+        .map(|(id, note)| (id, note.rowid_key))
         .collect();
 
     // 4. Execute transactional updates
     let now_ts = chrono::Utc::now().timestamp();
+    let total_dirty = to_delete.len() + to_update.len() + to_insert.len();
     let tx = conn.transaction()?;
 
     // Process deletions
-    for (id, rowid_key, title, content_cache) in to_delete {
-        // Contentless FTS5 delete: must pass old title, prose, and code
-        let (old_prose, old_code) = split_prose_and_code(&content_cache);
+    for (id, rowid_key) in to_delete {
+        // Direct rowid deletion on contentless FTS5 table
         tx.execute(
-            "INSERT INTO vault_fts(vault_fts, rowid, title, prose, code) VALUES('delete', ?1, ?2, ?3, ?4)",
-            params![rowid_key, title, old_prose, old_code],
+            "DELETE FROM vault_fts WHERE rowid = ?1",
+            params![rowid_key],
         )?;
 
         tx.execute(
@@ -496,43 +501,45 @@ pub fn scan_and_sync_vault(conn: &mut Connection, root_path: &Path) -> AppResult
     }
 
     // Process updates
-    for (rowid_key, old_title, old_content, parsed) in to_update {
-        // Delete old entry in FTS5
-        let (old_prose, old_code) = split_prose_and_code(&old_content);
+    for (index_update, parsed) in to_update {
+        // Delete old entry in FTS5 directly by rowid
         tx.execute(
-            "INSERT INTO vault_fts(vault_fts, rowid, title, prose, code) VALUES('delete', ?1, ?2, ?3, ?4)",
-            params![rowid_key, old_title, old_prose, old_code],
+            "DELETE FROM vault_fts WHERE rowid = ?1",
+            params![index_update.rowid_key],
         )?;
 
         let tags_json = serde_json::to_string(&parsed.tags).unwrap_or_else(|_| "[]".to_string());
         let (note_type, external_uri) = parse_note_type_and_uri_from_json(&parsed.frontmatter_json);
 
-        // Update vault_notes
+        // Update vault_notes without content_cache
         tx.execute(
             r#"
             UPDATE vault_notes
             SET title = ?1, tags = ?2, frontmatter_json = ?3, file_mtime = ?4,
-                content_cache = ?5, updated_at = ?6, note_type = ?7, external_uri = ?8
-            WHERE rowid_key = ?9
+                updated_at = ?5, note_type = ?6, external_uri = ?7
+            WHERE rowid_key = ?8
             "#,
             params![
                 parsed.title,
                 tags_json,
                 parsed.frontmatter_json,
                 parsed.file_mtime,
-                parsed.content,
                 now_ts,
                 note_type,
                 external_uri,
-                rowid_key
+                index_update.rowid_key
             ],
         )?;
 
-        // Re-insert into FTS5
-        let (prose, code) = split_prose_and_code(&parsed.content);
+        // Re-insert into FTS5 using memory update payload
         tx.execute(
             "INSERT INTO vault_fts(rowid, title, prose, code) VALUES(?1, ?2, ?3, ?4)",
-            params![rowid_key, parsed.title, prose, code],
+            params![
+                index_update.rowid_key,
+                index_update.title,
+                index_update.prose,
+                index_update.code
+            ],
         )?;
 
         // Update links
@@ -555,8 +562,8 @@ pub fn scan_and_sync_vault(conn: &mut Connection, root_path: &Path) -> AppResult
 
         tx.execute(
             r#"
-            INSERT INTO vault_notes(id, title, tags, frontmatter_json, file_mtime, content_cache, updated_at, note_type, external_uri)
-            VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+            INSERT INTO vault_notes(id, title, tags, frontmatter_json, file_mtime, updated_at, note_type, external_uri)
+            VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
             "#,
             params![
                 parsed.id,
@@ -564,7 +571,6 @@ pub fn scan_and_sync_vault(conn: &mut Connection, root_path: &Path) -> AppResult
                 tags_json,
                 parsed.frontmatter_json,
                 parsed.file_mtime,
-                parsed.content,
                 now_ts,
                 note_type,
                 external_uri
@@ -587,10 +593,20 @@ pub fn scan_and_sync_vault(conn: &mut Connection, root_path: &Path) -> AppResult
         }
     }
 
+    if total_dirty > 0 {
+        // Run FTS5 optimize after batch modifications to merge index b-trees
+        tx.execute("INSERT INTO vault_fts(vault_fts) VALUES('optimize')", [])?;
+    }
+
     tx.commit()?;
 
     // 5. Re-resolve dangling links across the vault
     let _ = resolve_unresolved_links(conn)?;
+
+    if total_dirty > 0 {
+        // Run PRAGMA optimize for query planner maintenance after batch modifications
+        let _ = conn.execute_batch("PRAGMA optimize;");
+    }
 
     // 6. Query and return VaultStatsDto
     query_vault_stats(conn)
@@ -783,8 +799,8 @@ Some content here."#;
         // Insert a dummy note into vault_notes and vault_fts to query against
         conn.execute(
             r#"
-            INSERT INTO vault_notes(id, title, tags, frontmatter_json, file_mtime, content_cache, updated_at)
-            VALUES('test.md', 'Test', '[]', NULL, 100, 'segment tree algorithm details', 100)
+            INSERT INTO vault_notes(id, title, tags, frontmatter_json, file_mtime, updated_at)
+            VALUES('test.md', 'Test', '[]', NULL, 100, 100)
             "#,
             [],
         )

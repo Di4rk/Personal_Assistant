@@ -14,6 +14,8 @@ pub use scanner::{
     resolve_unresolved_links, scan_and_sync_vault, VaultNoteParsed, VaultStatsDto,
 };
 pub use watcher::{
-    get_vault_watcher_status, start_vault_watcher, stop_vault_watcher, VaultSyncEventPayload,
-    VaultWatcherState,
+    get_vault_watcher_status, is_indexable_md_file, start_vault_watcher,
+    start_vault_watcher_with_emitter, start_vault_watcher_with_policy,
+    start_vault_watcher_with_pools, stop_vault_watcher, VaultSyncEventPayload,
+    VaultWatcherState, VaultWatchPolicy, WatcherSignal,
 };

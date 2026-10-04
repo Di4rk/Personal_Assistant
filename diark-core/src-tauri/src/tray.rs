@@ -6,10 +6,10 @@ use tauri::{
 };
 
 pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
-    let show_i = MenuItem::with_id(app, "show", "Show HUD (Alt+K)", true, None::<&str>)?;
+    let show_i = MenuItem::with_id(app, "show", "Mở Diark OS", true, None::<&str>)?;
     let briefing_i = MenuItem::with_id(app, "briefing", "📢 Daily Briefing (Thông báo)", true, None::<&str>)?;
     let status_i = MenuItem::with_id(app, "status", "Status: Running", false, None::<&str>)?;
-    let quit_i = MenuItem::with_id(app, "quit", "Quit Diark OS", true, None::<&str>)?;
+    let quit_i = MenuItem::with_id(app, "quit", "Thoát hoàn toàn", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&show_i, &briefing_i, &status_i, &quit_i])?;
 
     let icon = match app.default_window_icon() {
@@ -28,6 +28,7 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
             "show" => {
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = show_and_focus_main(&window);
+                    let _ = app.emit("window-shown", ());
                 }
             }
             "briefing" => {
@@ -38,24 +39,34 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             "quit" => {
-                let app_handle = app.clone();
-                tauri::async_runtime::spawn(async move {
-                    graceful_shutdown(app_handle).await;
-                });
+                app.exit(0);
             }
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {
             if let TrayIconEvent::Click {
                 button: tauri::tray::MouseButton::Left,
+                button_state: tauri::tray::MouseButtonState::Up,
                 ..
             } = event
             {
                 let app = tray.app_handle();
                 if let Some(window) = app.get_webview_window("main") {
-                    // Tray click = restore the dashboard. Never emit hud-shown
-                    // (that overlay is reserved for Alt+K / Quick Note).
-                    let _ = show_and_focus_main(&window);
+                    let is_minimized = window.is_minimized().unwrap_or(false);
+                    let is_visible = window.is_visible().unwrap_or(false);
+                    if is_minimized {
+                        let _ = window.unminimize();
+                        let _ = window.show();
+                        let _ = window.set_focus();
+                        let _ = app.emit("window-shown", ());
+                    } else if is_visible {
+                        let _ = window.hide();
+                        let _ = app.emit("window-hidden", ());
+                    } else {
+                        let _ = window.show();
+                        let _ = window.set_focus();
+                        let _ = app.emit("window-shown", ());
+                    }
                 }
             }
         })
@@ -85,8 +96,7 @@ pub fn checkpoint_wal(conn: &rusqlite::Connection) -> Result<(), String> {
     let mut stmt = conn
         .prepare("PRAGMA wal_checkpoint(TRUNCATE)")
         .map_err(|e| format!("Failed to prepare WAL checkpoint: {e}"))?;
-    let _ = stmt
-        .query_row([], |_row| Ok(()))
+    stmt.query_row([], |_row| Ok(()))
         .map_err(|e| format!("Failed to execute WAL checkpoint: {e}"))?;
     Ok(())
 }
@@ -100,7 +110,9 @@ pub async fn graceful_shutdown(app: AppHandle) {
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     // Truncate checkpoint SQLite WAL
-    if let Some(shared_db) = app.try_state::<crate::db::SharedDb>() {
+    if let Some(pools) = app.try_state::<crate::db::DbPools>() {
+        let _ = pools.checkpoint_truncate().await;
+    } else if let Some(shared_db) = app.try_state::<crate::db::SharedDb>() {
         if let Ok(conn) = shared_db.lock() {
             let _ = checkpoint_wal(&conn);
         }

@@ -246,42 +246,24 @@ pub async fn create_structured_note(
             .ok();
 
         let rowid_key = if let Some(old_rowid) = existing_rowid {
-            // Delete old FTS5 entry
-            let old_cached: String = tx
-                .query_row(
-                    "SELECT content_cache FROM vault_notes WHERE rowid_key = ?1",
-                    params![old_rowid],
-                    |r| r.get(0),
-                )
-                .unwrap_or_default();
-            let (old_prose, old_code) =
-                crate::modules::vault::scanner::split_prose_and_code(&old_cached);
-            let old_title: String = tx
-                .query_row(
-                    "SELECT title FROM vault_notes WHERE rowid_key = ?1",
-                    params![old_rowid],
-                    |r| r.get(0),
-                )
-                .unwrap_or_else(|_| dto.title.clone());
-
+            // Delete old FTS5 entry directly by rowid
             let _ = tx.execute(
-                "INSERT INTO vault_fts(vault_fts, rowid, title, prose, code) VALUES('delete', ?1, ?2, ?3, ?4)",
-                params![old_rowid, old_title, old_prose, old_code],
+                "DELETE FROM vault_fts WHERE rowid = ?1",
+                params![old_rowid],
             );
 
             tx.execute(
                 r#"
                 UPDATE vault_notes
                 SET title = ?1, tags = ?2, frontmatter_json = ?3, file_mtime = ?4,
-                    content_cache = ?5, updated_at = ?6, note_type = ?7, external_uri = ?8
-                WHERE rowid_key = ?9
+                    updated_at = ?5, note_type = ?6, external_uri = ?7
+                WHERE rowid_key = ?8
                 "#,
                 params![
                     dto.title,
                     tags_yaml,
                     frontmatter_json,
                     now_ts,
-                    md_content,
                     now_ts,
                     dto.note_type,
                     ext_uri,
@@ -294,8 +276,8 @@ pub async fn create_structured_note(
         } else {
             tx.execute(
                 r#"
-                INSERT INTO vault_notes(id, title, tags, frontmatter_json, file_mtime, content_cache, updated_at, note_type, external_uri)
-                VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                INSERT INTO vault_notes(id, title, tags, frontmatter_json, file_mtime, updated_at, note_type, external_uri)
+                VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
                 "#,
                 params![
                     relative_path,
@@ -303,7 +285,6 @@ pub async fn create_structured_note(
                     tags_yaml,
                     frontmatter_json,
                     now_ts,
-                    md_content,
                     now_ts,
                     dto.note_type,
                     ext_uri

@@ -27,6 +27,8 @@ import {
 import type { WecodeSubmission } from '../../../types/wecode';
 import { useSettingsStore } from '../../../stores/useSettingsStore';
 
+import { StreamBufferImpl, createSessionChunkHandler } from '../utils/streamBuffer';
+
 interface SocraticDebuggerModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -49,8 +51,27 @@ export const SocraticDebuggerModal: React.FC<SocraticDebuggerModalProps> = ({
   const [postMortemSaved, setPostMortemSaved] = useState<boolean>(false);
 
   const unlistenRef = useRef<UnlistenFn | null>(null);
+  const streamBufferRef = useRef<StreamBufferImpl | null>(null);
   const currentSessionIdRef = useRef<string>('');
   const streamBottomRef = useRef<HTMLDivElement | null>(null);
+
+  const cleanupListener = useCallback(() => {
+    if (unlistenRef.current) {
+      unlistenRef.current();
+      unlistenRef.current = null;
+    }
+    if (streamBufferRef.current) {
+      streamBufferRef.current.dispose();
+      streamBufferRef.current = null;
+    }
+  }, []);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      cleanupListener();
+    };
+  }, [cleanupListener]);
 
   // Cuộn xuống đáy mượt mà khi nhận stream chunks
   useEffect(() => {
@@ -83,19 +104,9 @@ export const SocraticDebuggerModal: React.FC<SocraticDebuggerModalProps> = ({
 
     return () => {
       isMounted = false;
-      if (unlistenRef.current) {
-        unlistenRef.current();
-        unlistenRef.current = null;
-      }
+      cleanupListener();
     };
-  }, [isOpen]);
-
-  const cleanupListener = useCallback(() => {
-    if (unlistenRef.current) {
-      unlistenRef.current();
-      unlistenRef.current = null;
-    }
-  }, []);
+  }, [isOpen, cleanupListener]);
 
   const handleStartAnalysis = useCallback(
     async (customQuery?: string) => {
@@ -115,26 +126,32 @@ export const SocraticDebuggerModal: React.FC<SocraticDebuggerModalProps> = ({
       const sessionId = `socratic_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
       currentSessionIdRef.current = sessionId;
 
+      const buffer = new StreamBufferImpl((flushedText) => {
+        setStreamText((prev) => prev + flushedText);
+      });
+      streamBufferRef.current = buffer;
+
+      const handleChunk = createSessionChunkHandler(
+        () => currentSessionIdRef.current,
+        buffer,
+        {
+          onError: (err) => {
+            setStreamError(err);
+            setIsStreaming(false);
+            cleanupListener();
+          },
+          onDone: () => {
+            setIsStreaming(false);
+            cleanupListener();
+          },
+        }
+      );
+
       try {
         const unlisten = await listen<GeminiStreamChunk>(
           `gemini-stream-${sessionId}`,
           (event) => {
-            const payload = event.payload;
-            if (payload.session_id !== currentSessionIdRef.current) return;
-
-            if (payload.chunk) {
-              setStreamText((prev) => prev + payload.chunk);
-            }
-
-            if (payload.error) {
-              setStreamError(payload.error);
-              setIsStreaming(false);
-            }
-
-            if (payload.is_done) {
-              setIsStreaming(false);
-              cleanupListener();
-            }
+            handleChunk(event.payload);
           }
         );
 

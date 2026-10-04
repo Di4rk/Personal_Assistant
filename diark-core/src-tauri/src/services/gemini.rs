@@ -1,3 +1,5 @@
+use std::time::{Duration, Instant};
+
 use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -6,6 +8,8 @@ use tauri::{AppHandle, Emitter};
 // ============================================================
 //  DTOs & Structures
 // ============================================================
+
+pub const GEMINI_EMIT_INTERVAL: Duration = Duration::from_millis(16);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct GeminiConfigDto {
@@ -19,6 +23,45 @@ pub struct GeminiStreamChunk {
     pub chunk: String,
     pub is_done: bool,
     pub error: Option<String>,
+}
+
+/// Buffers rapid streaming chunks and flushes them at most once per 16 ms interval.
+#[derive(Debug, Clone)]
+pub struct StreamBatcher {
+    pub pending: String,
+    pub interval: Duration,
+    pub last_emit: Instant,
+}
+
+impl StreamBatcher {
+    pub fn new(interval: Duration) -> Self {
+        Self {
+            pending: String::new(),
+            interval,
+            last_emit: Instant::now(),
+        }
+    }
+
+    /// Appends text to pending buffer. Returns Some(flushed_text) if interval has elapsed.
+    pub fn push(&mut self, text: &str) -> Option<String> {
+        self.pending.push_str(text);
+        if self.last_emit.elapsed() >= self.interval && !self.pending.is_empty() {
+            self.last_emit = Instant::now();
+            Some(std::mem::take(&mut self.pending))
+        } else {
+            None
+        }
+    }
+
+    /// Flushes any pending text immediately.
+    pub fn flush(&mut self) -> Option<String> {
+        if !self.pending.is_empty() {
+            self.last_emit = Instant::now();
+            Some(std::mem::take(&mut self.pending))
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -457,6 +500,7 @@ pub async fn stream_gemini_request(
         };
 
         let mut buffer = String::new();
+        let mut batcher = StreamBatcher::new(GEMINI_EMIT_INTERVAL);
 
         while let Ok(Some(chunk_bytes)) = response.chunk().await {
             let chunk_str = String::from_utf8_lossy(&chunk_bytes);
@@ -468,18 +512,33 @@ pub async fn stream_gemini_request(
 
                 match parse_gemini_sse_line(&line) {
                     Ok(Some(text)) => {
-                        let _ = app.emit(
-                            &event_name,
-                            GeminiStreamChunk {
-                                session_id: session_id.clone(),
-                                chunk: text,
-                                is_done: false,
-                                error: None,
-                            },
-                        );
+                        if let Some(flushed) = batcher.push(&text) {
+                            let _ = app.emit(
+                                &event_name,
+                                GeminiStreamChunk {
+                                    session_id: session_id.clone(),
+                                    chunk: flushed,
+                                    is_done: false,
+                                    error: None,
+                                },
+                            );
+                        }
                     }
                     Ok(None) => {}
                     Err(err) => {
+                        // Flush any pending text before sending error
+                        if let Some(flushed) = batcher.flush() {
+                            let _ = app.emit(
+                                &event_name,
+                                GeminiStreamChunk {
+                                    session_id: session_id.clone(),
+                                    chunk: flushed,
+                                    is_done: false,
+                                    error: None,
+                                },
+                            );
+                        }
+
                         let _ = app.emit(
                             &event_name,
                             GeminiStreamChunk {
@@ -495,7 +554,20 @@ pub async fn stream_gemini_request(
             }
         }
 
-        // Emit final done chunk
+        // Flush any remaining accumulated text before final is_done
+        if let Some(flushed) = batcher.flush() {
+            let _ = app.emit(
+                &event_name,
+                GeminiStreamChunk {
+                    session_id: session_id.clone(),
+                    chunk: flushed,
+                    is_done: false,
+                    error: None,
+                },
+            );
+        }
+
+        // Emit final done chunk (only terminal chunk with is_done: true)
         let _ = app.emit(
             &event_name,
             GeminiStreamChunk {
@@ -777,5 +849,45 @@ mod tests {
             .unwrap();
 
         assert_eq!(row_count, 1);
+    }
+
+    #[test]
+    fn test_stream_batcher_coalescing_and_flush() {
+        let mut batcher = StreamBatcher::new(Duration::from_millis(16));
+
+        // Rapidly push 100 chunks within 16 ms
+        let mut emitted_during_push = Vec::new();
+        for i in 0..100 {
+            if let Some(emitted) = batcher.push(&format!("chunk_{};", i)) {
+                emitted_during_push.push(emitted);
+            }
+        }
+
+        // All chunks within 16ms should be coalesced into pending without premature emit
+        let flushed = batcher.flush();
+        assert!(flushed.is_some(), "Batcher must flush accumulated chunks");
+        let flushed_text = flushed.unwrap();
+
+        // Verify correct concatenated content
+        assert!(flushed_text.starts_with("chunk_0;"));
+        assert!(flushed_text.contains("chunk_50;"));
+        assert!(flushed_text.ends_with("chunk_99;"));
+
+        // Subsequent flush on empty batcher returns None
+        assert!(batcher.flush().is_none());
+    }
+
+    #[test]
+    fn test_stream_batcher_interval_threshold() {
+        let mut batcher = StreamBatcher::new(Duration::from_millis(16));
+        batcher.push("initial text");
+
+        // Simulate 20ms elapsed
+        batcher.last_emit = Instant::now() - Duration::from_millis(25);
+
+        // Next push should trigger batch emission
+        let emitted = batcher.push(" new text");
+        assert_eq!(emitted, Some("initial text new text".to_string()));
+        assert_eq!(batcher.pending, "");
     }
 }

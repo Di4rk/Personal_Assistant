@@ -4,10 +4,196 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use crate::error::AppError;
+use r2d2::Pool;
+use r2d2_sqlite::SqliteConnectionManager;
+
 /// Alias cho state dùng chung giữa Tauri commands và Axum server.
 /// Bọc trong Arc<Mutex<>> vì rusqlite::Connection không phải Send+Sync tự nhiên
 /// khi bị mutate từ nhiều nơi -- Mutex đảm bảo chỉ 1 thread ghi tại 1 thời điểm.
+/// Dành cho backward-compatibility với các frontend command handler chưa tách.
 pub type SharedDb = Arc<Mutex<Connection>>;
+
+pub type ReadPool = Pool<SqliteConnectionManager>;
+
+pub type DbJob = Box<dyn FnOnce(&mut Connection) + Send + 'static>;
+
+#[derive(Clone)]
+pub struct DbWriterHandle {
+    sender: tokio::sync::mpsc::Sender<DbJob>,
+}
+
+impl DbWriterHandle {
+    pub fn new(mut conn: Connection) -> Result<Self, AppError> {
+        let (sender, mut receiver) = tokio::sync::mpsc::channel::<DbJob>(256);
+
+        std::thread::Builder::new()
+            .name("diark-db-writer".into())
+            .spawn(move || {
+                while let Some(job) = receiver.blocking_recv() {
+                    job(&mut conn);
+                }
+            })
+            .map_err(AppError::Io)?;
+
+        Ok(Self { sender })
+    }
+
+    pub async fn write<T, F>(&self, f: F) -> Result<T, AppError>
+    where
+        F: FnOnce(&mut Connection) -> Result<T, AppError> + Send + 'static,
+        T: Send + 'static,
+    {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let job: DbJob = Box::new(move |conn: &mut Connection| {
+            let res = f(conn);
+            let _ = tx.send(res);
+        });
+
+        self.sender
+            .send(job)
+            .await
+            .map_err(|_| AppError::WriterClosed("DbWriter channel bị đóng".into()))?;
+
+        rx.await
+            .map_err(|_| AppError::WriterClosed("DbWriter phản hồi bị hủy".into()))?
+    }
+
+    pub fn write_blocking<T, F>(&self, f: F) -> Result<T, AppError>
+    where
+        F: FnOnce(&mut Connection) -> Result<T, AppError> + Send + 'static,
+        T: Send + 'static,
+    {
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        let job: DbJob = Box::new(move |conn: &mut Connection| {
+            let res = f(conn);
+            let _ = tx.send(res);
+        });
+
+        self.sender
+            .blocking_send(job)
+            .map_err(|_| AppError::WriterClosed("DbWriter channel bị đóng".into()))?;
+
+        rx.recv()
+            .map_err(|_| AppError::WriterClosed("DbWriter phản hồi bị hủy".into()))?
+    }
+}
+
+#[derive(Clone)]
+pub struct DbPools {
+    writer: DbWriterHandle,
+    readers: ReadPool,
+}
+
+impl DbPools {
+    pub fn new(writer: DbWriterHandle, readers: ReadPool) -> Self {
+        Self { writer, readers }
+    }
+
+    pub async fn write<T, F>(&self, f: F) -> Result<T, AppError>
+    where
+        F: FnOnce(&mut Connection) -> Result<T, AppError> + Send + 'static,
+        T: Send + 'static,
+    {
+        self.writer.write(f).await
+    }
+
+    pub fn write_blocking<T, F>(&self, f: F) -> Result<T, AppError>
+    where
+        F: FnOnce(&mut Connection) -> Result<T, AppError> + Send + 'static,
+        T: Send + 'static,
+    {
+        self.writer.write_blocking(f)
+    }
+
+    pub fn read<T, F>(&self, f: F) -> Result<T, AppError>
+    where
+        F: FnOnce(&Connection) -> Result<T, AppError>,
+    {
+        let conn = self.readers.get().map_err(AppError::Pool)?;
+        f(&conn)
+    }
+
+    pub async fn read_async<T, F>(&self, f: F) -> Result<T, AppError>
+    where
+        F: FnOnce(&Connection) -> Result<T, AppError> + Send + 'static,
+        T: Send + 'static,
+    {
+        let pool = self.readers.clone();
+        tokio::task::spawn_blocking(move || {
+            let conn = pool.get().map_err(AppError::Pool)?;
+            f(&conn)
+        })
+        .await
+        .map_err(|e| AppError::WriterClosed(format!("Task spawn_blocking failed: {e}")))?
+    }
+
+    pub fn writer_handle(&self) -> &DbWriterHandle {
+        &self.writer
+    }
+
+    pub fn read_pool(&self) -> &ReadPool {
+        &self.readers
+    }
+
+    /// Truncate checkpoint SQLite WAL khi tắt ứng dụng hoặc giải phóng tài nguyên.
+    pub async fn checkpoint_truncate(&self) -> Result<(), AppError> {
+        self.write(|conn| {
+            let mut stmt = conn.prepare("PRAGMA wal_checkpoint(TRUNCATE);")?;
+            let _ = stmt.query_row([], |_row| Ok(()))?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// Định kỳ bảo trì WAL và tối ưu hóa truy vấn trong điều kiện tải thấp.
+    pub async fn maintenance(&self) -> Result<(), AppError> {
+        self.write(|conn| {
+            let _ = conn.execute_batch(
+                "PRAGMA wal_checkpoint(PASSIVE);
+                 PRAGMA optimize;",
+            )?;
+            Ok(())
+        })
+        .await
+    }
+}
+
+/// Khởi tạo DbPools với một dedicated writer connection và một pool các reader connections mở ở chế độ READ_ONLY.
+pub fn init_pools(db_path: &Path) -> Result<DbPools, AppError> {
+    let writer_conn = init_db(db_path).map_err(AppError::Database)?;
+    writer_conn.pragma_update(None, "wal_autocheckpoint", 1000)?;
+
+    let writer = DbWriterHandle::new(writer_conn)?;
+
+    let manager = SqliteConnectionManager::file(db_path)
+        .with_flags(
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
+                | rusqlite::OpenFlags::SQLITE_OPEN_URI
+                | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .with_init(|conn| {
+            conn.busy_timeout(Duration::from_millis(5000))?;
+            conn.pragma_update(None, "query_only", "ON")?;
+            conn.pragma_update(None, "foreign_keys", "ON")?;
+            conn.pragma_update(None, "synchronous", "NORMAL")?;
+            let _: i64 = conn.pragma_update_and_check(None, "mmap_size", 0, |row| row.get(0))?;
+            conn.pragma_update(None, "cache_size", -4000)?;
+            if let Err(e) = load_sqlite_vec_extension(conn) {
+                eprintln!("[WARN] sqlite-vec reader load deferred: {e}");
+            }
+            Ok(())
+        });
+
+    let readers = Pool::builder()
+        .max_size(8)
+        .min_idle(Some(1))
+        .connection_timeout(Duration::from_secs(5))
+        .build(manager)
+        .map_err(AppError::Pool)?;
+
+    Ok(DbPools { writer, readers })
+}
 
 /// Nạp dynamic extension sqlite-vec (vec0) vào SQLite connection.
 /// Tuyệt đối không unwrap(), ưu tiên tìm kiếm file binary tại các đường dẫn quy ước.
@@ -40,7 +226,7 @@ pub fn load_sqlite_vec_extension(conn: &Connection) -> SqlResult<()> {
 /// và chạy migration tạo bảng nếu chưa tồn tại (idempotent - chạy lại
 /// bao nhiêu lần cũng an toàn).
 pub fn init_db(db_path: &Path) -> SqlResult<Connection> {
-    let conn = Connection::open(db_path)?;
+    let mut conn = Connection::open(db_path)?;
 
     // busy_timeout: SQLite menunggu hingga 5s sebelum mengembalikan SQLITE_BUSY
     // ketika ada koneksi lain (misal DB Browser) yang sedang memegang lock.
@@ -79,6 +265,8 @@ pub fn init_db(db_path: &Path) -> SqlResult<Connection> {
     ensure_plugin_and_activity_schema(&conn)?;
     apply_legacy_compatibility_migrations(&conn)?;
     crate::db::vault_schema::init_vault_tables(&conn)?;
+    crate::db::vault_schema::migrate_vault_cache_to_contentless_delete(&mut conn)
+        .map_err(|e| rusqlite::Error::UserFunctionError(e.to_string().into()))?;
     purge_mock_submissions(&conn)?;
 
     Ok(conn)
@@ -1169,5 +1357,183 @@ mod tests {
         ).unwrap();
         assert_eq!(prob_name, "Tìm kiếm");
         assert_eq!(prob_url, "https://khmt.uit.edu.vn/wecode25/it00x/assignment/1/2275");
+    }
+
+    #[tokio::test]
+    async fn test_pools_reader_can_query_while_writer_holds_transaction() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let db_path = temp_dir.path().join("concurrency_test.sqlite3");
+        let pools = super::init_pools(&db_path).expect("init_pools should succeed");
+
+        // Seed initial row
+        pools
+            .write(|conn| {
+                conn.execute(
+                    "INSERT INTO settings (key, value) VALUES ('test_key', 'initial')",
+                    [],
+                )?;
+                Ok(())
+            })
+            .await
+            .expect("seed write must succeed");
+
+        let (writer_started_tx, writer_started_rx) = tokio::sync::oneshot::channel();
+        let (writer_resume_tx, writer_resume_rx) = tokio::sync::oneshot::channel();
+
+        // Writer task starts long transaction
+        let pools_writer = pools.clone();
+        let writer_handle = tokio::spawn(async move {
+            pools_writer
+                .write(move |conn| {
+                    let tx = conn.transaction()?;
+                    tx.execute(
+                        "UPDATE settings SET value = 'in_transaction' WHERE key = 'test_key'",
+                        [],
+                    )?;
+
+                    // Signal that transaction has modified data but has not committed yet
+                    let _ = writer_started_tx.send(());
+
+                    // Wait for reader to perform concurrent read before committing
+                    let _ = writer_resume_rx.blocking_recv();
+
+                    tx.commit()?;
+                    Ok(())
+                })
+                .await
+        });
+
+        // Wait until writer is holding active transaction
+        writer_started_rx.await.expect("writer started");
+
+        // Reader queries DB concurrently while writer holds uncommitted transaction.
+        // In WAL mode, reader must NOT be blocked by application mutex and reads snapshot!
+        let read_val = pools
+            .read(|conn| {
+                let val: String = conn.query_row(
+                    "SELECT value FROM settings WHERE key = 'test_key'",
+                    [],
+                    |r| r.get(0),
+                )?;
+                Ok(val)
+            })
+            .expect("reader must succeed concurrently without deadlock");
+
+        assert_eq!(read_val, "initial", "Reader should see WAL snapshot before commit");
+
+        // Allow writer to commit
+        let _ = writer_resume_tx.send(());
+        let writer_res = writer_handle.await.expect("writer task panicked");
+        assert!(writer_res.is_ok(), "writer commit must succeed: {:?}", writer_res);
+
+        // After commit, reader observes updated value
+        let committed_val = pools
+            .read(|conn| {
+                let val: String = conn.query_row(
+                    "SELECT value FROM settings WHERE key = 'test_key'",
+                    [],
+                    |r| r.get(0),
+                )?;
+                Ok(val)
+            })
+            .expect("read after commit must succeed");
+
+        assert_eq!(committed_val, "in_transaction");
+    }
+
+    #[tokio::test]
+    async fn test_reader_rejects_write_and_verifies_pragmas() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let db_path = temp_dir.path().join("pragmas_test.sqlite3");
+        let pools = super::init_pools(&db_path).expect("init_pools should succeed");
+
+        // Verify reader pragmas: journal_mode=wal, query_only=1
+        pools
+            .read(|conn| {
+                let journal: String = conn
+                    .query_row("PRAGMA journal_mode;", [], |r| r.get(0))
+                    .map_err(super::AppError::Database)?;
+                assert_eq!(journal.to_lowercase(), "wal", "Database must be in WAL journal mode");
+
+                let query_only: i64 = conn
+                    .query_row("PRAGMA query_only;", [], |r| r.get(0))
+                    .map_err(super::AppError::Database)?;
+                assert_eq!(query_only, 1, "Reader connection must have query_only = ON (1)");
+
+                // Attempting write on reader must be rejected with SQLITE_READONLY
+                let write_res = conn.execute("INSERT INTO settings (key, value) VALUES ('k', 'v')", []);
+                assert!(
+                    write_res.is_err(),
+                    "Write on reader connection must fail"
+                );
+                let err_str = write_res.unwrap_err().to_string();
+                assert!(
+                    err_str.contains("readonly") || err_str.contains("read-only"),
+                    "Expected readonly error but got: {}",
+                    err_str
+                );
+                Ok(())
+            })
+            .expect("pragmas verification must succeed");
+    }
+
+    #[tokio::test]
+    async fn test_multi_table_write_rollback_on_intermediate_failure() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let db_path = temp_dir.path().join("rollback_test.sqlite3");
+        let pools = super::init_pools(&db_path).expect("init_pools should succeed");
+
+        // Attempt a multi-table write where step 2 fails
+        let res = pools
+            .write(|conn| {
+                let tx = conn.transaction()?;
+
+                // Step 1: write to settings
+                tx.execute(
+                    "INSERT INTO settings (key, value) VALUES ('rollback_test', 'persisted')",
+                    [],
+                )?;
+
+                // Step 2: simulate failure / error injection
+                let failure: rusqlite::Result<()> = Err(rusqlite::Error::QueryReturnedNoRows);
+                failure?;
+
+                // Step 3: would be second table
+                tx.execute(
+                    "INSERT INTO wecode_assignments (id, name) VALUES (9999, 'Rollback Test')",
+                    [],
+                )?;
+
+                tx.commit()?;
+                Ok(())
+            })
+            .await;
+
+        assert!(res.is_err(), "Transaction must fail and propagate error");
+
+        // Verify neither table contains changes from the failed transaction
+        pools
+            .read(|conn| {
+                let settings_count: i64 = conn
+                    .query_row(
+                        "SELECT COUNT(*) FROM settings WHERE key = 'rollback_test'",
+                        [],
+                        |r| r.get(0),
+                    )
+                    .map_err(super::AppError::Database)?;
+                assert_eq!(settings_count, 0, "Settings insert must have rolled back");
+
+                let wecode_count: i64 = conn
+                    .query_row(
+                        "SELECT COUNT(*) FROM wecode_assignments WHERE id = 9999",
+                        [],
+                        |r| r.get(0),
+                    )
+                    .map_err(super::AppError::Database)?;
+                assert_eq!(wecode_count, 0, "Wecode insert must have rolled back");
+
+                Ok(())
+            })
+            .expect("read verification must succeed");
     }
 }

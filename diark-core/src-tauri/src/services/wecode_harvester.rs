@@ -71,6 +71,43 @@ impl WecodeHarvesterRegistry {
         WecodeIngestionEngine::commit_wecode_records(db, all_submissions)?;
         Ok(total)
     }
+
+    pub fn commit_session_with_pools(
+        &self,
+        window_label: &str,
+        pools: &crate::db::DbPools,
+    ) -> Result<usize, String> {
+        let buffer = {
+            let mut guard = self.sessions.lock().map_err(|e| format!("Mutex poisoned: {e}"))?;
+            guard.remove(window_label).ok_or_else(|| {
+                format!("No wecode harvester session found for window: {window_label}")
+            })?
+        };
+
+        let expected_batches = buffer.total_batches;
+        let received_batches = buffer.batches.len();
+
+        if expected_batches > 0 && received_batches != expected_batches {
+            return Err(format!(
+                "Incomplete payload detected: received {}/{} wecode submission batches.",
+                received_batches, expected_batches
+            ));
+        }
+
+        let mut all_submissions = Vec::new();
+        for i in 0..expected_batches {
+            if let Some(chunk) = buffer.batches.get(&i) {
+                all_submissions.extend(chunk.clone());
+            }
+        }
+
+        pools.write_blocking(move |conn| {
+            WecodeIngestionEngine::commit_wecode_sync_request_on_conn(
+                conn,
+                crate::commands::wecode::WecodeSyncRequest::Legacy(all_submissions),
+            ).map_err(|e| crate::error::AppError::Database(rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e)))))
+        }).map_err(|e| e.to_string())
+    }
 }
 
 pub struct WecodeIngestionEngine;
@@ -78,6 +115,14 @@ pub struct WecodeIngestionEngine;
 impl WecodeIngestionEngine {
     pub fn commit_wecode_sync_request(
         db: Arc<Mutex<Connection>>,
+        req: crate::commands::wecode::WecodeSyncRequest,
+    ) -> Result<usize, String> {
+        let mut conn = db.lock().map_err(|e| format!("Mutex poisoned: {e}"))?;
+        Self::commit_wecode_sync_request_on_conn(&mut conn, req)
+    }
+
+    pub fn commit_wecode_sync_request_on_conn(
+        conn: &mut Connection,
         req: crate::commands::wecode::WecodeSyncRequest,
     ) -> Result<usize, String> {
         let (submissions, assignments, problems) = match req {
@@ -93,7 +138,6 @@ impl WecodeIngestionEngine {
             ),
         };
 
-        let mut conn = db.lock().map_err(|e| format!("Mutex poisoned: {e}"))?;
         let tx = conn.transaction().map_err(|e| format!("Cannot begin transaction: {e}"))?;
 
         // 1. Đảm bảo bảng tồn tại
