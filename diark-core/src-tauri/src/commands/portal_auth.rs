@@ -30,6 +30,10 @@ impl Default for RemoteOriginPolicy {
     fn default() -> Self {
         let mut portal = HostSet::new();
         portal.insert("portal.uit.edu.vn".to_string());
+        portal.insert("sso.uit.edu.vn".to_string());
+        portal.insert("auth.uit.edu.vn".to_string());
+        portal.insert("login.uit.edu.vn".to_string());
+        portal.insert("account.uit.edu.vn".to_string());
         portal.insert("login.microsoftonline.com".to_string());
         portal.insert("login.live.com".to_string());
 
@@ -38,6 +42,10 @@ impl Default for RemoteOriginPolicy {
 
         let mut moodle = HostSet::new();
         moodle.insert("courses.uit.edu.vn".to_string());
+        moodle.insert("sso.uit.edu.vn".to_string());
+        moodle.insert("auth.uit.edu.vn".to_string());
+        moodle.insert("login.uit.edu.vn".to_string());
+        moodle.insert("account.uit.edu.vn".to_string());
         moodle.insert("login.microsoftonline.com".to_string());
         moodle.insert("login.live.com".to_string());
 
