@@ -12,6 +12,8 @@ fn test_remote_webview_security_portal_origin_policy_allows_only_trusted_hosts()
         "https://portal.uit.edu.vn",
         "https://portal.uit.edu.vn/dashboard",
         "https://portal.uit.edu.vn:443/student/index",
+        "https://sso.uit.edu.vn/realms/UIT/protocol/openid-connect/auth",
+        "https://auth.uit.edu.vn/login",
         "https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize",
         "https://login.live.com/oauth20_authorize.srf",
     ];
@@ -98,6 +100,8 @@ fn test_remote_webview_security_moodle_origin_policy_allows_only_trusted_hosts()
         "https://courses.uit.edu.vn",
         "https://courses.uit.edu.vn/my/",
         "https://courses.uit.edu.vn/course/view.php?id=123",
+        "https://sso.uit.edu.vn/realms/UIT/protocol/openid-connect/auth",
+        "https://auth.uit.edu.vn/login",
         "https://login.microsoftonline.com/common/oauth2/authorize",
         "https://login.live.com/login.srf",
     ];
