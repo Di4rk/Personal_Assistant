@@ -3,9 +3,10 @@ import {
   submitPortalTranscript,
   ingestPortalSyncPayloadJson,
   launchPortalSsoSync,
+  getLocalSyncToken,
 } from "../../../lib/tauri-client";
 import { useTauriEvent } from "../../../hooks/useTauriEvent";
-import { PORTAL_BROWSER_SYNC_SCRIPT } from "../utils/browserSyncScripts";
+import { PORTAL_BROWSER_SYNC_SCRIPT, withLocalSyncToken } from "../utils/browserSyncScripts";
 import type { AcademicOverviewDto, RawPortalSemester } from "../types";
 import {
   Check,
@@ -15,7 +16,6 @@ import {
   AlertCircle,
   GraduationCap,
   CheckCircle2,
-  Sparkles,
   ChevronDown,
   ChevronUp,
   Loader2,
@@ -102,7 +102,10 @@ export const SyncPortalModal: React.FC<SyncPortalModalProps> = ({
 
   const handleCopyScript = async () => {
     try {
-      await navigator.clipboard.writeText(PORTAL_BROWSER_SYNC_SCRIPT);
+      const token = await getLocalSyncToken();
+      await navigator.clipboard.writeText(
+        withLocalSyncToken(PORTAL_BROWSER_SYNC_SCRIPT, token)
+      );
       setCopied(true);
       setIsListening(true);
       setStatus("listening");
@@ -158,7 +161,7 @@ export const SyncPortalModal: React.FC<SyncPortalModalProps> = ({
   // CHẾ ĐỘ THU NHỎ (MINIMIZED FLOATING DOCK):
   if (isMinimized) {
     return (
-      <div className="fixed bottom-6 right-6 z-50 w-96 max-w-[calc(100vw-3rem)] rounded-xl border border-sky-800/50 bg-zinc-950/95 p-4 shadow-2xl backdrop-blur-md font-mono text-zinc-100 transition-all duration-200">
+      <div className="fixed bottom-6 right-6 z-50 w-96 max-w-[calc(100vw-3rem)] rounded-lg border border-zinc-800 bg-zinc-950 p-4 shadow-2xl font-mono text-zinc-100 transition-colors duration-150">
         {/* Header */}
         <div className="flex items-center justify-between gap-2 border-b border-zinc-800/80 pb-2.5">
           <div className="flex items-center gap-2 min-w-0">
@@ -259,20 +262,20 @@ export const SyncPortalModal: React.FC<SyncPortalModalProps> = ({
 
   // CHẾ ĐỘ MODAL ĐẦY ĐỦ (FULL DIALOG):
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 font-mono">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-4 font-mono">
       <div className="relative w-full max-w-lg rounded-xl border border-zinc-800 bg-zinc-900 text-zinc-100 shadow-2xl p-6">
         {/* Header */}
         <div className="flex items-center justify-between pb-4 border-b border-zinc-800">
           <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-lg bg-sky-950/60 border border-sky-800/50 text-sky-400">
+            <div className="p-2 rounded-lg bg-zinc-800 border border-zinc-700 text-emerald-400">
               <GraduationCap className="w-4 h-4" />
             </div>
             <div>
-              <h3 className="text-sm font-bold text-zinc-100">
+              <h3 className="text-sm font-semibold text-zinc-100">
                 Đồng bộ Cổng thông tin UIT
               </h3>
               <p className="text-[11px] text-zinc-400 mt-0.5">
-                Tự động 100% — Chỉ cần đăng nhập, hệ thống tự kéo toàn bộ dữ liệu
+                Chỉ cần đăng nhập một lần, ứng dụng tự kéo điểm, TKB, lịch thi và học phí
               </p>
             </div>
           </div>
@@ -299,15 +302,15 @@ export const SyncPortalModal: React.FC<SyncPortalModalProps> = ({
         {/* Content Body */}
         <div className="py-4 space-y-4">
           {status === "completed" ? (
-            <div className="rounded-lg border border-sky-900/60 bg-sky-950/30 p-5 text-center space-y-3">
-              <CheckCircle2 className="w-10 h-10 text-sky-400 mx-auto" />
-              <h4 className="text-sm font-bold text-sky-300">
+            <div className="rounded-lg border border-emerald-900/60 bg-emerald-950/30 p-5 text-center space-y-3">
+              <CheckCircle2 className="w-10 h-10 text-emerald-400 mx-auto" />
+              <h4 className="text-sm font-bold text-emerald-300">
                 Đồng bộ Portal UIT thành công!
               </h4>
               <p className="text-xs text-zinc-300 leading-relaxed">
                 {syncedCoursesCount !== null
-                  ? `Đã cập nhật ${syncedCoursesCount} môn học, điểm rèn luyện và hồ sơ sinh viên vào SQLite.`
-                  : "Toàn bộ điểm học kỳ, DRL và tín chỉ tích lũy đã được nạp vào Academic Radar."}
+                  ? `Đã cập nhật ${syncedCoursesCount} môn học, điểm rèn luyện và hồ sơ sinh viên vào ứng dụng.`
+                  : "Toàn bộ điểm học kỳ, DRL và tín chỉ tích lũy đã được cập nhật."}
               </p>
               {resultOverview && (
                 <div className="grid grid-cols-2 gap-2 pt-2 text-xs">
@@ -319,7 +322,7 @@ export const SyncPortalModal: React.FC<SyncPortalModalProps> = ({
                   </div>
                   <div className="bg-zinc-950/70 p-2.5 rounded border border-zinc-800">
                     <span className="text-zinc-500 block text-[10px]">Tín chỉ tích lũy</span>
-                    <span className="text-base font-bold text-sky-400">
+                    <span className="text-base font-bold text-emerald-400">
                       {resultOverview.passedCredits} / {resultOverview.totalCredits} TC
                     </span>
                   </div>
@@ -329,14 +332,14 @@ export const SyncPortalModal: React.FC<SyncPortalModalProps> = ({
           ) : (
             <div className="space-y-4 text-xs">
               {/* PRIMARY METHOD: AUTO-SYNC SSO */}
-              <div className="rounded-lg border border-sky-900/40 bg-sky-950/20 p-4 space-y-3">
-                <div className="flex items-center gap-2 font-semibold text-sky-300">
-                  <Sparkles className="w-4 h-4 text-sky-400" />
-                  <span>Phương thức Tự động (Khuyên dùng):</span>
+              <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-4 space-y-3">
+                <div className="flex items-center gap-2 font-semibold text-emerald-400">
+                  <GraduationCap className="w-4 h-4 text-emerald-400" />
+                  <span>Đăng nhập & Đồng bộ tự động</span>
                 </div>
                 <p className="text-[11px] text-zinc-300 leading-relaxed">
                   Nhấn nút bên dưới, đăng nhập tài khoản UIT trên cửa sổ xuất hiện.
-                  Diark OS sẽ <b>tự động lấy Bảng điểm, Điểm rèn luyện & Hồ sơ</b>, sau đó tự đóng cửa sổ.
+                  Ứng dụng sẽ <b>tự động lấy toàn bộ dữ liệu</b>, sau đó tự đóng cửa sổ.
                 </p>
 
                 <button
@@ -346,26 +349,23 @@ export const SyncPortalModal: React.FC<SyncPortalModalProps> = ({
                   className={`w-full py-2.5 px-4 rounded-lg font-semibold text-xs transition-all flex items-center justify-center gap-2 shadow-sm cursor-pointer ${
                     isListening
                       ? "bg-zinc-800 text-zinc-400 cursor-not-allowed border border-zinc-700"
-                      : "bg-sky-500 hover:bg-sky-400 active:bg-sky-600 text-zinc-950"
+                      : "bg-zinc-100 hover:bg-zinc-200 active:bg-zinc-300 text-zinc-950"
                   }`}
                 >
                   {isListening ? (
                     <>
-                      <Loader2 className="w-4 h-4 animate-spin text-sky-400" />
+                      <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />
                       <span>Đang chờ bạn đăng nhập trên cửa sổ UIT...</span>
                     </>
                   ) : (
-                    <>
-                      <span className="text-base">🚀</span>
-                      <span>Đăng nhập & Tự động đồng bộ</span>
-                    </>
+                    <span>Đăng nhập & Tự động đồng bộ</span>
                   )}
                 </button>
 
                 {isListening && (
                   <div className="p-3 rounded-lg bg-zinc-950/90 border border-zinc-800 space-y-2 text-[11px]">
-                    <div className="flex items-center gap-2 text-sky-400 font-medium">
-                      <span className="w-2 h-2 rounded-full bg-sky-400 animate-ping shrink-0" />
+                    <div className="flex items-center gap-2 text-emerald-400 font-medium">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />
                       <span>Cửa sổ UIT đã mở — Hãy đăng nhập tài khoản trường</span>
                     </div>
                     <p className="text-zinc-400 text-[10px] pl-4">
@@ -373,12 +373,12 @@ export const SyncPortalModal: React.FC<SyncPortalModalProps> = ({
                     </p>
                     <div className="flex items-center justify-between pt-1 border-t border-zinc-800/80">
                       <span className="text-[10px] text-zinc-400">
-                        💡 Bạn có thể thu nhỏ để làm việc khác trong lúc chờ.
+                        Bạn có thể thu nhỏ để làm việc khác trong lúc chờ.
                       </span>
                       <button
                         type="button"
                         onClick={() => setIsMinimized(true)}
-                        className="inline-flex items-center gap-1 text-[11px] font-semibold text-sky-400 hover:text-sky-300 transition-colors"
+                        className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-400 hover:text-emerald-300 transition-colors cursor-pointer"
                       >
                         <Minus className="w-3.5 h-3.5" />
                         <span>Thu nhỏ</span>
@@ -393,11 +393,11 @@ export const SyncPortalModal: React.FC<SyncPortalModalProps> = ({
                 <button
                   type="button"
                   onClick={() => setShowManualSection(!showManualSection)}
-                  className="w-full p-3 flex items-center justify-between text-left text-[11px] font-medium text-zinc-400 hover:text-zinc-200 transition-colors"
+                  className="w-full p-3 flex items-center justify-between text-left text-[11px] font-medium text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer"
                 >
                   <div className="flex items-center gap-2">
                     <Terminal className="w-3.5 h-3.5 text-zinc-500" />
-                    <span>Phương thức phụ (Dán script F12 / JSON thủ công)</span>
+                    <span>Nâng cao (Nhập thủ công)</span>
                   </div>
                   {showManualSection ? (
                     <ChevronUp className="w-3.5 h-3.5 text-zinc-500" />
@@ -508,7 +508,7 @@ export const SyncPortalModal: React.FC<SyncPortalModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="py-1.5 px-4 rounded-lg bg-sky-500 hover:bg-sky-400 text-zinc-950 font-semibold transition-colors"
+              className="py-1.5 px-4 rounded-lg bg-zinc-100 hover:bg-zinc-200 text-zinc-950 font-semibold transition-colors cursor-pointer"
             >
               Hoàn tất
             </button>

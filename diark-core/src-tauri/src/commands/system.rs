@@ -738,7 +738,7 @@ pub async fn resume_hotkey(
 #[tauri::command]
 pub async fn notify_ui_ready(
     app: AppHandle,
-    gate: State<'_, WindowGate>,
+    gate: State<'_, std::sync::Arc<WindowGate>>,
 ) -> Result<(), AppError> {
     if gate.should_show_initially {
         if gate.shown.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_ok() {

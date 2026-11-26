@@ -35,7 +35,7 @@ export interface GradeMetrics {
  * Pure Domain Function tính toán Hệ 4 và Điểm chữ chuẩn Quy chế Đào tạo ĐHQG-HCM.
  * Dùng làm Compute-on-Render fallback khi DB mang giá trị NULL hoặc chưa đồng bộ.
  */
-export function computeGradeMetrics(score10: number | null | undefined, isGpaCalculated = true): GradeMetrics {
+export function computeGradeMetrics(score10: number | null | undefined, _isGpaCalculated = true): GradeMetrics {
   if (score10 === null || score10 === undefined || isNaN(score10)) {
     return { score4: 0, gradeChar: '—', isPassed: false, classification: 'Chưa có điểm' };
   }
@@ -49,8 +49,8 @@ export function computeGradeMetrics(score10: number | null | undefined, isGpaCal
   if (s >= 6.0) return { score4: 2.5, gradeChar: 'C+', isPassed: true, classification: 'Trung bình khá' };
   if (s >= 5.5) return { score4: 2.0, gradeChar: 'C', isPassed: true, classification: 'Trung bình' };
   if (s >= 5.0) return { score4: 1.5, gradeChar: 'D+', isPassed: true, classification: 'Trung bình yếu' };
-  if (s >= 4.0) return { score4: 1.0, gradeChar: 'D', isPassed: true, classification: 'Yếu' };
-  
-  return { score4: 0.0, gradeChar: 'F', isPassed: !isGpaCalculated ? s >= 4.0 : false, classification: 'Kém' };
+  if (s >= 4.0) return { score4: 0.0, gradeChar: 'F', isPassed: false, classification: 'Yếu' };
+
+  return { score4: 0.0, gradeChar: 'F', isPassed: false, classification: 'Kém' };
 }
 

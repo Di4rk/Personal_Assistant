@@ -1,7 +1,11 @@
 import React, { useCallback, useState, useEffect } from "react";
-import { ingestWecodeSubmissionsJson, launchWecodeSsoSync } from "../../../lib/tauri-client";
+import {
+  ingestWecodeSubmissionsJson,
+  launchWecodeSsoSync,
+  getLocalSyncToken,
+} from "../../../lib/tauri-client";
 import { useTauriEvent } from "../../../hooks/useTauriEvent";
-import { WECODE_BROWSER_SYNC_SCRIPT } from "../utils/browserSyncScripts";
+import { WECODE_BROWSER_SYNC_SCRIPT, withLocalSyncToken } from "../utils/browserSyncScripts";
 import {
   Check,
   Copy,
@@ -89,7 +93,10 @@ export const SyncWecodeModal: React.FC<SyncWecodeModalProps> = ({
 
   const handleCopyScript = async () => {
     try {
-      await navigator.clipboard.writeText(WECODE_BROWSER_SYNC_SCRIPT);
+      const token = await getLocalSyncToken();
+      await navigator.clipboard.writeText(
+        withLocalSyncToken(WECODE_BROWSER_SYNC_SCRIPT, token)
+      );
       setCopied(true);
       setIsListening(true);
       setStatus("listening");

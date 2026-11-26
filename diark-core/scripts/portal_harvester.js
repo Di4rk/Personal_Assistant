@@ -10,6 +10,13 @@
     window.__DIARK_PORTAL_HARVESTER_V3__ = true;
 
     const LOCAL_SYNC_ENDPOINT = "http://127.0.0.1:3030/api/v1/sync/portal";
+    const LOCAL_EXTRA_ENDPOINT = "http://127.0.0.1:3030/api/v1/sync/portal-extra";
+    const LOCAL_EXAM_ENDPOINT = "http://127.0.0.1:3030/api/v1/sync/exam-schedule";
+    const SYNC_TOKEN = window.__DIARK_SYNC_TOKEN__ || "";
+    const LOCAL_JSON_HEADERS = {
+        "Content-Type": "application/json",
+        "X-Diark-Sync-Token": SYNC_TOKEN
+    };
 
     function sleep(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));
@@ -236,6 +243,85 @@
             profile = await tryEnrichProfileFromHoSo(profile);
         } catch (_) {}
 
+        // 4.5. Fetch TKB, Lớp học phần, Lịch thi, Học phí, Chứng chỉ, Lịch sinh hoạt song song
+        showPill("<span>📅 Đang kéo Thời khóa biểu, Lịch thi & Học vụ mở rộng...</span>", "info");
+        try {
+            const dangKyRes = await fetch("/api/sinh-vien/tkb/dang-ky", { credentials: "include" }).then(r => r.ok ? r.json() : null).catch(() => null);
+            const hocKy = Number(dangKyRes?.hocKy) || 1;
+            const yearId = Number(dangKyRes?.yearId) || 0;
+            const firstStartDate = dangKyRes?.rows?.[0]?.startDate || "";
+            const inferredYearMatch = String(firstStartDate).match(/^(\d{4})-/);
+            const namHoc = inferredYearMatch ? Number(inferredYearMatch[1]) : new Date().getFullYear();
+
+            const tuitionBody = {
+                tuition_field_list: [
+                    "id", "semester", "year_id", "tuition_amount", "tuition_semester",
+                    "tuition_renewal", "reduction_amount", "tuition_credit_number",
+                    "must_be_paid", "paid", "remaining", "debt_in_advance",
+                    "payment_status", "late_payment_date", "period_1_due_date",
+                    "period_2_due_date", "renewal_date", "tuition_status", "paid_time", "note"
+                ],
+                detail_field_list: [
+                    "id", "subject_id", "subject_code", "subject_name",
+                    "tuition_credit_number", "unit_price", "additional_tuition",
+                    "amount", "repayment", "improve", "note"
+                ]
+            };
+
+            const [tkbRes, examMidRes, examFinRes, tuitionRes, certRes, actRes] = await Promise.allSettled([
+                fetch(`/api/sinh-vien/tkb?hocKy=${hocKy}&namHoc=${namHoc}&yearId=${yearId}`, { credentials: "include" }).then(r => r.ok ? r.json() : null),
+                fetch("/api/sv/exam-schedule", {
+                    method: "POST",
+                    credentials: "include",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ academic: [], year_name: String(namHoc), examination: "midterm", semester: `semester_${hocKy}` })
+                }).then(r => r.ok ? r.json() : null),
+                fetch("/api/sv/exam-schedule", {
+                    method: "POST",
+                    credentials: "include",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ academic: [], year_name: String(namHoc), examination: "final_term", semester: `semester_${hocKy}` })
+                }).then(r => r.ok ? r.json() : null),
+                fetch("/api/sv/tuition", {
+                    method: "POST",
+                    credentials: "include",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(tuitionBody)
+                }).then(r => r.ok ? r.json() : null),
+                fetch("/api/sinh-vien/xac-nhan-chung-chi", { credentials: "include" }).then(r => r.ok ? r.json() : null),
+                fetch(`/api/sinh-vien/lich-sinh-hoat?hocKy=${hocKy}&namHoc=${namHoc}&yearId=0&type=class`, { credentials: "include" }).then(r => r.ok ? r.json() : null)
+            ]);
+
+            const examItems = [
+                ...(examMidRes.status === "fulfilled" && Array.isArray(examMidRes.value?.items) ? examMidRes.value.items : []),
+                ...(examFinRes.status === "fulfilled" && Array.isArray(examFinRes.value?.items) ? examFinRes.value.items : [])
+            ];
+
+            if (examItems.length > 0) {
+                await fetch(LOCAL_EXAM_ENDPOINT, {
+                    method: "POST",
+                    headers: LOCAL_JSON_HEADERS,
+                    body: JSON.stringify({ items: examItems })
+                }).catch(() => {});
+            }
+
+            const extraPayload = {
+                tkb_dang_ky: dangKyRes || null,
+                tkb: tkbRes.status === "fulfilled" ? tkbRes.value : null,
+                tuition_records: tuitionRes.status === "fulfilled" && Array.isArray(tuitionRes.value?.records) ? tuitionRes.value.records : [],
+                certificates: certRes.status === "fulfilled" && Array.isArray(certRes.value?.certs) ? certRes.value.certs : [],
+                class_activities: actRes.status === "fulfilled" && Array.isArray(actRes.value?.items) ? actRes.value.items : []
+            };
+
+            await fetch(LOCAL_EXTRA_ENDPOINT, {
+                method: "POST",
+                headers: LOCAL_JSON_HEADERS,
+                body: JSON.stringify(extraPayload)
+            }).catch(() => {});
+        } catch (extraErr) {
+            console.warn("[Diark OS] Extended Portal harvest partial error:", extraErr);
+        }
+
         // 5. Construct Unified Payload
         const unifiedPayload = {
             ...transcriptData,
@@ -257,7 +343,7 @@
         try {
             const syncResponse = await fetch(LOCAL_SYNC_ENDPOINT, {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: LOCAL_JSON_HEADERS,
                 body: JSON.stringify(unifiedPayload)
             });
 

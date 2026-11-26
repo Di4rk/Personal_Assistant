@@ -6,7 +6,6 @@ import {
   CheckSquare,
   Square,
   Bell,
-  Sparkles,
   ClipboardPaste,
   Code2,
   Check,
@@ -24,13 +23,15 @@ import {
   syncExamSchedules,
   updateExamChecklist,
   triggerDailyBriefing,
+  getLocalSyncToken,
   type DailyBriefingDto,
 } from "../../../lib/tauri-client";
 import { useWindowVisibility } from "../../../hooks/useWindowVisibility";
-import { PORTAL_EXAM_SCHEDULE_SYNC_SCRIPT } from "../utils/browserSyncScripts";
+import { PORTAL_EXAM_SCHEDULE_SYNC_SCRIPT, withLocalSyncToken } from "../utils/browserSyncScripts";
 
 interface ExamRadarCardProps {
   className?: string;
+  onSyncPortal?: () => void;
 }
 
 interface Countdown {
@@ -73,18 +74,18 @@ function parseChecklist(jsonStr: string): ExamChecklistItem[] {
 function formatExamFormat(format: string): { label: string; color: string } {
   const f = format.toLowerCase().trim();
   if (f === "tl" || f === "essay") {
-    return { label: "Tự luận", color: "bg-blue-950/70 text-blue-300 border-blue-800" };
+    return { label: "Tự luận", color: "bg-zinc-800 text-zinc-200 border-zinc-700" };
   }
   if (f === "tn" || f === "multiple_choice") {
-    return { label: "Trắc nghiệm", color: "bg-emerald-950/70 text-emerald-300 border-emerald-800" };
+    return { label: "Trắc nghiệm", color: "bg-emerald-950/60 text-emerald-300 border-emerald-800/70" };
   }
   if (f === "practical" || f === "th") {
-    return { label: "Thực hành Máy tính", color: "bg-purple-950/70 text-purple-300 border-purple-800" };
+    return { label: "Thực hành máy tính", color: "bg-amber-950/60 text-amber-300 border-amber-800/70" };
   }
   if (f === "oral" || f === "vd") {
-    return { label: "Vấn đáp", color: "bg-amber-950/70 text-amber-300 border-amber-800" };
+    return { label: "Vấn đáp", color: "bg-amber-950/60 text-amber-300 border-amber-800/70" };
   }
-  return { label: format || "Chưa rõ", color: "bg-slate-800 text-slate-300 border-slate-700" };
+  return { label: format || "Chưa rõ", color: "bg-zinc-800 text-zinc-300 border-zinc-700" };
 }
 
 function formatExamTerm(term: string): string {
@@ -94,12 +95,16 @@ function formatExamTerm(term: string): string {
   return term || "Kỳ thi";
 }
 
-export const ExamRadarCard: React.FC<ExamRadarCardProps> = ({ className = "" }) => {
+export const ExamRadarCard: React.FC<ExamRadarCardProps> = ({
+  className = "",
+  onSyncPortal,
+}) => {
   const isWindowVisible = useWindowVisibility();
   const [exams, setExams] = useState<AcademicExamRecord[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [nowTs, setNowTs] = useState<number>(Math.floor(Date.now() / 1000));
   const [expandedExamId, setExpandedExamId] = useState<number | null>(null);
+  const [showManualTools, setShowManualTools] = useState<boolean>(false);
 
   // Modal dán JSON / Script đồng bộ
   const [showImportModal, setShowImportModal] = useState<boolean>(false);
@@ -458,7 +463,10 @@ export const ExamRadarCard: React.FC<ExamRadarCardProps> = ({ className = "" }) 
   // Sao chép Console Script
   const handleCopyScript = async () => {
     try {
-      await navigator.clipboard.writeText(PORTAL_EXAM_SCHEDULE_SYNC_SCRIPT);
+      const token = await getLocalSyncToken();
+      await navigator.clipboard.writeText(
+        withLocalSyncToken(PORTAL_EXAM_SCHEDULE_SYNC_SCRIPT, token)
+      );
       setCopiedScript(true);
       setTimeout(() => setCopiedScript(false), 2500);
     } catch (err) {
@@ -466,27 +474,30 @@ export const ExamRadarCard: React.FC<ExamRadarCardProps> = ({ className = "" }) 
     }
   };
 
+  const handlePrimarySync = () => {
+    if (onSyncPortal) {
+      onSyncPortal();
+    } else {
+      setShowImportModal(true);
+    }
+  };
+
   return (
     <div
-      className={`bg-slate-900/95 border border-slate-800 rounded-xl p-5 shadow-xl text-slate-200 transition-all ${className}`}
+      className={`bg-zinc-900 border border-zinc-800 rounded-xl p-5 text-zinc-200 transition-all ${className}`}
     >
       {/* 1. Header Section */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-800">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-zinc-800">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 shadow-inner">
+          <div className="w-10 h-10 rounded-lg bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400">
             <Calendar className="w-5 h-5" />
           </div>
           <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-base font-bold tracking-tight text-white uppercase">
-                Exam Radar — Lịch Thi & Đếm Ngược
-              </h2>
-              <span className="px-2 py-0.5 text-xs font-semibold rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                v0.7.0
-              </span>
-            </div>
-            <p className="text-xs text-slate-400">
-              Đồng bộ chính thức Portal UIT • Đếm ngược ca thi, phòng thi & checklist phòng thi
+            <h2 className="text-base font-bold tracking-tight text-zinc-100">
+              Lịch Thi &amp; Đếm Ngược
+            </h2>
+            <p className="text-xs text-zinc-400">
+              Tự động cập nhật khi đồng bộ Portal UIT · Đếm ngược ca thi, phòng thi &amp; checklist
             </p>
           </div>
         </div>
@@ -494,62 +505,91 @@ export const ExamRadarCard: React.FC<ExamRadarCardProps> = ({ className = "" }) 
         {/* Action Buttons */}
         <div className="flex flex-wrap items-center gap-2">
           <button
+            type="button"
+            onClick={handlePrimarySync}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white transition cursor-pointer"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            <span>Đồng bộ lịch thi từ Portal</span>
+          </button>
+
+          <button
+            type="button"
             onClick={handleTriggerBriefing}
             disabled={briefingLoading}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition"
-            title="Bắn thử thông báo Windows Native qua khay hệ thống"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700 transition cursor-pointer"
+            title="Gửi thử thông báo nhắc lịch thi"
           >
             <Bell className={`w-3.5 h-3.5 ${briefingLoading ? "animate-spin text-amber-400" : "text-amber-400"}`} />
-            <span>{briefingLoading ? "Đang gửi..." : "Daily Briefing"}</span>
+            <span>{briefingLoading ? "Đang gửi..." : "Nhắc lịch thi"}</span>
           </button>
 
           <button
-            onClick={() => setShowImportModal(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition"
+            type="button"
+            onClick={() => setShowManualTools((prev) => !prev)}
+            className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-lg bg-zinc-950/70 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 border border-zinc-800 transition cursor-pointer"
           >
-            <ClipboardPaste className="w-3.5 h-3.5 text-sky-400" />
-            <span>Nạp Lịch Thi</span>
-          </button>
-
-          <button
-            onClick={handleCopyScript}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 transition"
-            title="Copy script dán vào F12 Console trên trang portal.uit.edu.vn"
-          >
-            {copiedScript ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Code2 className="w-3.5 h-3.5" />}
-            <span>{copiedScript ? "Đã copy Script!" : "Script Portal"}</span>
+            <span>Nhập thủ công (dự phòng)</span>
+            {showManualTools ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
           </button>
         </div>
       </div>
 
+      {showManualTools && (
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-zinc-800 bg-zinc-950/70 px-3 py-2 text-xs">
+          <span className="text-zinc-400">
+            Dùng khi Portal thay đổi cấu trúc và chưa kéo tự động được:
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleCopyScript}
+              className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700 transition cursor-pointer"
+              title="Copy script dán vào F12 Console trên trang portal.uit.edu.vn"
+            >
+              {copiedScript ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Code2 className="w-3.5 h-3.5" />}
+              <span>{copiedScript ? "Đã copy script" : "Copy script Portal"}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowImportModal(true)}
+              className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700 transition cursor-pointer"
+            >
+              <ClipboardPaste className="w-3.5 h-3.5 text-amber-400" />
+              <span>Dán JSON lịch thi</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Thông báo kết quả Daily Briefing */}
       {briefingResult && (
-        <div className="mt-3 p-3 rounded-lg bg-amber-950/40 border border-amber-500/30 text-xs flex items-start gap-2.5 animate-fadeIn">
+        <div className="mt-3 p-3 rounded-lg bg-amber-950/30 border border-amber-500/30 text-xs flex items-start gap-2.5">
           <Bell className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
           <div className="flex-1">
             <div className="font-semibold text-amber-300">{briefingResult.title}</div>
-            <div className="text-slate-300 whitespace-pre-line mt-0.5">{briefingResult.message}</div>
+            <div className="text-zinc-300 whitespace-pre-line mt-0.5">{briefingResult.message}</div>
           </div>
         </div>
       )}
 
       {/* 2. Hero Section: Ca thi sắp tới & Đồng hồ đếm ngược */}
       {loading ? (
-        <div className="py-12 flex flex-col items-center justify-center gap-2 text-slate-400">
+        <div className="py-12 flex flex-col items-center justify-center gap-2 text-zinc-400">
           <RefreshCw className="w-6 h-6 animate-spin text-amber-400" />
-          <span className="text-xs">Đang nạp dữ liệu lịch thi từ SQLite...</span>
+          <span className="text-xs">Đang nạp dữ liệu lịch thi...</span>
         </div>
       ) : nextExam && countdown ? (
         <div className="mt-5 grid grid-cols-1 lg:grid-cols-12 gap-5">
           {/* Cột trái: Countdown & Chi tiết ca thi */}
-          <div className="lg:col-span-7 bg-slate-950/70 border border-slate-800/80 rounded-xl p-5 flex flex-col justify-between">
+          <div className="lg:col-span-7 bg-zinc-950/70 border border-zinc-800/80 rounded-xl p-5 flex flex-col justify-between">
             <div>
               <div className="flex items-center justify-between gap-2 mb-3">
                 <span className="text-xs font-semibold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
+                  <span className="w-2 h-2 rounded-full bg-amber-400" />
                   Ca Thi Sắp Tới
                 </span>
-                <span className="text-xs font-mono text-slate-400">
+                <span className="text-xs font-mono text-zinc-400">
                   {nextExam.weekday}, {nextExam.date_str}
                 </span>
               </div>
@@ -558,9 +598,9 @@ export const ExamRadarCard: React.FC<ExamRadarCardProps> = ({ className = "" }) 
               <h3 className="text-lg font-bold text-white tracking-tight leading-snug">
                 {nextExam.subject_name}
               </h3>
-              <div className="text-xs font-mono text-slate-400 mt-0.5">
-                Mã môn: <span className="text-slate-200 font-semibold">{nextExam.subject_code}</span>
-                {nextExam.section_class_code ? ` • Lớp: ${nextExam.section_class_code}` : ""}
+              <div className="text-xs font-mono text-zinc-400 mt-0.5">
+                Mã môn: <span className="text-zinc-200 font-semibold">{nextExam.subject_code}</span>
+                {nextExam.section_class_code ? ` · Lớp: ${nextExam.section_class_code}` : ""}
               </div>
 
               {/* Badges thông tin: Hình thức, Kỳ thi, Phòng, Ca */}
@@ -574,7 +614,7 @@ export const ExamRadarCard: React.FC<ExamRadarCardProps> = ({ className = "" }) 
                   );
                 })()}
 
-                <span className="px-2 py-0.5 text-xs font-medium rounded bg-slate-800 text-slate-300 border border-slate-700">
+                <span className="px-2 py-0.5 text-xs font-medium rounded bg-zinc-800 text-zinc-300 border border-zinc-700">
                   {formatExamTerm(nextExam.examination)}
                 </span>
 
@@ -583,13 +623,13 @@ export const ExamRadarCard: React.FC<ExamRadarCardProps> = ({ className = "" }) 
                   {nextExam.room || "Phòng chưa xếp"}
                 </span>
 
-                <span className="px-2 py-0.5 text-xs font-medium rounded bg-slate-800 text-slate-300 border border-slate-700 flex items-center gap-1">
-                  <Clock className="w-3 h-3 text-slate-400" />
+                <span className="px-2 py-0.5 text-xs font-medium rounded bg-zinc-800 text-zinc-300 border border-zinc-700 flex items-center gap-1">
+                  <Clock className="w-3 h-3 text-zinc-400" />
                   Ca {nextExam.shift}: {nextExam.start_time} - {nextExam.end_time}
                 </span>
 
                 {nextExam.seat_number && nextExam.seat_number !== "0" && (
-                  <span className="px-2 py-0.5 text-xs font-mono font-semibold rounded bg-indigo-950/60 text-indigo-300 border border-indigo-800">
+                  <span className="px-2 py-0.5 text-xs font-mono font-semibold rounded bg-zinc-800 text-emerald-300 border border-zinc-700">
                     SBD: {nextExam.seat_number}
                   </span>
                 )}
@@ -606,45 +646,45 @@ export const ExamRadarCard: React.FC<ExamRadarCardProps> = ({ className = "" }) 
               )}
             </div>
 
-            {/* Đồng hồ đếm ngược số to chuẩn Dark Grid */}
-            <div className="mt-5 pt-4 border-t border-slate-800/80">
+            {/* Đồng hồ đếm ngược */}
+            <div className="mt-5 pt-4 border-t border-zinc-800/80">
               <div className="grid grid-cols-4 gap-2 text-center">
-                <div className="bg-slate-900/90 border border-slate-800 rounded-lg p-2.5">
+                <div className="bg-zinc-900/90 border border-zinc-800 rounded-lg p-2.5">
                   <div className="text-2xl md:text-3xl font-mono font-black text-white tracking-tight">
                     {String(countdown.days).padStart(2, "0")}
                   </div>
-                  <div className="text-[10px] uppercase font-bold text-slate-400 mt-1">Ngày</div>
+                  <div className="text-[10px] uppercase font-bold text-zinc-400 mt-1">Ngày</div>
                 </div>
 
-                <div className="bg-slate-900/90 border border-slate-800 rounded-lg p-2.5">
+                <div className="bg-zinc-900/90 border border-zinc-800 rounded-lg p-2.5">
                   <div className="text-2xl md:text-3xl font-mono font-black text-amber-400 tracking-tight">
                     {String(countdown.hours).padStart(2, "0")}
                   </div>
-                  <div className="text-[10px] uppercase font-bold text-slate-400 mt-1">Giờ</div>
+                  <div className="text-[10px] uppercase font-bold text-zinc-400 mt-1">Giờ</div>
                 </div>
 
-                <div className="bg-slate-900/90 border border-slate-800 rounded-lg p-2.5">
+                <div className="bg-zinc-900/90 border border-zinc-800 rounded-lg p-2.5">
                   <div className="text-2xl md:text-3xl font-mono font-black text-amber-400 tracking-tight">
                     {String(countdown.minutes).padStart(2, "0")}
                   </div>
-                  <div className="text-[10px] uppercase font-bold text-slate-400 mt-1">Phút</div>
+                  <div className="text-[10px] uppercase font-bold text-zinc-400 mt-1">Phút</div>
                 </div>
 
-                <div className="bg-slate-900/90 border border-slate-800 rounded-lg p-2.5">
+                <div className="bg-zinc-900/90 border border-zinc-800 rounded-lg p-2.5">
                   <div className="text-2xl md:text-3xl font-mono font-black text-emerald-400 tracking-tight">
                     {String(countdown.seconds).padStart(2, "0")}
                   </div>
-                  <div className="text-[10px] uppercase font-bold text-slate-400 mt-1">Giây</div>
+                  <div className="text-[10px] uppercase font-bold text-zinc-400 mt-1">Giây</div>
                 </div>
               </div>
             </div>
           </div>
 
           {/* Cột phải: Checklist đồ dùng phòng thi */}
-          <div className="lg:col-span-5 bg-slate-950/70 border border-slate-800/80 rounded-xl p-5 flex flex-col justify-between">
+          <div className="lg:col-span-5 bg-zinc-950/70 border border-zinc-800/80 rounded-xl p-5 flex flex-col justify-between">
             <div>
               <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-200">
+                <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-zinc-200">
                   <ShieldCheck className="w-4 h-4 text-emerald-400" />
                   <span>Checklist Đồ Dùng Phòng Thi</span>
                 </div>
@@ -665,7 +705,7 @@ export const ExamRadarCard: React.FC<ExamRadarCardProps> = ({ className = "" }) 
                 const checkedCount = items.filter((i) => i.is_checked).length;
                 const pct = items.length > 0 ? Math.round((checkedCount / items.length) * 100) : 0;
                 return (
-                  <div className="w-full bg-slate-800 rounded-full h-1.5 mb-3 overflow-hidden">
+                  <div className="w-full bg-zinc-800 rounded-full h-1.5 mb-3 overflow-hidden">
                     <div
                       className="bg-emerald-500 h-1.5 rounded-full transition-all duration-300"
                       style={{ width: `${pct}%` }}
@@ -682,28 +722,29 @@ export const ExamRadarCard: React.FC<ExamRadarCardProps> = ({ className = "" }) 
                     onClick={() => handleToggleChecklist(nextExam, item.id)}
                     className={`flex items-center justify-between p-2 rounded-lg border text-xs cursor-pointer select-none transition ${
                       item.is_checked
-                        ? "bg-emerald-950/20 border-emerald-900/50 text-slate-300"
-                        : "bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-700"
+                        ? "bg-emerald-950/20 border-emerald-900/50 text-zinc-300"
+                        : "bg-zinc-900 border-zinc-800 text-zinc-300 hover:border-zinc-700"
                     }`}
                   >
                     <div className="flex items-center gap-2">
                       {item.is_checked ? (
                         <CheckSquare className="w-4 h-4 text-emerald-400 shrink-0" />
                       ) : (
-                        <Square className="w-4 h-4 text-slate-500 shrink-0" />
+                        <Square className="w-4 h-4 text-zinc-500 shrink-0" />
                       )}
-                      <span className={item.is_checked ? "line-through text-slate-500" : "font-medium text-slate-200"}>
+                      <span className={item.is_checked ? "line-through text-zinc-500" : "font-medium text-zinc-200"}>
                         {item.label}
                       </span>
                     </div>
 
                     {item.id.startsWith("custom_") && (
                       <button
+                        type="button"
                         onClick={(e) => {
                           e.stopPropagation();
                           handleRemoveChecklistItem(nextExam, item.id);
                         }}
-                        className="text-slate-500 hover:text-rose-400 p-0.5"
+                        className="text-zinc-500 hover:text-rose-400 p-0.5"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -714,31 +755,33 @@ export const ExamRadarCard: React.FC<ExamRadarCardProps> = ({ className = "" }) 
             </div>
 
             {/* Thêm đồ dùng mới */}
-            <div className="mt-4 pt-3 border-t border-slate-800/80">
+            <div className="mt-4 pt-3 border-t border-zinc-800/80">
               <AddChecklistInput onAdd={(label) => handleAddChecklistItem(nextExam, label)} />
             </div>
           </div>
         </div>
       ) : (
         /* Empty State */
-        <div className="mt-5 py-10 px-6 rounded-xl bg-slate-950/60 border border-slate-800 text-center">
-          <div className="w-12 h-12 mx-auto rounded-full bg-slate-800 flex items-center justify-center text-slate-400 mb-3">
-            <Sparkles className="w-6 h-6 text-amber-400" />
+        <div className="mt-5 py-8 px-6 rounded-xl bg-zinc-950/60 border border-zinc-800 text-center">
+          <div className="w-11 h-11 mx-auto rounded-full bg-zinc-800 flex items-center justify-center text-emerald-400 mb-3">
+            <Calendar className="w-5 h-5" />
           </div>
-          <h3 className="text-sm font-bold text-white uppercase tracking-wider">
-            {exams.length > 0 ? "🎉 Đã Hoàn Thành Tất Cả Ca Thi!" : "Chưa Có Lịch Thi Nào"}
+          <h3 className="text-sm font-bold text-zinc-100">
+            {exams.length > 0 ? "Đã hoàn thành tất cả ca thi" : "Chưa có lịch thi nào"}
           </h3>
-          <p className="text-xs text-slate-400 max-w-md mx-auto mt-1">
+          <p className="text-xs text-zinc-400 max-w-md mx-auto mt-1">
             {exams.length > 0
-              ? "Tất cả các môn thi trong danh sách đã diễn ra. Chúc mừng bạn đã hoàn thành kỳ thi!"
-              : "Nhấn 'Script Portal' rồi dán vào Console trên Portal UIT, hoặc bấm 'Nạp Lịch Thi' để dán JSON."}
+              ? "Tất cả môn thi trong danh sách đã kết thúc. Bấm đồng bộ Portal khi trường công bố lịch thi kỳ mới."
+              : "Lịch thi được kéo tự động từ Portal UIT khi bạn đồng bộ học vụ."}
           </p>
           <div className="flex justify-center gap-2 mt-4">
             <button
-              onClick={() => setShowImportModal(true)}
-              className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 transition"
+              type="button"
+              onClick={handlePrimarySync}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white transition cursor-pointer"
             >
-              Nạp dữ liệu lịch thi
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>Đồng bộ lịch thi từ Portal</span>
             </button>
           </div>
         </div>
@@ -746,12 +789,12 @@ export const ExamRadarCard: React.FC<ExamRadarCardProps> = ({ className = "" }) 
 
       {/* 3. Danh sách toàn bộ ca thi (Timeline Table) */}
       {exams.length > 0 && (
-        <div className="mt-6 pt-4 border-t border-slate-800">
+        <div className="mt-6 pt-4 border-t border-zinc-800">
           <div className="flex items-center justify-between mb-3">
-            <div className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-2">
+            <div className="text-xs font-bold uppercase tracking-wider text-zinc-300 flex items-center gap-2">
               <span>Toàn Bộ Ca Thi Kỳ Này ({exams.length} môn)</span>
-              <span className="px-2 py-0.5 text-[10px] rounded bg-slate-800 text-slate-400 border border-slate-700">
-                {upcomingExams.length} sắp thi • {pastExams.length} đã thi
+              <span className="px-2 py-0.5 text-[10px] rounded bg-zinc-800 text-zinc-400 border border-zinc-700">
+                {upcomingExams.length} sắp thi · {pastExams.length} đã thi
               </span>
             </div>
           </div>
@@ -769,8 +812,8 @@ export const ExamRadarCard: React.FC<ExamRadarCardProps> = ({ className = "" }) 
                   key={exam.id}
                   className={`rounded-lg border transition ${
                     isUpcoming
-                      ? "bg-slate-950/60 border-slate-800 hover:border-slate-700"
-                      : "bg-slate-950/30 border-slate-800/50 opacity-70"
+                      ? "bg-zinc-950/60 border-zinc-800 hover:border-zinc-700"
+                      : "bg-zinc-950/30 border-zinc-800/50 opacity-75"
                   }`}
                 >
                   <div
@@ -780,28 +823,28 @@ export const ExamRadarCard: React.FC<ExamRadarCardProps> = ({ className = "" }) 
                     <div className="flex items-start md:items-center gap-3">
                       {/* Cột ngày giờ */}
                       <div className="min-w-28 text-left">
-                        <div className="text-xs font-bold font-mono text-white">{exam.date_str}</div>
-                        <div className="text-[11px] text-slate-400">
-                          {exam.weekday} • Ca {exam.shift} ({exam.start_time})
+                        <div className="text-xs font-bold font-mono text-zinc-100">{exam.date_str}</div>
+                        <div className="text-[11px] text-zinc-400">
+                          {exam.weekday} · Ca {exam.shift} ({exam.start_time})
                         </div>
                       </div>
 
                       {/* Tên môn học */}
                       <div>
                         <div className="flex items-center gap-2">
-                          <span className="text-xs font-bold text-white">{exam.subject_name}</span>
-                          <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-slate-800 text-slate-400">
+                          <span className="text-xs font-bold text-zinc-100">{exam.subject_name}</span>
+                          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400">
                             {exam.subject_code}
                           </span>
                         </div>
-                        <div className="text-[11px] text-slate-400 flex items-center gap-2 mt-0.5">
+                        <div className="text-[11px] text-zinc-400 flex items-center gap-2 mt-0.5">
                           <span>{formatExamTerm(exam.examination)}</span>
-                          <span>•</span>
+                          <span>·</span>
                           <span className="font-semibold text-amber-300">Phòng {exam.room}</span>
                           {exam.seat_number && exam.seat_number !== "0" && (
                             <>
-                              <span>•</span>
-                              <span className="font-mono text-indigo-300">SBD: {exam.seat_number}</span>
+                              <span>·</span>
+                              <span className="font-mono text-emerald-300">SBD: {exam.seat_number}</span>
                             </>
                           )}
                         </div>
@@ -818,7 +861,7 @@ export const ExamRadarCard: React.FC<ExamRadarCardProps> = ({ className = "" }) 
                         className={`text-xs font-mono px-2 py-0.5 rounded border ${
                           checkedCount === checklistItems.length && checklistItems.length > 0
                             ? "bg-emerald-950/50 text-emerald-300 border-emerald-800"
-                            : "bg-slate-800 text-slate-400 border-slate-700"
+                            : "bg-zinc-800 text-zinc-400 border-zinc-700"
                         }`}
                       >
                         ✓ {checkedCount}/{checklistItems.length}
@@ -827,21 +870,21 @@ export const ExamRadarCard: React.FC<ExamRadarCardProps> = ({ className = "" }) 
                       {isUpcoming ? (
                         <span className="text-[11px] font-semibold text-amber-400">Sắp thi</span>
                       ) : (
-                        <span className="text-[11px] text-slate-500">Đã thi</span>
+                        <span className="text-[11px] text-zinc-500">Đã thi</span>
                       )}
 
                       {isExpanded ? (
-                        <ChevronUp className="w-4 h-4 text-slate-400" />
+                        <ChevronUp className="w-4 h-4 text-zinc-400" />
                       ) : (
-                        <ChevronDown className="w-4 h-4 text-slate-400" />
+                        <ChevronDown className="w-4 h-4 text-zinc-400" />
                       )}
                     </div>
                   </div>
 
                   {/* Expanded Checklist Sub-drawer */}
                   {isExpanded && (
-                    <div className="px-4 pb-4 pt-1 border-t border-slate-800/80 bg-slate-950/80">
-                      <div className="text-xs font-semibold text-slate-300 mb-2 flex items-center gap-1.5">
+                    <div className="px-4 pb-4 pt-1 border-t border-zinc-800/80 bg-zinc-950/80">
+                      <div className="text-xs font-semibold text-zinc-300 mb-2 flex items-center gap-1.5">
                         <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
                         <span>Checklist đồ dùng cho môn {exam.subject_code}</span>
                       </div>
@@ -853,28 +896,29 @@ export const ExamRadarCard: React.FC<ExamRadarCardProps> = ({ className = "" }) 
                             onClick={() => handleToggleChecklist(exam, item.id)}
                             className={`flex items-center justify-between p-2 rounded border text-xs cursor-pointer select-none ${
                               item.is_checked
-                                ? "bg-emerald-950/20 border-emerald-900/40 text-slate-300"
-                                : "bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-700"
+                                ? "bg-emerald-950/20 border-emerald-900/40 text-zinc-300"
+                                : "bg-zinc-900 border-zinc-800 text-zinc-300 hover:border-zinc-700"
                             }`}
                           >
                             <div className="flex items-center gap-2">
                               {item.is_checked ? (
                                 <CheckSquare className="w-4 h-4 text-emerald-400 shrink-0" />
                               ) : (
-                                <Square className="w-4 h-4 text-slate-500 shrink-0" />
+                                <Square className="w-4 h-4 text-zinc-500 shrink-0" />
                               )}
-                              <span className={item.is_checked ? "line-through text-slate-500" : ""}>
+                              <span className={item.is_checked ? "line-through text-zinc-500" : ""}>
                                 {item.label}
                               </span>
                             </div>
 
                             {item.id.startsWith("custom_") && (
                               <button
+                                type="button"
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   handleRemoveChecklistItem(exam, item.id);
                                 }}
-                                className="text-slate-500 hover:text-rose-400"
+                                className="text-zinc-500 hover:text-rose-400"
                               >
                                 <Trash2 className="w-3 h-3" />
                               </button>
@@ -895,24 +939,24 @@ export const ExamRadarCard: React.FC<ExamRadarCardProps> = ({ className = "" }) 
 
       {/* 4. Modal nạp JSON / Dán lịch thi */}
       {showImportModal && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-xl max-w-xl w-full p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <div className="flex items-center gap-2 text-white font-bold text-base">
+        <div className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-xl max-w-xl w-full p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+              <div className="flex items-center gap-2 text-zinc-100 font-bold text-base">
                 <ClipboardPaste className="w-5 h-5 text-amber-400" />
-                <span>Nạp Lịch Thi Chính Thức Từ Portal</span>
+                <span>Nhập Lịch Thi Thủ Công (Dự Phòng)</span>
               </div>
               <button
+                type="button"
                 onClick={() => setShowImportModal(false)}
-                className="text-slate-400 hover:text-white text-sm"
+                className="text-zinc-400 hover:text-white text-sm"
               >
                 ✕
               </button>
             </div>
 
-            <p className="text-xs text-slate-300">
-              Dán mảng JSON ca thi hoặc đối tượng <code className="bg-slate-800 px-1 py-0.5 rounded text-amber-300">&#123; "items": [...] &#125;</code> từ API{" "}
-              <span className="font-mono text-sky-400">https://portal.uit.edu.vn/api/sv/exam-schedule</span>.
+            <p className="text-xs text-zinc-300">
+              Dán mảng JSON ca thi hoặc đối tượng <code className="bg-zinc-800 px-1 py-0.5 rounded text-amber-300">&#123; "items": [...] &#125;</code> từ Portal UIT.
             </p>
 
             <textarea
@@ -920,7 +964,7 @@ export const ExamRadarCard: React.FC<ExamRadarCardProps> = ({ className = "" }) 
               onChange={(e) => setJsonInput(e.target.value)}
               placeholder="Dán JSON lịch thi vào đây..."
               rows={8}
-              className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 font-mono text-xs text-slate-200 focus:outline-none focus:border-amber-500"
+              className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-3 font-mono text-xs text-zinc-200 focus:outline-none focus:border-emerald-500"
             />
 
             {importStatus && (
@@ -937,7 +981,7 @@ export const ExamRadarCard: React.FC<ExamRadarCardProps> = ({ className = "" }) 
 
             <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
               <div className="flex items-center gap-3">
-                <span className="text-[11px] text-slate-400">Dữ liệu mẫu UIT:</span>
+                <span className="text-[11px] text-zinc-400">Dữ liệu mẫu:</span>
                 <button
                   type="button"
                   onClick={handleLoadMidtermSample}
@@ -945,7 +989,7 @@ export const ExamRadarCard: React.FC<ExamRadarCardProps> = ({ className = "" }) 
                 >
                   Giữa kỳ (3 môn)
                 </button>
-                <span className="text-slate-600">•</span>
+                <span className="text-zinc-600">·</span>
                 <button
                   type="button"
                   onClick={handleLoadFinaltermSample}
@@ -959,16 +1003,16 @@ export const ExamRadarCard: React.FC<ExamRadarCardProps> = ({ className = "" }) 
                 <button
                   type="button"
                   onClick={() => setShowImportModal(false)}
-                  className="px-3 py-1.5 text-xs font-medium rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
+                  className="px-3 py-1.5 text-xs font-medium rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 transition"
                 >
                   Đóng
                 </button>
                 <button
                   type="button"
                   onClick={handleImportJson}
-                  className="px-4 py-1.5 text-xs font-bold rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 transition"
+                  className="px-4 py-1.5 text-xs font-bold rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white transition"
                 >
-                  Lưu Lịch Thi
+                  Lưu lịch thi
                 </button>
               </div>
             </div>

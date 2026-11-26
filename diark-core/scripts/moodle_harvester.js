@@ -4,6 +4,11 @@
     window.__DIARK_MOODLE_HARVESTER_ACTIVE__ = true;
 
     const LOCAL_SERVER_URL = "http://127.0.0.1:3030/api/v1/sync/moodle";
+    const SYNC_TOKEN = window.__DIARK_SYNC_TOKEN__ || "";
+    const LOCAL_JSON_HEADERS = {
+        "Content-Type": "application/json",
+        "X-Diark-Sync-Token": SYNC_TOKEN
+    };
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
     // --- 1. UI PROGRESS HUD ---
@@ -195,6 +200,43 @@
         return 0;
     }
 
+    function inferMoodleTerm(shortname, fullname) {
+        const src = `${shortname || ""} ${fullname || ""}`;
+        const m = src.match(/\.([A-Z])(\d)\d*/i);
+        if (m) {
+            const letter = m[1].toUpperCase().charCodeAt(0);
+            const semDigit = parseInt(m[2], 10);
+            // Quy ước UIT: Q = 2025-2026, R = 2026-2027, S = 2027-2028...
+            const startYear = 2025 + (letter - "Q".charCodeAt(0));
+            if (startYear >= 2020 && startYear <= 2040 && (semDigit === 1 || semDigit === 2 || semDigit === 3)) {
+                return `HK${semDigit} ${startYear}-${startYear + 1}`;
+            }
+        }
+        const now = new Date();
+        const y = now.getFullYear();
+        const month = now.getMonth() + 1;
+        if (month >= 9 || month <= 1) {
+            const sy = month >= 9 ? y : y - 1;
+            return `HK1 ${sy}-${sy + 1}`;
+        }
+        if (month >= 2 && month <= 6) {
+            return `HK2 ${y - 1}-${y}`;
+        }
+        return `HK3 ${y - 1}-${y}`;
+    }
+
+    function extractUserId() {
+        if (window.M && window.M.cfg && typeof window.M.cfg.userId === "number" && window.M.cfg.userId > 1) {
+            return window.M.cfg.userId;
+        }
+        const el = document.querySelector("[data-userid]");
+        if (el) {
+            const id = parseInt(el.getAttribute("data-userid") || "0", 10);
+            if (id > 1) return id;
+        }
+        return 0;
+    }
+
     // --- 3. HARVESTER EXECUTION ---
     async function runAutoHarvester(sesskey) {
         renderBanner(true, "Đang kết nối API Moodle UIT...", 15);
@@ -224,7 +266,7 @@
                     course_id: c.id,
                     course_code: c.shortname || c.idnumber || c.fullname,
                     fullname: c.fullname,
-                    term: "HK2 2025-2026",
+                    term: inferMoodleTerm(c.shortname || c.idnumber || "", c.fullname || ""),
                     instructor_name: "",
                     instructor_mail: "",
                     instructor_phone: "",
@@ -250,7 +292,7 @@
                                     course_id: cid,
                                     course_code: title.split(' - ')[0]?.trim() || `COURSE_${cid}`,
                                     fullname: title,
-                                    term: "HK2 2025-2026",
+                                    term: inferMoodleTerm(title, title),
                                     instructor_name: "",
                                     instructor_mail: "",
                                     instructor_phone: "",
@@ -271,7 +313,7 @@
                 try {
                     await fetch(LOCAL_SERVER_URL, {
                         method: "POST",
-                        headers: { "Content-Type": "application/json" },
+                        headers: LOCAL_JSON_HEADERS,
                         body: JSON.stringify({
                             courses: enrolledCourses,
                             tasks: [],
@@ -528,12 +570,28 @@
                         dueTs = parseMoodleDateString(dateEl.textContent);
                     }
 
-                    const badgeEl = act.querySelector('.activitybadge, [data-region="completion-info"]');
-                    const badgeText = badgeEl ? badgeEl.textContent.trim() : '';
-                    const isDone = badgeText.toLowerCase().includes('đã nộp') || 
-                                   badgeText.toLowerCase().includes('hoàn thành') || 
-                                   badgeText.toLowerCase().includes('done') || 
-                                   badgeText.toLowerCase().includes('submitted');
+                    const completionContainer = act.querySelector(
+                        '.activitybadge, [data-region="completion-info"], .automatic-completion-conditions, .activity-completion, .badge-success, .alert-success'
+                    );
+                    const undoBtn = act.querySelector('button[data-toggletype="manual:undo"], button[data-action="toggle-manual-completion"][data-toggletype*="undo"]');
+                    const completionText = (
+                        (completionContainer ? completionContainer.textContent : '') + ' ' +
+                        (act.querySelector('.activity-information')?.textContent || '')
+                    ).trim();
+                    const compLower = completionText.toLowerCase();
+                    const isDone = Boolean(undoBtn) ||
+                        compLower.includes('đã nộp') ||
+                        compLower.includes('hoàn thành') ||
+                        compLower.includes('xong:') ||
+                        compLower.includes('done:') ||
+                        compLower.includes('done ') ||
+                        compLower === 'done' ||
+                        compLower.includes('submitted') ||
+                        compLower.includes('completed') ||
+                        compLower.includes('graded') ||
+                        compLower.includes('nhận được điểm') ||
+                        compLower.includes('receive a grade');
+                    const badgeText = completionText;
 
                     let templateFileUrl = '';
                     const desc = act.querySelector('.activity-description');
@@ -651,7 +709,7 @@
             try {
                 await fetch(LOCAL_SERVER_URL, {
                     method: "POST",
-                    headers: { "Content-Type": "application/json" },
+                    headers: LOCAL_JSON_HEADERS,
                     body: JSON.stringify({
                         courses: [course],
                         tasks: courseTasks,
@@ -672,17 +730,134 @@
             await Promise.all(batch.map(course => harvestSingleCourse(course, sesskey, taskMap, allMaterials, onCourseSynced)));
         }
 
+        // Bước 3.2: Xác minh trực tiếp trạng thái nộp bài trên trang chi tiết (tránh Moodle tắt Activity Completion)
+        const unconfirmedTasks = Array.from(taskMap.values())
+            .filter(t => t.due_date > 0 && !t.is_submitted && t.task_url && t.task_url.includes('/mod/'))
+            .sort((a, b) => b.due_date - a.due_date)
+            .slice(0, 25);
+
+        const verifiedSubmittedTasks = [];
+        const VERIFY_BATCH = 4;
+        for (let i = 0; i < unconfirmedTasks.length; i += VERIFY_BATCH) {
+            const chunk = unconfirmedTasks.slice(i, i + VERIFY_BATCH);
+            await Promise.all(chunk.map(async (task) => {
+                try {
+                    const resp = await fetch(task.task_url, { credentials: "include" });
+                    if (!resp.ok) return;
+                    const html = await resp.text();
+                    const doc = new DOMParser().parseFromString(html, "text/html");
+                    let confirmed = false;
+                    let statusText = task.submission_status;
+
+                    if (task.task_type === "quiz") {
+                        const attemptRows = doc.querySelectorAll('.quizattemptsummary tbody tr');
+                        const summaryText = (doc.querySelector('.quizattemptsummary')?.textContent || doc.body?.textContent || '').toLowerCase();
+                        if (
+                            (attemptRows.length > 0 && (summaryText.includes('đã hoàn thành') || summaryText.includes('finished'))) ||
+                            summaryText.includes('điểm cao nhất') ||
+                            summaryText.includes('highest grade') ||
+                            summaryText.includes('trạng tháiđã hoàn thành')
+                        ) {
+                            confirmed = true;
+                            statusText = 'Đã hoàn thành';
+                        }
+                    } else {
+                        const subCell = doc.querySelector('.submissionstatussubmitted, td.submissionstatussubmitted');
+                        const tableText = (doc.querySelector('.submissionstatustable, [role="main"]')?.textContent || '').toLowerCase();
+                        if (
+                            subCell ||
+                            tableText.includes('đã nộp để chấm điểm') ||
+                            tableText.includes('submitted for grading') ||
+                            tableText.includes('đã chấm điểm') ||
+                            tableText.includes('not marked') ||
+                            tableText.includes('chưa được chấm')
+                        ) {
+                            confirmed = true;
+                            statusText = 'Đã nộp';
+                        }
+                    }
+
+                    if (confirmed) {
+                        task.is_submitted = true;
+                        task.submission_status = statusText;
+                        verifiedSubmittedTasks.push(task);
+                    }
+                } catch (_) {}
+            }));
+        }
+
+        // Bước 3.5: Thu thập bảng điểm quá trình & thông báo Moodle
+        let harvestedGrades = [];
+        let harvestedNotifications = [];
+        try {
+            const gradeResp = await fetch("https://courses.uit.edu.vn/grade/report/overview/index.php", { credentials: "include" });
+            if (gradeResp.ok) {
+                const gradeHtml = await gradeResp.text();
+                const gradeDoc = new DOMParser().parseFromString(gradeHtml, "text/html");
+                const rows = gradeDoc.querySelectorAll("#overview-grade tbody tr");
+                for (const row of rows) {
+                    const link = row.querySelector("td.c0 a[href*='id=']");
+                    const scoreCell = row.querySelector("td.c1");
+                    if (!link) continue;
+                    const idMatch = (link.getAttribute("href") || "").match(/[?&]id=(\d+)/);
+                    const cid = idMatch ? parseInt(idMatch[1], 10) : 0;
+                    const cName = link.textContent?.trim() || "";
+                    const rawScore = scoreCell?.textContent?.trim() || "-";
+                    const parsedNum = parseFloat(rawScore.replace(",", "."));
+                    if (cid > 0 && cName) {
+                        harvestedGrades.push({
+                            course_id: cid,
+                            course_name: cName,
+                            grade_text: rawScore,
+                            grade_numeric: isNaN(parsedNum) ? null : parsedNum,
+                            updated_at: Math.floor(Date.now() / 1000)
+                        });
+                    }
+                }
+            }
+        } catch (_) {}
+
+        try {
+            const uid = extractUserId();
+            if (uid > 1) {
+                const notifUrl = `https://courses.uit.edu.vn/lib/ajax/service.php?sesskey=${sesskey}&info=message_popup_get_popup_notifications`;
+                const notifResp = await fetch(notifUrl, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify([{
+                        index: 0,
+                        methodname: "message_popup_get_popup_notifications",
+                        args: { useridto: uid, newestfirst: true, limit: 20, offset: 0 }
+                    }])
+                });
+                if (notifResp.ok) {
+                    const notifJson = await notifResp.json();
+                    const items = notifJson?.[0]?.data?.notifications || [];
+                    harvestedNotifications = items.map(n => ({
+                        id: n.id,
+                        subject: n.subject || "",
+                        shortened_subject: n.shortenedsubject || "",
+                        full_message: n.text || n.fullmessage || "",
+                        is_read: Boolean(n.read),
+                        created_at: n.timecreated || Math.floor(Date.now() / 1000)
+                    }));
+                }
+            }
+        } catch (_) {}
+
         // Bước 4: Chốt hạ hoàn tất và gửi tín hiệu is_final = true
         renderBanner(true, `✅ Hoàn tất! Đã đồng bộ ${enrolledCourses.length} môn học Moodle. Đang đóng cửa sổ...`, 100);
 
         try {
             await fetch(LOCAL_SERVER_URL, {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: LOCAL_JSON_HEADERS,
                 body: JSON.stringify({
                     courses: [],
-                    tasks: [],
+                    tasks: verifiedSubmittedTasks,
                     materials: [],
+                    grades: harvestedGrades,
+                    notifications: harvestedNotifications,
                     is_final: true,
                     current_course: "Hoàn tất đồng bộ",
                     progress_current: totalCourses,

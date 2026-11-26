@@ -1405,11 +1405,18 @@ pub async fn launch_portal_sso_sync(app: AppHandle) -> Result<(), String> {
     let policy = RemoteOriginPolicy::for_portal();
     let session_id_for_nav = session_id.clone();
 
+    let sso_autofill_script = crate::commands::portal_extra::build_sso_autofill_script(&app.state::<SharedDb>());
+    let sync_token_script = format!(
+        "window.__DIARK_SYNC_TOKEN__ = {};",
+        serde_json::to_string(crate::server::get_sync_token()).unwrap_or_else(|_| "\"\"".to_string())
+    );
     let window = WebviewWindowBuilder::new(&app, &window_label, auth_url)
         .title("Đăng nhập Cổng Thông Tin UIT")
         .inner_size(960.0, 720.0)
         .resizable(true)
         .always_on_top(true)
+        .initialization_script(&sync_token_script)
+        .initialization_script(&sso_autofill_script)
         .initialization_script(PORTAL_HARVESTER_SCRIPT)
         .on_navigation(move |url| {
             match classify_remote_navigation(url, &policy) {
@@ -1573,11 +1580,18 @@ pub async fn launch_wecode_sso_sync(app: AppHandle) -> Result<(), String> {
     let policy = RemoteOriginPolicy::for_wecode();
     let session_id_for_nav = session_id.clone();
 
+    let sso_autofill_script = crate::commands::portal_extra::build_sso_autofill_script(&app.state::<SharedDb>());
+    let sync_token_script = format!(
+        "window.__DIARK_SYNC_TOKEN__ = {};",
+        serde_json::to_string(crate::server::get_sync_token()).unwrap_or_else(|_| "\"\"".to_string())
+    );
     let window = WebviewWindowBuilder::new(&app, "wecode-sso-login", auth_url)
         .title("Đồng bộ Wecode Submissions")
         .inner_size(900.0, 750.0)
         .resizable(true)
         .always_on_top(true)
+        .initialization_script(&sync_token_script)
+        .initialization_script(&sso_autofill_script)
         .initialization_script(WECODE_HARVESTER_SCRIPT)
         .on_navigation(move |url| {
             match classify_remote_navigation(url, &policy) {
@@ -1793,9 +1807,20 @@ pub async fn launch_portal_silent_sync(app: AppHandle) -> Result<(), String> {
     let policy = RemoteOriginPolicy::for_portal();
     let session_id_for_nav = session_id.clone();
 
+    let sso_autofill_script = crate::commands::portal_extra::build_sso_autofill_script(&app.state::<SharedDb>());
+    let sync_token_script = format!(
+        "window.__DIARK_SYNC_TOKEN__ = {};",
+        serde_json::to_string(crate::server::get_sync_token()).unwrap_or_else(|_| "\"\"".to_string())
+    );
+    let allow_sso_autologin = crate::commands::portal_extra::has_saved_sso_autologin(&app.state::<SharedDb>());
+    let login_hits = Arc::new(AtomicU8::new(0));
+    let login_hits_nav = Arc::clone(&login_hits);
+
     let window = WebviewWindowBuilder::new(&app, &window_label, auth_url)
         .title("Diark Portal Silent Sync")
         .visible(false)
+        .initialization_script(&sync_token_script)
+        .initialization_script(&sso_autofill_script)
         .initialization_script(PORTAL_HARVESTER_SCRIPT)
         .on_navigation(move |url| {
             match classify_remote_navigation(url, &policy) {
@@ -1892,6 +1917,9 @@ pub async fn launch_portal_silent_sync(app: AppHandle) -> Result<(), String> {
                         || url_str.contains("/dang-nhap")
                         || (url_str.contains("microsoft") && !url_str.contains("diark-sso"))
                     {
+                        if allow_sso_autologin && !url_str.contains("microsoft") && login_hits_nav.fetch_add(1, Ordering::Relaxed) < 2 {
+                            return true;
+                        }
                         let _ = cleanup_sso_session(&app_nav, &session_id_for_nav, CleanupReason::AuthExpired);
                         return false;
                     }
@@ -1967,9 +1995,20 @@ pub async fn launch_wecode_silent_sync(app: AppHandle) -> Result<(), String> {
     let policy = RemoteOriginPolicy::for_wecode();
     let session_id_for_nav = session_id.clone();
 
+    let sso_autofill_script = crate::commands::portal_extra::build_sso_autofill_script(&app.state::<SharedDb>());
+    let sync_token_script = format!(
+        "window.__DIARK_SYNC_TOKEN__ = {};",
+        serde_json::to_string(crate::server::get_sync_token()).unwrap_or_else(|_| "\"\"".to_string())
+    );
+    let allow_sso_autologin = crate::commands::portal_extra::has_saved_sso_autologin(&app.state::<SharedDb>());
+    let login_hits = Arc::new(AtomicU8::new(0));
+    let login_hits_nav = Arc::clone(&login_hits);
+
     let window = WebviewWindowBuilder::new(&app, &window_label, auth_url)
         .title("Diark Wecode Silent Sync")
         .visible(false)
+        .initialization_script(&sync_token_script)
+        .initialization_script(&sso_autofill_script)
         .initialization_script(WECODE_HARVESTER_SCRIPT)
         .on_navigation(move |url| {
             match classify_remote_navigation(url, &policy) {
@@ -2047,6 +2086,9 @@ pub async fn launch_wecode_silent_sync(app: AppHandle) -> Result<(), String> {
                     let url_str = url.as_str();
                     // Detect expired auth: redirecting to login page
                     if url_str.contains(WECODE_LOGIN_MARKER) || (url_str.contains("/login") && !url_str.contains("diark-sso")) {
+                        if allow_sso_autologin && login_hits_nav.fetch_add(1, Ordering::Relaxed) < 2 {
+                            return true;
+                        }
                         let _ = cleanup_sso_session(&app_nav, &session_id_for_nav, CleanupReason::AuthExpired);
                         return false;
                     }
@@ -2136,9 +2178,20 @@ pub async fn launch_moodle_silent_sync(app: AppHandle) -> Result<(), String> {
     let policy = RemoteOriginPolicy::for_moodle();
     let session_id_for_nav = session_id.clone();
 
+    let sso_autofill_script = crate::commands::portal_extra::build_sso_autofill_script(&app.state::<SharedDb>());
+    let sync_token_script = format!(
+        "window.__DIARK_SYNC_TOKEN__ = {};",
+        serde_json::to_string(crate::server::get_sync_token()).unwrap_or_else(|_| "\"\"".to_string())
+    );
+    let allow_sso_autologin = crate::commands::portal_extra::has_saved_sso_autologin(&app.state::<SharedDb>());
+    let login_hits = Arc::new(AtomicU8::new(0));
+    let login_hits_nav = Arc::clone(&login_hits);
+
     let window = WebviewWindowBuilder::new(&app, &window_label, auth_url)
         .title("Diark Moodle Silent Sync")
         .visible(false)
+        .initialization_script(&sync_token_script)
+        .initialization_script(&sso_autofill_script)
         .initialization_script(MOODLE_HARVESTER_SCRIPT)
         .on_navigation(move |url| {
             match classify_remote_navigation(url, &policy) {
@@ -2187,6 +2240,9 @@ pub async fn launch_moodle_silent_sync(app: AppHandle) -> Result<(), String> {
                         || (url_str.contains("/login") && !url_str.contains("diark-sso"))
                         || url_str.contains("/dang-nhap")
                     {
+                        if allow_sso_autologin && !url_str.contains("microsoft") && login_hits_nav.fetch_add(1, Ordering::Relaxed) < 3 {
+                            return true;
+                        }
                         let _ = cleanup_sso_session(&app_nav, &session_id_for_nav, CleanupReason::AuthExpired);
                         return false;
                     }
@@ -2248,11 +2304,18 @@ pub async fn launch_moodle_sso_sync(app: AppHandle) -> Result<(), String> {
     let policy = RemoteOriginPolicy::for_moodle();
     let session_id_for_nav = session_id.clone();
 
+    let sso_autofill_script = crate::commands::portal_extra::build_sso_autofill_script(&app.state::<SharedDb>());
+    let sync_token_script = format!(
+        "window.__DIARK_SYNC_TOKEN__ = {};",
+        serde_json::to_string(crate::server::get_sync_token()).unwrap_or_else(|_| "\"\"".to_string())
+    );
     let window = WebviewWindowBuilder::new(&app, "moodle-sso-login", auth_url)
         .title("Đồng bộ Courses UIT (Moodle)")
         .inner_size(900.0, 750.0)
         .resizable(true)
         .always_on_top(true)
+        .initialization_script(&sync_token_script)
+        .initialization_script(&sso_autofill_script)
         .initialization_script(MOODLE_HARVESTER_SCRIPT)
         .on_navigation(move |url| {
             match classify_remote_navigation(url, &policy) {

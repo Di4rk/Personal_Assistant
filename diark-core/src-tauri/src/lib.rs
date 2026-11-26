@@ -73,6 +73,32 @@ macro_rules! registered_commands {
             commands::academic::get_sync_token,
             commands::academic::get_student_profile,
             commands::academic::ingest_portal_sync_payload_json,
+            // Portal Extra & Google Calendar ICS
+            commands::portal_extra::get_portal_registered_classes,
+            commands::portal_extra::get_portal_timetable,
+            commands::portal_extra::get_portal_tuition,
+            commands::portal_extra::get_portal_certificates,
+            commands::portal_extra::get_portal_class_activities,
+            commands::portal_extra::get_moodle_grades,
+            commands::portal_extra::get_moodle_notifications,
+            commands::portal_extra::list_google_calendars,
+            commands::portal_extra::add_google_calendar,
+            commands::portal_extra::remove_google_calendar,
+            commands::portal_extra::toggle_google_calendar,
+            commands::portal_extra::sync_google_calendars,
+            commands::portal_extra::get_calendar_events,
+            commands::portal_extra::export_uit_schedule_ics,
+            commands::portal_extra::get_google_oauth_status,
+            commands::portal_extra::save_google_oauth_client_config,
+            commands::portal_extra::connect_google_calendar_oauth,
+            commands::portal_extra::disconnect_google_calendar_oauth,
+            commands::portal_extra::create_google_calendar_event,
+            commands::portal_extra::delete_google_calendar_event,
+            commands::portal_extra::push_uit_schedule_to_google,
+            commands::portal_extra::get_sso_credentials_status,
+            commands::portal_extra::save_sso_credentials,
+            commands::portal_extra::clear_sso_credentials,
+            commands::portal_extra::get_local_sync_token,
             // Portal In-App SSO
             commands::portal_auth::launch_portal_sso_sync,
             commands::portal_auth::launch_wecode_sso_sync,
@@ -94,6 +120,7 @@ macro_rules! registered_commands {
             commands::moodle::open_local_material,
             commands::moodle::ingest_moodle_sync_payload_json,
             commands::moodle::update_moodle_course_instructor,
+            commands::moodle::mark_moodle_task_submitted,
             commands::workspace::ingest_moodle_course_html,
             commands::workspace::get_upcoming_deadlines,
             commands::workspace::mark_deadline_submitted,
@@ -118,6 +145,11 @@ macro_rules! registered_commands {
             commands::vault::stop_vault_watcher,
             commands::vault::get_vault_watcher_status,
             commands::vault::archive_semester,
+            commands::vault::ensure_default_vault_path,
+            commands::vault::list_vault_notes,
+            commands::vault::read_vault_note,
+            commands::vault::save_vault_note,
+            commands::vault::delete_vault_note,
             commands::open_external_url,
             commands::hide_hud,
             // Settings & Identity
@@ -400,6 +432,11 @@ pub fn run() {
             let env_prefix = "";
 
             let _ = main_window.set_title(&format!("{env_prefix}{nickname} // OS"));
+            if !should_show_initially {
+                let _ = main_window.hide();
+            } else {
+                let _ = crate::tray::show_and_focus_main(&main_window);
+            }
 
             let window_clone = main_window.clone();
             let app_handle_for_close = app.handle().clone();

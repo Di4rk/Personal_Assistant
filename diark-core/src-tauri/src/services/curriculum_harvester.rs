@@ -62,10 +62,12 @@ pub fn major_name_to_code(major_name: &str) -> Option<String> {
         Some("KHMT".to_string())
     } else if norm.contains("ky thuat phan mem") {
         Some("KTPM".to_string())
-    } else if norm.contains("an toan thong tin") {
+    } else if norm.contains("an toan thong tin") || norm.contains("an ninh mang") {
         Some("ATTT".to_string())
     } else if norm.contains("he thong thong tin") {
         Some("HTTT".to_string())
+    } else if norm.contains("truyen thong da phuong tien") {
+        Some("TTDPT".to_string())
     } else if norm.contains("mang may tinh") || norm.contains("truyen thong") {
         Some("MMT".to_string())
     } else if norm.contains("ky thuat may tinh") {
@@ -76,6 +78,10 @@ pub fn major_name_to_code(major_name: &str) -> Option<String> {
         Some("KHDL".to_string())
     } else if norm.contains("thuong mai dien tu") {
         Some("TMDT".to_string())
+    } else if norm.contains("thiet ke vi mach") {
+        Some("TKVM".to_string())
+    } else if norm.contains("cong nghe thong tin") {
+        Some("CNTT".to_string())
     } else {
         None
     }

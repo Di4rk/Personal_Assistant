@@ -96,8 +96,9 @@ export const GpaSimulatorCard: React.FC<GpaSimulatorCardProps> = ({
     return (totalTerms / 2).toFixed(1);
   }, [completedTerms, effectiveTerms]);
 
-  // Tính cGPA trung bình cần đạt trên tổng số tín chỉ còn lại
-  const targetTotalPoints = targetGpa10 * TOTAL_DEGREE_CREDITS;
+  // Tính cGPA trung bình cần đạt trên tổng số tín chỉ tính GPA còn lại (loại trừ TC môn miễn)
+  const finalGpaCreditsAtGraduation = currentGpaCredits + remainingCredits;
+  const targetTotalPoints = targetGpa10 * finalGpaCreditsAtGraduation;
   const requiredRemainingPoints = targetTotalPoints - currentTotalWeighted10;
   const requiredAverageGpa10 =
     remainingCredits > 0

@@ -65,15 +65,13 @@ export const GraduationAuditCard: React.FC<GraduationAuditCardProps> = ({
   const [showAllCohorts, setShowAllCohorts] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // Trạng thái thu gọn card — mặc định collapsed (true) để giảm visual noise ban đầu.
-  // Lưu preference vào localStorage để persist qua session.
+  // Mặc định mở sẵn trong sub-tab Tổng quan & CTĐT để sinh viên thấy ngay tiến độ
   const [isCollapsed, setIsCollapsed] = useState<boolean>(() => {
     try {
       const stored = localStorage.getItem("academic_audit_collapsed");
-      // Nếu chưa có preference, mặc định collapsed = true
-      return stored === null ? true : stored === "true";
+      return stored === null ? false : stored === "true";
     } catch {
-      return true;
+      return false;
     }
   });
 

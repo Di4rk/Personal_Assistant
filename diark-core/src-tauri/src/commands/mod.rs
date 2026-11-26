@@ -5,6 +5,7 @@ pub mod matrix;
 pub mod moodle;
 pub mod plugins;
 pub mod portal_auth;
+pub mod portal_extra;
 pub mod post_mortem;
 pub mod settings;
 pub mod system;

@@ -189,7 +189,7 @@ pub async fn sync_uit_portal(
                         });
                         fetch('http://127.0.0.1:3030/api/v1/academic/transcript', {
                             method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
+                            headers: { 'Content-Type': 'application/json', 'X-Diark-Sync-Token': __DIARK_SYNC_TOKEN__ },
                             body: JSON.stringify({ html: payload })
                         }).catch(() => {});
                         return true;
@@ -201,7 +201,7 @@ pub async fn sync_uit_portal(
                 if (table && document.body.innerText.includes('Mã môn') && (document.body.innerText.includes('Điểm TB') || document.body.innerText.includes('Điểm HP') || document.body.innerText.includes('Tín chỉ'))) {
                     fetch('http://127.0.0.1:3030/api/v1/academic/transcript', {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
+                        headers: { 'Content-Type': 'application/json', 'X-Diark-Sync-Token': __DIARK_SYNC_TOKEN__ },
                         body: JSON.stringify({ html: table.outerHTML || table.innerHTML })
                     }).catch(() => {});
                     return true;
@@ -209,7 +209,10 @@ pub async fn sync_uit_portal(
             } catch(e) {}
             return false;
         })();
-    "#;
+    "#.replace(
+        "__DIARK_SYNC_TOKEN__",
+        &serde_json::to_string(crate::server::get_sync_token()).unwrap_or_else(|_| "\"\"".to_string()),
+    );
 
     let mut extracted_html: Option<String> = None;
     let start_time = std::time::Instant::now();
@@ -235,7 +238,7 @@ pub async fn sync_uit_portal(
         }
 
         // Rust chủ động execute JS trên window và hứng kết quả (tránh remote IPC)
-        let _ = sso_window.eval(extraction_script);
+        let _ = sso_window.eval(&extraction_script);
         let _ = app.emit("academic://sync-state", UitSyncState::Extracting);
     }
 
@@ -293,13 +296,16 @@ pub async fn sync_uit_portal(
                     if (main && main.innerText && main.innerText.includes('r\u1ecdn luy\u1ec7n')) {
                         fetch('http://127.0.0.1:3030/api/v1/academic/drl', {
                             method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
+                            headers: { 'Content-Type': 'application/json', 'X-Diark-Sync-Token': __DIARK_SYNC_TOKEN__ },
                             body: JSON.stringify({ html: main.outerHTML })
                         }).catch(() => {});
                     }
                 } catch(e) {}
             })();
-        "#;
+        "#.replace(
+            "__DIARK_SYNC_TOKEN__",
+            &serde_json::to_string(crate::server::get_sync_token()).unwrap_or_else(|_| "\"\"".to_string()),
+        );
 
         // Poll store tối đa 20s (1.5s/lần)
         let mut extracted_drl_html: Option<String> = None;
@@ -322,7 +328,7 @@ pub async fn sync_uit_portal(
             }
 
             // Fire JS eval (không lấy return value)
-            let _ = sso_window.eval(drl_extraction_script);
+            let _ = sso_window.eval(&drl_extraction_script);
         }
 
         let Some(html) = extracted_drl_html else {
@@ -1186,14 +1192,13 @@ pub async fn get_degree_audit_report(
     db: tauri::State<'_, SharedDb>,
     preferred_slug: Option<String>,
 ) -> Result<crate::modules::academic::degree_audit::DegreeAuditReport, String> {
-    // 1. Kiểm tra xem slug mục tiêu đã được cache chưa
     let target_slug = {
         let conn = db.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
-        crate::modules::academic::degree_audit::run_degree_audit(&conn, preferred_slug.as_deref())
-            .map(|r| r.slug)
-            .ok()
-            .or(preferred_slug.clone())
-            .unwrap_or_else(|| "cu-nhan-nganh-khoa-hoc-may-tinh-khoa-20-2025".to_string())
+        crate::modules::academic::degree_audit::resolve_active_curriculum_slug(
+            &conn,
+            preferred_slug.as_deref(),
+        )
+        .map_err(|e| e.to_string())?
     };
 
     let needs_fetch = {

@@ -14,6 +14,9 @@ import {
   saveGeminiConfig,
   testGeminiKey,
   openExternalUrl,
+  getSsoCredentialsStatus,
+  saveSsoCredentials,
+  clearSsoCredentials,
   StudentProfilePayload,
   SystemStorageStats,
 } from '../lib/tauri-client';
@@ -32,7 +35,6 @@ import {
   GraduationCap,
   Code,
   ExternalLink,
-  Sparkles,
   Key,
   Eye,
   EyeOff,
@@ -91,6 +93,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = () => {
   // Tab: Services state
   const [syncingPortal, setSyncingPortal] = useState(false);
   const [syncingWecode, setSyncingWecode] = useState(false);
+  const [ssoUsername, setSsoUsername] = useState('');
+  const [ssoPassword, setSsoPassword] = useState('');
+  const [ssoHasPassword, setSsoHasPassword] = useState(false);
+  const [ssoAutoLogin, setSsoAutoLogin] = useState(true);
+  const [isSavingSso, setIsSavingSso] = useState(false);
+  const [ssoFeedback, setSsoFeedback] = useState<string | null>(null);
 
   // Tab: System stats state
   const [storageStats, setStorageStats] = useState<SystemStorageStats | null>(null);
@@ -178,6 +186,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = () => {
         setHotkeyActive(prefs.hotkeyActive);
       })
       .catch((e) => console.error('Failed to get system preferences:', e));
+
+    getSsoCredentialsStatus()
+      .then((status) => {
+        setSsoUsername(status.username || '');
+        setSsoHasPassword(status.has_password);
+        setSsoAutoLogin(status.auto_login);
+        setSsoPassword('');
+        setSsoFeedback(null);
+      })
+      .catch((e) => console.error('Failed to get SSO status:', e));
   }, [isOpen]);
 
   // Listen to hotkey-registration-failed event from backend
@@ -359,20 +377,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = () => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-4">
-      <div className="flex h-[560px] w-full max-w-3xl overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/95 shadow-2xl shadow-cyan-950/20 text-slate-100">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-4">
+      <div className="flex h-[560px] w-full max-w-3xl overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900 shadow-2xl text-zinc-100">
         {/* Left Column: Tab Navigation */}
-        <div className="w-56 border-r border-slate-800 bg-slate-950/50 p-4 flex flex-col justify-between">
+        <div className="w-56 border-r border-zinc-800 bg-zinc-950/70 p-4 flex flex-col justify-between">
           <div>
             <div className="mb-6 px-2 flex items-center gap-3">
               <img
                 src="/app-icon.png"
                 alt="DIARK // OS Logo"
-                className="w-9 h-9 rounded-lg border border-cyan-500/40 object-cover shadow-sm shadow-cyan-950/40"
+                className="w-9 h-9 rounded-lg border border-zinc-700 object-cover"
               />
               <div>
-                <p className="font-mono text-[10px] uppercase tracking-widest text-cyan-400">Settings Hub</p>
-                <h2 className="font-mono text-base font-bold tracking-wider text-slate-100">// CONFIG</h2>
+                <p className="font-mono text-[10px] uppercase tracking-widest text-emerald-400">Cài đặt</p>
+                <h2 className="font-mono text-sm font-bold tracking-wider text-zinc-100">DIARK OS</h2>
               </div>
             </div>
 
@@ -380,10 +398,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = () => {
               <button
                 type="button"
                 onClick={() => setActiveTab('profile')}
-                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg font-mono text-xs font-semibold transition cursor-pointer ${
+                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-xs font-medium transition cursor-pointer ${
                   activeTab === 'profile'
-                    ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 border border-transparent'
+                    ? 'bg-zinc-800 text-zinc-100 border border-zinc-700'
+                    : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50 border border-transparent'
                 }`}
               >
                 <User className="w-4 h-4" />
@@ -393,23 +411,23 @@ export const SettingsModal: React.FC<SettingsModalProps> = () => {
               <button
                 type="button"
                 onClick={() => setActiveTab('plugins')}
-                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg font-mono text-xs font-semibold transition cursor-pointer ${
+                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-xs font-medium transition cursor-pointer ${
                   activeTab === 'plugins'
-                    ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 border border-transparent'
+                    ? 'bg-zinc-800 text-zinc-100 border border-zinc-700'
+                    : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50 border border-transparent'
                 }`}
               >
                 <Blocks className="w-4 h-4" />
-                <span>Phân hệ / Plugins</span>
+                <span>Tiện ích mở rộng</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => setActiveTab('services')}
-                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg font-mono text-xs font-semibold transition cursor-pointer ${
+                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-xs font-medium transition cursor-pointer ${
                   activeTab === 'services'
-                    ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 border border-transparent'
+                    ? 'bg-zinc-800 text-zinc-100 border border-zinc-700'
+                    : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50 border border-transparent'
                 }`}
               >
                 <RefreshCw className="w-4 h-4" />
@@ -419,23 +437,23 @@ export const SettingsModal: React.FC<SettingsModalProps> = () => {
               <button
                 type="button"
                 onClick={() => setActiveTab('copilot')}
-                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg font-mono text-xs font-semibold transition cursor-pointer ${
+                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-xs font-medium transition cursor-pointer ${
                   activeTab === 'copilot'
-                    ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/40'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 border border-transparent'
+                    ? 'bg-zinc-800 text-zinc-100 border border-zinc-700'
+                    : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50 border border-transparent'
                 }`}
               >
-                <Sparkles className="w-4 h-4 text-indigo-400" />
-                <span>AI Copilot (BYOK)</span>
+                <Key className="w-4 h-4 text-emerald-400" />
+                <span>Trợ lý Gemini</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => setActiveTab('system')}
-                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg font-mono text-xs font-semibold transition cursor-pointer ${
+                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-xs font-medium transition cursor-pointer ${
                   activeTab === 'system'
-                    ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 border border-transparent'
+                    ? 'bg-zinc-800 text-zinc-100 border border-zinc-700'
+                    : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50 border border-transparent'
                 }`}
               >
                 <Database className="w-4 h-4" />
@@ -673,17 +691,107 @@ export const SettingsModal: React.FC<SettingsModalProps> = () => {
                   </div>
 
                   {/* Moodle UIT Card */}
-                  <div className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-950/40 p-4">
+                  <div className="flex items-center justify-between rounded-xl border border-zinc-800 bg-zinc-950/40 p-4">
                     <div>
                       <div className="flex items-center gap-2">
-                        <ExternalLink className="w-4 h-4 text-purple-400" />
-                        <h4 className="font-semibold text-slate-200 text-sm">Học tập Trực tuyến (Moodle / Courses)</h4>
+                        <ExternalLink className="w-4 h-4 text-emerald-400" />
+                        <h4 className="font-semibold text-zinc-200 text-sm">Học tập Trực tuyến (Moodle / Courses)</h4>
                       </div>
-                      <p className="text-xs text-slate-400 mt-1">
-                        Thu nạp hạn nộp bài tập qua cơ chế parser HTML Workspace &amp; Native Vault.
+                      <p className="text-xs text-zinc-400 mt-1">
+                        Đồng bộ môn học, hạn nộp bài tập, tài liệu và điểm quá trình từ Courses UIT.
                       </p>
                     </div>
-                    <span className="font-mono text-xs text-slate-500">HTML Ingestion</span>
+                    <span className="font-mono text-xs text-zinc-500">Đồng bộ tự động</span>
+                  </div>
+
+                  {/* Tự động đăng nhập SSO UIT */}
+                  <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-4 space-y-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <h4 className="text-sm font-semibold text-zinc-100">Tự động đăng nhập SSO UIT</h4>
+                        <p className="text-xs text-zinc-400 mt-0.5">
+                          Lưu tài khoản và mật khẩu ngay trên máy của bạn để tự điền mỗi khi phiên đăng nhập hết hạn.
+                        </p>
+                      </div>
+                      <label className="flex items-center gap-2 text-xs text-zinc-300 shrink-0 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={ssoAutoLogin}
+                          onChange={(e) => setSsoAutoLogin(e.target.checked)}
+                          className="h-3.5 w-3.5 accent-emerald-500"
+                        />
+                        <span>Tự động vào</span>
+                      </label>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      <input
+                        type="text"
+                        value={ssoUsername}
+                        onChange={(e) => setSsoUsername(e.target.value)}
+                        placeholder="MSSV (vd: 25520458)"
+                        className="rounded-md border border-zinc-800 bg-zinc-900 px-3 py-1.5 font-mono text-xs text-zinc-100 placeholder-zinc-600 focus:border-zinc-600 focus:outline-none"
+                      />
+                      <input
+                        type="password"
+                        value={ssoPassword}
+                        onChange={(e) => setSsoPassword(e.target.value)}
+                        placeholder={ssoHasPassword ? "•••••••• (đã lưu, nhập để đổi)" : "Mật khẩu SSO"}
+                        className="rounded-md border border-zinc-800 bg-zinc-900 px-3 py-1.5 font-mono text-xs text-zinc-100 placeholder-zinc-600 focus:border-zinc-600 focus:outline-none"
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[11px] font-mono text-zinc-500">
+                        {ssoFeedback || (ssoHasPassword ? `Đã lưu cục bộ cho ${ssoUsername}` : "Chưa lưu mật khẩu")}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        {ssoHasPassword && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsSavingSso(true);
+                              void clearSsoCredentials()
+                                .then(() => {
+                                  setSsoUsername('');
+                                  setSsoPassword('');
+                                  setSsoHasPassword(false);
+                                  setSsoAutoLogin(false);
+                                  setSsoFeedback('Đã xóa thông tin đăng nhập đã lưu.');
+                                })
+                                .catch((e) => setSsoFeedback(String(e)))
+                                .finally(() => setIsSavingSso(false));
+                            }}
+                            disabled={isSavingSso}
+                            className="rounded-md border border-zinc-800 bg-zinc-900 px-2.5 py-1 text-xs text-rose-400 hover:bg-zinc-800 cursor-pointer"
+                          >
+                            Xóa đã lưu
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsSavingSso(true);
+                            void saveSsoCredentials(
+                              ssoUsername,
+                              ssoPassword.length > 0 ? ssoPassword : null,
+                              ssoAutoLogin
+                            )
+                              .then(() => {
+                                if (ssoPassword.length > 0) setSsoHasPassword(true);
+                                setSsoPassword('');
+                                setSsoFeedback('Đã lưu cấu hình SSO cục bộ.');
+                              })
+                              .catch((e) => setSsoFeedback(String(e)))
+                              .finally(() => setIsSavingSso(false));
+                          }}
+                          disabled={isSavingSso || !ssoUsername.trim()}
+                          className="rounded-md bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-950 hover:bg-zinc-200 disabled:opacity-40 cursor-pointer"
+                        >
+                          Lưu SSO
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -693,12 +801,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = () => {
             {activeTab === 'copilot' && (
               <div className="space-y-6">
                 <div>
-                  <h3 className="font-mono text-base font-bold text-slate-100 flex items-center gap-2">
-                    <Sparkles className="w-4 h-4 text-indigo-400" />
-                    <span>Gemini AI Copilot (BYOK)</span>
+                  <h3 className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
+                    <Key className="w-4 h-4 text-emerald-400" />
+                    <span>Trợ lý Gemini cá nhân</span>
                   </h3>
-                  <p className="text-xs text-slate-400 mt-1">
-                    Mô hình mang chìa khóa của riêng bạn (Bring Your Own Key). Hoàn toàn miễn phí, key được lưu cục bộ trên máy tính của bạn và gọi trực tiếp tới Google AI.
+                  <p className="text-xs text-zinc-400 mt-1">
+                    Dùng khóa API cá nhân của bạn. Khóa được lưu ngay trên máy và gọi trực tiếp tới Google AI.
                   </p>
                 </div>
 
@@ -706,14 +814,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = () => {
                   {/* API Key Input */}
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
-                      <label className="font-mono text-xs uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                        <Key className="w-3.5 h-3.5 text-indigo-400" />
+                      <label className="font-mono text-xs uppercase tracking-wider text-zinc-400 flex items-center gap-1.5">
+                        <Key className="w-3.5 h-3.5 text-emerald-400" />
                         <span>Google Gemini API Key</span>
                       </label>
                       <button
                         type="button"
                         onClick={() => openExternalUrl('https://aistudio.google.com/app/apikey')}
-                        className="text-[11px] text-indigo-400 hover:text-indigo-300 flex items-center gap-1 cursor-pointer"
+                        className="text-[11px] text-emerald-400 hover:text-emerald-300 flex items-center gap-1 cursor-pointer"
                       >
                         <span>Lấy API Key miễn phí tại Google AI Studio</span>
                         <ExternalLink className="w-3 h-3" />
@@ -726,12 +834,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = () => {
                         value={geminiApiKey}
                         onChange={(e) => setGeminiApiKey(e.target.value)}
                         placeholder="AIzaSy..."
-                        className="w-full rounded-xl border border-slate-800 bg-slate-950/60 px-4 py-2.5 pr-10 font-mono text-xs text-slate-200 placeholder-slate-600 focus:border-indigo-500 focus:outline-none"
+                        className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-4 py-2.5 pr-10 font-mono text-xs text-zinc-200 placeholder-zinc-600 focus:border-zinc-600 focus:outline-none"
                       />
                       <button
                         type="button"
                         onClick={() => setShowApiKey((v) => !v)}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 cursor-pointer"
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 cursor-pointer"
                       >
                         {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                       </button>
@@ -741,15 +849,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = () => {
                   {/* Model Selection */}
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
-                      <label className="font-mono text-xs uppercase tracking-wider text-slate-400">
+                      <label className="font-mono text-xs uppercase tracking-wider text-zinc-400">
                         Mô hình Gemini (Model)
                       </label>
                       <button
                         type="button"
                         onClick={() => setIsCustomModel((prev) => !prev)}
-                        className="text-[11px] font-mono text-indigo-400 hover:text-indigo-300 underline cursor-pointer"
+                        className="text-[11px] font-mono text-zinc-400 hover:text-zinc-200 underline cursor-pointer"
                       >
-                        {isCustomModel ? "Chọn từ danh sách có sẵn" : "Nhập mã model tùy chỉnh (Custom ID)"}
+                        {isCustomModel ? "Chọn từ danh sách có sẵn" : "Nhập mã model tùy chỉnh"}
                       </button>
                     </div>
 
@@ -763,14 +871,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = () => {
                             setGeminiModel(e.target.value);
                           }
                         }}
-                        className="w-full rounded-xl border border-slate-800 bg-slate-950/60 px-4 py-2.5 font-mono text-xs text-slate-200 focus:border-indigo-500 focus:outline-none cursor-pointer"
+                        className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-4 py-2.5 font-mono text-xs text-zinc-200 focus:border-zinc-600 focus:outline-none cursor-pointer"
                       >
                         {PRESET_GEMINI_MODELS.map((m) => (
                           <option key={m.id} value={m.id}>
                             {m.name}
                           </option>
                         ))}
-                        <option value="__custom__">⚙️ Tùy chỉnh (Nhập mã model bất kỳ...)</option>
+                        <option value="__custom__">Tùy chỉnh (Nhập mã model bất kỳ...)</option>
                       </select>
                     ) : (
                       <div className="space-y-1.5">
@@ -778,11 +886,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = () => {
                           type="text"
                           value={geminiModel}
                           onChange={(e) => setGeminiModel(e.target.value)}
-                          placeholder="Ví dụ: gemini-3.8-flash, gemini-exp-1206..."
-                          className="w-full rounded-xl border border-indigo-500/50 bg-slate-950/60 px-4 py-2.5 font-mono text-xs text-slate-200 focus:border-indigo-500 focus:outline-none"
+                          placeholder="Ví dụ: gemini-3.8-flash..."
+                          className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-4 py-2.5 font-mono text-xs text-zinc-200 focus:border-zinc-500 focus:outline-none"
                           autoFocus
                         />
-                        <p className="text-[10px] text-slate-500 font-mono">
+                        <p className="text-[10px] text-zinc-500 font-mono">
                           Nhập chính xác Model ID từ Google AI Studio (ví dụ: gemini-2.5-flash, gemini-3.1-flash-lite...)
                         </p>
                       </div>
@@ -794,28 +902,28 @@ export const SettingsModal: React.FC<SettingsModalProps> = () => {
                     <button
                       type="submit"
                       disabled={isSavingGemini}
-                      className="flex items-center gap-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 px-5 py-2.5 font-mono text-xs font-bold text-white transition cursor-pointer disabled:opacity-50"
+                      className="flex items-center gap-2 rounded-lg bg-zinc-100 hover:bg-zinc-200 px-4 py-2 text-xs font-semibold text-zinc-950 transition cursor-pointer disabled:opacity-50"
                     >
                       {isSavingGemini ? (
                         <Loader2 className="w-3.5 h-3.5 animate-spin" />
                       ) : geminiSavedSuccess ? (
                         <Check className="w-3.5 h-3.5" />
                       ) : null}
-                      <span>{geminiSavedSuccess ? 'ĐÃ LƯU CẤU HÌNH' : 'LƯU CẤU HÌNH'}</span>
+                      <span>{geminiSavedSuccess ? 'Đã lưu cấu hình' : 'Lưu cấu hình'}</span>
                     </button>
 
                     <button
                       type="button"
                       onClick={handleTestGeminiKey}
                       disabled={isTestingGemini || !geminiApiKey.trim()}
-                      className="flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-800 hover:bg-slate-700 px-4 py-2.5 font-mono text-xs font-semibold text-slate-200 transition cursor-pointer disabled:opacity-50"
+                      className="flex items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 px-4 py-2 text-xs font-medium text-zinc-200 transition cursor-pointer disabled:opacity-50"
                     >
                       {isTestingGemini ? (
-                        <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-400" />
+                        <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-400" />
                       ) : (
-                        <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
                       )}
-                      <span>Kiểm tra kết nối (Ping Test)</span>
+                      <span>Kiểm tra kết nối</span>
                     </button>
                   </div>
                 </form>
@@ -823,7 +931,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = () => {
                 {/* Test Result Feedback */}
                 {testGeminiResult && (
                   <div
-                    className={`rounded-xl border p-3.5 text-xs font-mono flex items-start gap-2.5 ${
+                    className={`rounded-lg border p-3.5 text-xs font-mono flex items-start gap-2.5 ${
                       testGeminiResult.success
                         ? 'border-emerald-600/30 bg-emerald-950/30 text-emerald-300'
                         : 'border-rose-600/30 bg-rose-950/30 text-rose-300'
@@ -842,16 +950,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = () => {
                 )}
 
                 {/* Security Policy */}
-                <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3.5 text-[11px] text-slate-400 space-y-1">
-                  <p className="font-semibold text-slate-300 flex items-center gap-1.5">
-                    <Shield className="w-3.5 h-3.5 text-cyan-400" />
-                    <span>Chính sách Bảo mật &amp; Quyền riêng tư (Zero Leak):</span>
+                <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3.5 text-[11px] text-zinc-400 space-y-1">
+                  <p className="font-semibold text-zinc-300 flex items-center gap-1.5">
+                    <Shield className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Quyền riêng tư (Lưu trên máy):</span>
                   </p>
                   <p>
-                    • API Key được lưu trong SQLite bảng <code>settings</code> của máy tính bạn. Không có server trung gian nào thu thập key.
+                    • API Key chỉ lưu ngay trên máy tính của bạn, không gửi qua máy chủ trung gian.
                   </p>
                   <p>
-                    • Socratic Debugger và Task Extractor kết nối trực tiếp qua Rust HTTP Client tới Google Gemini API bằng giao thức HTTPS mã hóa.
+                    • Mọi yêu cầu kết nối trực tiếp tới Google Gemini API qua giao thức mã hóa HTTPS.
                   </p>
                 </div>
               </div>
@@ -1000,33 +1108,33 @@ export const SettingsModal: React.FC<SettingsModalProps> = () => {
 
                 {/* Storage & DB Stats */}
                 <div className="space-y-3">
-                  <p className="font-mono text-xs uppercase tracking-wider text-slate-400">
-                    Thống kê Lưu trữ Cục bộ (SQLite SSOT)
+                  <p className="font-mono text-xs uppercase tracking-wider text-zinc-400">
+                    Thống kê dữ liệu lưu trên máy
                   </p>
 
                   {loadingStats ? (
-                    <div className="flex items-center justify-center p-6 text-slate-400">
+                    <div className="flex items-center justify-center p-6 text-zinc-400">
                       <Loader2 className="w-5 h-5 animate-spin" />
                     </div>
                   ) : (
                     <div className="grid grid-cols-3 gap-3">
-                      <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3.5 text-center">
-                        <p className="font-mono text-[10px] text-slate-500 uppercase">Kích thước DB</p>
-                        <p className="font-mono text-base font-bold text-cyan-400 mt-1">
+                      <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3.5 text-center">
+                        <p className="font-mono text-[10px] text-zinc-500 uppercase">Dung lượng dữ liệu</p>
+                        <p className="font-mono text-base font-bold text-zinc-100 mt-1">
                           {formatBytes(storageStats?.db_size_bytes || 0)}
                         </p>
                       </div>
 
-                      <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3.5 text-center">
-                        <p className="font-mono text-[10px] text-slate-500 uppercase">WAL Log Buffer</p>
-                        <p className="font-mono text-base font-bold text-blue-400 mt-1">
+                      <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3.5 text-center">
+                        <p className="font-mono text-[10px] text-zinc-500 uppercase">Bộ đệm tạm</p>
+                        <p className="font-mono text-base font-bold text-zinc-300 mt-1">
                           {formatBytes(storageStats?.wal_size_bytes || 0)}
                         </p>
                       </div>
 
-                      <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3.5 text-center">
-                        <p className="font-mono text-[10px] text-slate-500 uppercase">Tổng số bản ghi</p>
-                        <p className="font-mono text-base font-bold text-purple-400 mt-1">
+                      <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3.5 text-center">
+                        <p className="font-mono text-[10px] text-zinc-500 uppercase">Tổng số bản ghi</p>
+                        <p className="font-mono text-base font-bold text-emerald-400 mt-1">
                           {storageStats?.total_records_count?.toLocaleString() || 0}
                         </p>
                       </div>
@@ -1035,15 +1143,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = () => {
                 </div>
 
                 {/* Auto-Updater Section */}
-                <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-4 space-y-3">
+                <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-4 space-y-3">
                   <div className="flex items-center justify-between">
                     <div>
-                      <div className="flex items-center gap-2 text-slate-200 font-semibold text-xs font-mono">
-                        <ArrowUpCircle className="w-4 h-4 text-violet-400" />
-                        <span>CẬP NHẬT HỆ THỐNG (AUTO-UPDATE)</span>
+                      <div className="flex items-center gap-2 text-zinc-200 font-semibold text-xs font-mono">
+                        <ArrowUpCircle className="w-4 h-4 text-emerald-400" />
+                        <span>CẬP NHẬT ỨNG DỤNG</span>
                       </div>
-                      <p className="text-[11px] text-slate-400 mt-1">
-                        Kênh phát hành chính thức từ GitHub Releases. Phiên bản hiện tại: <span className="font-mono text-cyan-400">{APP_VERSION}</span>
+                      <p className="text-[11px] text-zinc-400 mt-1">
+                        Phiên bản hiện tại: <span className="font-mono text-emerald-400">{APP_VERSION}</span>
                       </p>
                     </div>
                     <button
@@ -1051,7 +1159,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = () => {
                       onClick={() => {
                         window.dispatchEvent(new CustomEvent('check-app-updates'));
                       }}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-violet-500/40 bg-violet-600/20 hover:bg-violet-600/30 text-violet-300 font-mono text-xs transition cursor-pointer"
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-mono text-xs transition cursor-pointer"
                     >
                       <RefreshCw className="w-3.5 h-3.5" />
                       <span>Kiểm tra bản mới</span>

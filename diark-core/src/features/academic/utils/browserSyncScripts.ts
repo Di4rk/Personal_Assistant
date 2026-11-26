@@ -3,11 +3,20 @@
  * Thay thế hoàn toàn In-App Webview. Không phụ thuộc vào Next.js router hay Webview2 scheme.
  */
 
+export function withLocalSyncToken(script: string, token: string): string {
+  return script.split('"__DIARK_SYNC_TOKEN__"').join(JSON.stringify(token));
+}
+
 export const PORTAL_BROWSER_SYNC_SCRIPT = `(async () => {
     console.clear();
     console.log("%c[Diark OS] 🚀 Bắt đầu đồng bộ dữ liệu Portal UIT...", "color: #38bdf8; font-weight: bold; font-size: 14px;");
 
     const LOCAL_SERVER_URL = "http://127.0.0.1:3030/api/v1/sync/portal";
+    const SYNC_TOKEN = "__DIARK_SYNC_TOKEN__";
+    const LOCAL_JSON_HEADERS = {
+        "Content-Type": "application/json",
+        "X-Diark-Sync-Token": SYNC_TOKEN
+    };
 
     function showBanner(message, isSuccess = true) {
         let banner = document.getElementById("__diark_sync_banner");
@@ -65,7 +74,7 @@ export const PORTAL_BROWSER_SYNC_SCRIPT = `(async () => {
                 if (examData && Array.isArray(examData.items)) {
                     await fetch("http://127.0.0.1:3030/api/v1/sync/exam-schedule", {
                         method: "POST",
-                        headers: { "Content-Type": "application/json" },
+                        headers: LOCAL_JSON_HEADERS,
                         body: JSON.stringify(examData)
                     }).catch(() => null);
                     console.log("[Diark OS] Đã đồng bộ lịch thi (" + examData.items.length + " ca thi)");
@@ -148,7 +157,7 @@ export const PORTAL_BROWSER_SYNC_SCRIPT = `(async () => {
         showBanner("🚀 Đang đẩy dữ liệu về Diark OS (port 3030)...", true);
         const resp = await fetch(LOCAL_SERVER_URL, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: LOCAL_JSON_HEADERS,
             body: JSON.stringify(bdData)
         });
 
@@ -169,6 +178,7 @@ export const WECODE_BROWSER_SYNC_SCRIPT = `(async () => {
     console.log("%c[Diark OS] 🚀 Bắt đầu tiến trình đồng bộ Wecode Submissions...", "color: #10b981; font-weight: bold; font-size: 14px;");
 
     const LOCAL_SERVER_URL = "http://127.0.0.1:3030/api/v1/sync/wecode";
+    const SYNC_TOKEN = "__DIARK_SYNC_TOKEN__";
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
     function showBanner(message, isSuccess = true) {
@@ -551,7 +561,10 @@ export const WECODE_BROWSER_SYNC_SCRIPT = `(async () => {
         showBanner(\`🚀 Đang gửi \${allSubmissions.length} bài nộp & \${allProblems.length} câu hỏi về Diark OS...\`, true);
         const resp = await fetch(LOCAL_SERVER_URL, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: {
+                "Content-Type": "application/json",
+                "X-Diark-Sync-Token": SYNC_TOKEN
+            },
             body: JSON.stringify(syncPayload)
         });
 
@@ -571,6 +584,7 @@ export const PORTAL_EXAM_SCHEDULE_SYNC_SCRIPT = `(async () => {
     console.log("%c[Diark OS] 🎯 Bắt đầu đồng bộ Lịch thi UIT...", "color: #f59e0b; font-weight: bold; font-size: 14px;");
 
     const LOCAL_SERVER_URL = "http://127.0.0.1:3030/api/v1/sync/exam-schedule";
+    const SYNC_TOKEN = "__DIARK_SYNC_TOKEN__";
 
     function showBanner(message, isSuccess = true) {
         let banner = document.getElementById("__diark_exam_sync_banner");
@@ -620,7 +634,10 @@ export const PORTAL_EXAM_SCHEDULE_SYNC_SCRIPT = `(async () => {
         showBanner("🚀 Đang gửi " + examCount + " ca thi về Diark OS (port 3030)...", true);
         const localResp = await fetch(LOCAL_SERVER_URL, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: {
+                "Content-Type": "application/json",
+                "X-Diark-Sync-Token": SYNC_TOKEN
+            },
             body: JSON.stringify(data)
         });
 

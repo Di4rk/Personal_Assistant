@@ -16,7 +16,12 @@ let toastIdCounter = 0;
 const toastTimers = new Map<number, ReturnType<typeof setTimeout>>();
 
 import { AcademicDashboard } from "./features/academic";
+import { SyncPortalModal } from "./features/academic/components/SyncPortalModal";
+import { useSyncOrchestratorStore } from "./features/academic/stores/syncOrchestratorStore";
+import { HomeDashboard } from "./features/home";
+import { ScheduleDashboard } from "./features/schedule";
 import { VaultDashboard } from "./features/vault";
+import { PortalQuickActionsPopover } from "./components/PortalQuickActionsPopover";
 import { CommandPaletteModal } from "./features/command-palette";
 import { GenesisModal } from "./features/onboarding";
 import { DevControlDock } from "./components/DevControlDock";
@@ -34,9 +39,10 @@ import { useWecodeStore } from "./stores/useWecodeStore";
 import { usePrivacyStore } from "./stores/usePrivacyStore";
 import { listInstalledPlugins } from "./lib/plugin-sdk";
 import type { PluginMetaDto } from "./types/plugin";
-import { Code2, GraduationCap, FolderGit2, Blocks, Settings, BookOpen, Terminal } from "lucide-react";
-import { APP_VERSION, APP_SUBTITLE } from "./constants/app";
+import { Code2, GraduationCap, FolderGit2, Blocks, Settings, BookOpen, Terminal, Home, CalendarDays, Search } from "lucide-react";
+import { APP_VERSION } from "./constants/app";
 import {
+  getSsoCredentialsStatus,
   getUserProfile,
   saveUserProfile,
   type UserProfileDto,
@@ -50,9 +56,10 @@ type ProfileState =
 
 export default function App() {
   const [profileState, setProfileState] = useState<ProfileState>({ status: "loading" });
-  const [activeTab, setActiveTab] = useState<string>("academic");
+  const [activeTab, setActiveTab] = useState<string>("home");
   const [plugins, setPlugins] = useState<PluginMetaDto[]>([]);
   const [isPluginModalOpen, setIsPluginModalOpen] = useState(false);
+  const [isPortalSyncModalOpen, setIsPortalSyncModalOpen] = useState(false);
 
   // Auto-Update Engine (Tauri v2 official updater plugin)
   const {
@@ -87,7 +94,7 @@ export default function App() {
     usePrivacyStore.getState().setDemoMode(false);
 
     // 2. Chuyển view về Genesis onboarding flow và tab mặc định
-    setActiveTab("academic");
+    setActiveTab("home");
     setProfileState({ status: "needs-onboarding" });
   }, []);
 
@@ -303,6 +310,24 @@ export default function App() {
     first_ac_count: number;
   }>("cf://sync-event", handleLegacySync);
   useTauriEvent<void>("system-genesis-reset", handleResetToGenesis);
+  useTauriEvent<string>("portal-sync-failed", () => {
+    setIsPortalSyncModalOpen(true);
+  });
+
+  const handleQuickPortalSync = useCallback(async () => {
+    try {
+      const status = await getSsoCredentialsStatus().catch(() => null);
+      if (status?.auto_login && status.has_password) {
+        const started = await useSyncOrchestratorStore
+          .getState()
+          .requestSync("portal", { bypassTtl: true, bypassCircuitBreaker: true });
+        if (started) return;
+      }
+    } catch {
+      // Fallback sang mở modal trực tiếp
+    }
+    setIsPortalSyncModalOpen(true);
+  }, []);
 
   // Khai báo vô điều kiện trước mọi early-return để tuân thủ React Rules of Hooks
   const isQuickCaptureOpen = useQuickCaptureStore((s) => s.isOpen);
@@ -337,96 +362,152 @@ export default function App() {
 
   return (
     <div className="h-full overflow-y-auto overflow-x-hidden bg-zinc-950 text-zinc-100">
-      {/* Header chính: bg zinc-900 (đúng Surface card token), border zinc-800 */}
-      <header className="sticky top-0 z-40 flex items-center justify-between border-b border-zinc-800 bg-zinc-900/95 backdrop-blur-md px-6 py-3">
-        <div>
-          <h1 className="text-xl font-black tracking-wider text-white">
-            {profile.nickname.toUpperCase()} <span className="text-emerald-400">// OS</span>
-          </h1>
-          <p className="text-xs font-mono text-zinc-500">{APP_SUBTITLE}</p>
-        </div>
-
+      {/* Header phẳng, mật độ cao theo chuẩn Linear/Vercel */}
+      <header className="sticky top-0 z-40 flex h-12 items-center justify-between border-b border-zinc-800/80 bg-zinc-950 px-5">
         <div className="flex items-center gap-4">
-          {/* Navigation Tabs */}
-          <nav className="flex items-center bg-zinc-950 border border-zinc-800 rounded-lg p-1 text-xs" aria-label="Main navigation">
+          <div className="flex items-center gap-2">
+            <span className="h-2 w-2 rounded-full bg-emerald-400" aria-hidden="true" />
+            <span className="text-xs font-semibold tracking-tight text-zinc-100">
+              {profile.nickname}
+            </span>
+            <span className="font-mono text-[11px] text-zinc-600">{APP_VERSION}</span>
+          </div>
+
+          <nav className="flex items-center gap-1 text-xs" aria-label="Main navigation">
             <button
-              onClick={() => setActiveTab("academic")}
-              aria-current={activeTab === "academic" ? "page" : undefined}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium transition-all duration-150 ease-out cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500 ${
-                activeTab === "academic"
-                  ? "bg-zinc-700 text-zinc-100 shadow-sm border border-zinc-600"
-                  : "text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800/50"
+              type="button"
+              onClick={() => setActiveTab("home")}
+              aria-current={activeTab === "home" ? "page" : undefined}
+              className={`flex h-8 items-center gap-1.5 rounded-md px-2.5 font-medium transition-colors duration-150 ease-out cursor-pointer ${
+                activeTab === "home"
+                  ? "bg-zinc-800 text-zinc-100"
+                  : "text-zinc-500 hover:bg-zinc-900 hover:text-zinc-200"
               }`}
             >
-              <GraduationCap className="w-3.5 h-3.5" aria-hidden="true" />
-              <span>Academic Radar</span>
+              <Home className="h-3.5 w-3.5" aria-hidden="true" />
+              <span>Hôm nay</span>
             </button>
 
-            {/* Dynamic Enabled Plugins */}
+            <button
+              type="button"
+              onClick={() => setActiveTab("schedule")}
+              aria-current={activeTab === "schedule" ? "page" : undefined}
+              className={`flex h-8 items-center gap-1.5 rounded-md px-2.5 font-medium transition-colors duration-150 ease-out cursor-pointer ${
+                activeTab === "schedule"
+                  ? "bg-zinc-800 text-zinc-100"
+                  : "text-zinc-500 hover:bg-zinc-900 hover:text-zinc-200"
+              }`}
+            >
+              <CalendarDays className="h-3.5 w-3.5" aria-hidden="true" />
+              <span>Lịch</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab("academic")}
+              aria-current={activeTab === "academic" ? "page" : undefined}
+              className={`flex h-8 items-center gap-1.5 rounded-md px-2.5 font-medium transition-colors duration-150 ease-out cursor-pointer ${
+                activeTab === "academic"
+                  ? "bg-zinc-800 text-zinc-100"
+                  : "text-zinc-500 hover:bg-zinc-900 hover:text-zinc-200"
+              }`}
+            >
+              <GraduationCap className="h-3.5 w-3.5" aria-hidden="true" />
+              <span>Học vụ</span>
+            </button>
+
             {plugins
               .filter((p) => p.isEnabled)
               .map((p) => {
                 const isSelected = activeTab === p.pluginId;
                 const iconEl =
                   p.pluginId === "cp-codeforces" ? (
-                    <Code2 className="w-3.5 h-3.5" aria-hidden="true" />
+                    <Code2 className="h-3.5 w-3.5" aria-hidden="true" />
                   ) : p.pluginId === "uit-courses" ? (
-                    <BookOpen className="w-3.5 h-3.5" aria-hidden="true" />
+                    <BookOpen className="h-3.5 w-3.5" aria-hidden="true" />
                   ) : p.pluginId === "uit-wecode" ? (
-                    <Terminal className="w-3.5 h-3.5" aria-hidden="true" />
+                    <Terminal className="h-3.5 w-3.5" aria-hidden="true" />
                   ) : (
-                    <Blocks className="w-3.5 h-3.5" aria-hidden="true" />
+                    <Blocks className="h-3.5 w-3.5" aria-hidden="true" />
                   );
+                const shortName =
+                  p.pluginId === "uit-courses"
+                    ? "Moodle"
+                    : p.pluginId === "uit-wecode"
+                    ? "Wecode"
+                    : p.pluginId === "cp-codeforces"
+                    ? "Codeforces"
+                    : p.name;
                 return (
                   <button
                     key={p.pluginId}
+                    type="button"
                     onClick={() => setActiveTab(p.pluginId)}
                     aria-current={isSelected ? "page" : undefined}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium transition-all duration-150 ease-out cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500 ${
+                    className={`flex h-8 items-center gap-1.5 rounded-md px-2.5 font-medium transition-colors duration-150 ease-out cursor-pointer ${
                       isSelected
-                        ? "bg-zinc-700 text-zinc-100 shadow-sm border border-zinc-600"
-                        : "text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800/50"
+                        ? "bg-zinc-800 text-zinc-100"
+                        : "text-zinc-500 hover:bg-zinc-900 hover:text-zinc-200"
                     }`}
                   >
                     {iconEl}
-                    <span>{p.name}</span>
+                    <span>{shortName}</span>
                   </button>
                 );
               })}
 
             <button
+              type="button"
               onClick={() => setActiveTab("vault")}
               aria-current={activeTab === "vault" ? "page" : undefined}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium transition-all duration-150 ease-out cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500 ${
+              className={`flex h-8 items-center gap-1.5 rounded-md px-2.5 font-medium transition-colors duration-150 ease-out cursor-pointer ${
                 activeTab === "vault"
-                  ? "bg-zinc-700 text-zinc-100 shadow-sm border border-zinc-600"
-                  : "text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800/50"
+                  ? "bg-zinc-800 text-zinc-100"
+                  : "text-zinc-500 hover:bg-zinc-900 hover:text-zinc-200"
               }`}
             >
-              <FolderGit2 className="w-3.5 h-3.5" aria-hidden="true" />
-              <span>Native Vault</span>
+              <FolderGit2 className="h-3.5 w-3.5" aria-hidden="true" />
+              <span>Ghi chú</span>
             </button>
           </nav>
+        </div>
 
-          {/* Settings Hub Button */}
+        <div className="flex items-center gap-2">
+          <PortalQuickActionsPopover />
+
           <button
-            onClick={() => useSettingsStore.getState().openSettings()}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded border border-zinc-700 bg-zinc-900 hover:bg-zinc-800 text-xs font-mono text-zinc-400 hover:text-emerald-400 transition-colors duration-150 cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500"
-            title="Cài đặt hệ thống (Settings Hub)"
-            aria-label="Mở Settings Hub"
+            type="button"
+            onClick={() => {
+              window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }));
+            }}
+            className="flex h-8 items-center gap-1.5 rounded-md border border-zinc-800 bg-zinc-900 px-2.5 text-xs text-zinc-400 transition-colors duration-150 hover:border-zinc-700 hover:bg-zinc-800 hover:text-zinc-200 cursor-pointer"
+            title="Mở bảng lệnh (Ctrl+K)"
           >
-            <Settings className="w-3.5 h-3.5" aria-hidden="true" />
-            <span className="hidden sm:inline">Settings</span>
+            <Search className="h-3.5 w-3.5" aria-hidden="true" />
+            <kbd className="font-mono text-[10px] text-zinc-500">Ctrl K</kbd>
           </button>
 
-          <span className="rounded border border-zinc-700 bg-zinc-900 px-2 py-0.5 font-mono text-xs text-emerald-400" aria-label={`Phiên bản ${APP_VERSION}`}>
-            {APP_VERSION}
-          </span>
+          <button
+            type="button"
+            onClick={() => useSettingsStore.getState().openSettings()}
+            className="flex h-8 w-8 items-center justify-center rounded-md border border-zinc-800 bg-zinc-900 text-zinc-400 transition-colors duration-150 hover:border-zinc-700 hover:bg-zinc-800 hover:text-zinc-100 cursor-pointer"
+            title="Cài đặt hệ thống"
+            aria-label="Mở Settings"
+          >
+            <Settings className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
         </div>
       </header>
 
-      <main className="p-6">
-        {activeTab === "academic" ? (
+      <main className="p-5">
+        {activeTab === "home" ? (
+          <HomeDashboard
+            onNavigateTab={(tab) => setActiveTab(tab)}
+            onSyncPortal={() => void handleQuickPortalSync()}
+          />
+        ) : activeTab === "schedule" ? (
+          <ScheduleDashboard />
+        ) : activeTab === "academic" ? (
           <AcademicDashboard />
         ) : activeTab === "vault" ? (
           <VaultDashboard />
@@ -484,17 +565,17 @@ export default function App() {
         submission={selectedSubmission}
       />
 
-      <CommandPaletteModal />
+      <CommandPaletteModal onNavigateTab={(tab) => setActiveTab(tab)} />
 
       {/* --- Toast notifications --- */}
       <div className="fixed bottom-4 right-4 flex flex-col gap-2 z-50">
         {toasts.map((toast) => (
           <div
             key={toast.id}
-            className={`px-4 py-3 rounded-lg shadow-lg text-sm font-medium animate-in slide-in-from-bottom-2 ${
+            className={`px-3.5 py-2.5 rounded-md shadow-lg text-xs font-medium ${
               toast.isFirstAc
-                ? "bg-violet-600 text-white"
-                : "bg-zinc-800 text-zinc-200 border border-zinc-700"
+                ? "bg-emerald-950 text-emerald-200 border border-emerald-800/70"
+                : "bg-zinc-900 text-zinc-200 border border-zinc-800"
             }`}
           >
             {toast.message}
@@ -510,6 +591,10 @@ export default function App() {
 
       <SettingsModal onResetGenesis={handleResetToGenesis} />
       <DevControlDock onResetIdentity={handleResetIdentity} />
+      <SyncPortalModal
+        isOpen={isPortalSyncModalOpen}
+        onClose={() => setIsPortalSyncModalOpen(false)}
+      />
 
       <AutoUpdateModal
         status={updateStatus}

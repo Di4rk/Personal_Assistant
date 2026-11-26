@@ -19,7 +19,15 @@ import type {
   DailyBriefingDto,
 } from "../features/academic/types";
 import type { LifeMatrixEntryDto } from "../features/life-matrix/types";
-import type { CreateStructuredNoteDto, ScaffoldResultDto, VaultSearchResultDto, VaultStatsDto } from "../features/vault/types";
+import type {
+  CreateStructuredNoteDto,
+  SaveVaultNoteDto,
+  ScaffoldResultDto,
+  VaultNoteDetailDto,
+  VaultNoteSummaryDto,
+  VaultSearchResultDto,
+  VaultStatsDto,
+} from "../features/vault/types";
 import type {
   GeminiConfig,
   GeminiStreamChunk,
@@ -27,6 +35,21 @@ import type {
   TaskExtractionRequest,
   ExtractedTask,
 } from "../types/gemini";
+import type {
+  PortalRegisteredClass,
+  PortalTimetableSlot,
+  PortalTuitionRecord,
+  PortalCertificate,
+  PortalClassActivity,
+  GoogleCalendarConfig,
+  GoogleOAuthStatus,
+  CreateGoogleEventInput,
+  PushUitScheduleSummary,
+  CalendarEvent,
+  GoogleCalendarSyncSummary,
+  MoodleGrade,
+  MoodleNotification,
+} from "../types/portal-extra";
 
 /**
  * Wrapper mỏng quanh invoke() để:
@@ -853,4 +876,181 @@ export async function saveExtractedMoodleTasks(tasks: ExtractedTask[]): Promise<
   return invoke<number>("save_extracted_moodle_tasks", { tasks });
 }
 
+// ============================================================
+//  Portal Extra & Personal Google Calendar ICS (v1.2.0)
+// ============================================================
+
+export async function getPortalRegisteredClasses(): Promise<PortalRegisteredClass[]> {
+  return invoke<PortalRegisteredClass[]>("get_portal_registered_classes");
+}
+
+export async function getPortalTimetable(
+  startDate?: string,
+  endDate?: string
+): Promise<PortalTimetableSlot[]> {
+  return invoke<PortalTimetableSlot[]>("get_portal_timetable", {
+    startDate: startDate ?? null,
+    endDate: endDate ?? null,
+  });
+}
+
+export async function getPortalTuition(): Promise<PortalTuitionRecord[]> {
+  return invoke<PortalTuitionRecord[]>("get_portal_tuition");
+}
+
+export async function getPortalCertificates(): Promise<PortalCertificate[]> {
+  return invoke<PortalCertificate[]>("get_portal_certificates");
+}
+
+export async function getPortalClassActivities(): Promise<PortalClassActivity[]> {
+  return invoke<PortalClassActivity[]>("get_portal_class_activities");
+}
+
+export async function getMoodleGrades(): Promise<MoodleGrade[]> {
+  return invoke<MoodleGrade[]>("get_moodle_grades");
+}
+
+export async function getMoodleNotifications(): Promise<MoodleNotification[]> {
+  return invoke<MoodleNotification[]>("get_moodle_notifications");
+}
+
+export async function listGoogleCalendars(): Promise<GoogleCalendarConfig[]> {
+  return invoke<GoogleCalendarConfig[]>("list_google_calendars");
+}
+
+export async function addGoogleCalendar(
+  name: string,
+  icsUrl: string,
+  color?: string
+): Promise<GoogleCalendarConfig> {
+  return invoke<GoogleCalendarConfig>("add_google_calendar", {
+    name,
+    icsUrl,
+    color: color ?? null,
+  });
+}
+
+export async function removeGoogleCalendar(id: string): Promise<void> {
+  return invoke<void>("remove_google_calendar", { id });
+}
+
+export async function toggleGoogleCalendar(
+  id: string,
+  isEnabled: boolean
+): Promise<void> {
+  return invoke<void>("toggle_google_calendar", { id, isEnabled });
+}
+
+export async function syncGoogleCalendars(): Promise<GoogleCalendarSyncSummary> {
+  return invoke<GoogleCalendarSyncSummary>("sync_google_calendars");
+}
+
+export async function getCalendarEvents(
+  startTs: number,
+  endTs: number
+): Promise<CalendarEvent[]> {
+  return invoke<CalendarEvent[]>("get_calendar_events", { startTs, endTs });
+}
+
+export async function exportUitScheduleIcs(): Promise<string> {
+  return invoke<string>("export_uit_schedule_ics");
+}
+
+export async function getGoogleOAuthStatus(): Promise<GoogleOAuthStatus> {
+  return invoke<GoogleOAuthStatus>("get_google_oauth_status");
+}
+
+export async function saveGoogleOAuthClientConfig(
+  clientId: string,
+  clientSecret: string
+): Promise<void> {
+  return invoke<void>("save_google_oauth_client_config", {
+    clientId,
+    clientSecret,
+  });
+}
+
+export async function connectGoogleCalendarOAuth(): Promise<GoogleCalendarSyncSummary> {
+  return invoke<GoogleCalendarSyncSummary>("connect_google_calendar_oauth");
+}
+
+export async function disconnectGoogleCalendarOAuth(): Promise<void> {
+  return invoke<void>("disconnect_google_calendar_oauth");
+}
+
+export async function createGoogleCalendarEvent(
+  input: CreateGoogleEventInput
+): Promise<CalendarEvent> {
+  return invoke<CalendarEvent>("create_google_calendar_event", { input });
+}
+
+export async function deleteGoogleCalendarEvent(
+  calendarId: string,
+  uid: string
+): Promise<void> {
+  return invoke<void>("delete_google_calendar_event", { calendarId, uid });
+}
+
+export async function pushUitScheduleToGoogle(): Promise<PushUitScheduleSummary> {
+  return invoke<PushUitScheduleSummary>("push_uit_schedule_to_google");
+}
+
+export interface SsoCredentialsStatus {
+  username: string;
+  has_password: boolean;
+  auto_login: boolean;
+}
+
+export async function getSsoCredentialsStatus(): Promise<SsoCredentialsStatus> {
+  return invoke<SsoCredentialsStatus>("get_sso_credentials_status");
+}
+
+export async function saveSsoCredentials(
+  username: string,
+  password: string | null,
+  autoLogin: boolean
+): Promise<void> {
+  return invoke<void>("save_sso_credentials", {
+    username,
+    password,
+    autoLogin,
+  });
+}
+
+export async function clearSsoCredentials(): Promise<void> {
+  return invoke<void>("clear_sso_credentials");
+}
+
+export async function getLocalSyncToken(): Promise<string> {
+  return invoke<string>("get_local_sync_token");
+}
+
+export async function markMoodleTaskSubmitted(
+  taskId: number,
+  isSubmitted: boolean
+): Promise<void> {
+  return invoke<void>("mark_moodle_task_submitted", { taskId, isSubmitted });
+}
+
+export async function ensureDefaultVaultPath(): Promise<string> {
+  return invoke<string>("ensure_default_vault_path");
+}
+
+export async function listVaultNotes(): Promise<VaultNoteSummaryDto[]> {
+  return invoke<VaultNoteSummaryDto[]>("list_vault_notes");
+}
+
+export async function readVaultNote(noteId: string): Promise<VaultNoteDetailDto> {
+  return invoke<VaultNoteDetailDto>("read_vault_note", { noteId });
+}
+
+export async function saveVaultNote(
+  payload: SaveVaultNoteDto
+): Promise<VaultNoteDetailDto> {
+  return invoke<VaultNoteDetailDto>("save_vault_note", { payload });
+}
+
+export async function deleteVaultNote(noteId: string): Promise<void> {
+  return invoke<void>("delete_vault_note", { noteId });
+}
 

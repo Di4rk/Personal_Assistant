@@ -51,8 +51,6 @@ impl GradeScale {
             GradeScale::C
         } else if score >= 5.0 {
             GradeScale::DPlus
-        } else if score >= 4.0 {
-            GradeScale::D
         } else {
             GradeScale::F
         }
@@ -88,11 +86,10 @@ impl GradeScale {
         }
     }
 
-    /// Môn học có được tính vào GPA không (môn D trở lên mới được tính GPA
-    /// trong quy chế credit — tuy nhiên, `is_passed` là cờ riêng ở course level).
-    /// Grade F không phải môn đạt, nhưng vẫn được TÍNH vào GPA (kéo điểm xuống).
+    /// Theo quy chế UIT, môn đạt yêu cầu phải có điểm tổng kết >= 5.0 (D+ trở lên).
+    /// Grade D (< 5.0) và F không phải môn đạt, nhưng vẫn được TÍNH vào GPA (kéo điểm xuống).
     pub fn is_passed(&self) -> bool {
-        !matches!(self, GradeScale::F)
+        !matches!(self, GradeScale::D | GradeScale::F)
     }
 }
 
@@ -449,7 +446,6 @@ pub fn self_heal_academic_data(conn: &Connection) -> SqlResult<()> {
                 WHEN summary_score_10 >= 6.0 THEN 2.5
                 WHEN summary_score_10 >= 5.5 THEN 2.0
                 WHEN summary_score_10 >= 5.0 THEN 1.5
-                WHEN summary_score_10 >= 4.0 THEN 1.0
                 ELSE 0.0
             END,
             grade_4 = CASE
@@ -460,7 +456,6 @@ pub fn self_heal_academic_data(conn: &Connection) -> SqlResult<()> {
                 WHEN summary_score_10 >= 6.0 THEN 2.5
                 WHEN summary_score_10 >= 5.5 THEN 2.0
                 WHEN summary_score_10 >= 5.0 THEN 1.5
-                WHEN summary_score_10 >= 4.0 THEN 1.0
                 ELSE 0.0
             END,
             grade_char = CASE
@@ -471,7 +466,6 @@ pub fn self_heal_academic_data(conn: &Connection) -> SqlResult<()> {
                 WHEN summary_score_10 >= 6.0 THEN 'C+'
                 WHEN summary_score_10 >= 5.5 THEN 'C'
                 WHEN summary_score_10 >= 5.0 THEN 'D+'
-                WHEN summary_score_10 >= 4.0 THEN 'D'
                 ELSE 'F'
             END
          WHERE summary_score_10 IS NOT NULL AND (summary_score_4 IS NULL OR grade_char IS NULL OR grade_char = '' OR grade_char = '—');",
@@ -677,7 +671,7 @@ fn compute_summary(dto: &UpsertCourseDto) -> (Option<f64>, Option<f64>, Option<S
             let grade = GradeScale::from_score_10(s10);
             let s4 = grade.to_scale_4();
             let is_gpa_calc = dto.is_gpa_calculated.unwrap_or(true);
-            let passed = if is_gpa_calc { grade.is_passed() } else { s10 >= 4.0 };
+            let passed = if is_gpa_calc { grade.is_passed() } else { s10 >= 5.0 };
             (Some(s10), Some(s4), Some(grade.as_char().to_string()), passed)
         }
         None => (None, None, None, false),
@@ -1150,13 +1144,13 @@ mod tests {
     }
 
     #[test]
-    fn grade_d_is_passed() {
-        assert!(GradeScale::D.is_passed());
+    fn grade_d_is_not_passed_at_uit() {
+        assert!(!GradeScale::D.is_passed());
     }
 
     #[test]
     fn all_boundaries_spot_check() {
-        // Kiểm tra toàn bộ ranh giới để tránh off-by-one
+        // Kiểm tra toàn bộ ranh giới theo quy chế UIT (>= 5.0 đạt)
         let cases: &[(f64, GradeScale, f64)] = &[
             (10.0, GradeScale::APlus, 4.0),
             (9.0, GradeScale::APlus, 4.0),
@@ -1172,8 +1166,8 @@ mod tests {
             (5.5, GradeScale::C, 2.0),
             (5.49, GradeScale::DPlus, 1.5),
             (5.0, GradeScale::DPlus, 1.5),
-            (4.99, GradeScale::D, 1.0),
-            (4.0, GradeScale::D, 1.0),
+            (4.99, GradeScale::F, 0.0),
+            (4.0, GradeScale::F, 0.0),
             (3.99, GradeScale::F, 0.0),
             (0.0, GradeScale::F, 0.0),
         ];

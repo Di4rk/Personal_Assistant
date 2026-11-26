@@ -1,531 +1,965 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
-import {
-  FolderGit2,
-  Folder,
-  RefreshCw,
-  Search,
-  FileText,
-  Link2,
-  Hash,
-  Loader2,
-  Plus,
-  ExternalLink,
-  Zap,
-} from "lucide-react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
-  getVaultStats,
-  scanVault,
+  FileText,
+  FolderOpen,
+  Link2,
+  Loader2,
+  Plus,
+  RefreshCw,
+  Save,
+  Search,
+  Trash2,
+  Zap,
+  ChevronDown,
+  ChevronUp,
+  ExternalLink,
+  Columns2,
+  Eye,
+  Pencil,
+  Hash,
+} from "lucide-react";
+import {
+  ensureDefaultVaultPath,
+  listVaultNotes,
+  readVaultNote,
+  saveVaultNote,
+  deleteVaultNote,
   searchVault,
-  openOnenoteLink,
-  getVaultPath,
+  scanVault,
   setVaultPath as setVaultPathBackend,
   scaffoldSemesterVault,
-  getMoodleCourses,
-  startVaultWatcher,
-  getVaultWatcherStatus,
+  openOnenoteLink,
+  openExternalUrl,
   VaultSyncEvent,
 } from "@/lib/tauri-client";
 import { useTauriEvent } from "@/hooks/useTauriEvent";
-import type { VaultStatsDto, VaultSearchResultDto, NoteType } from "../types";
+import type {
+  VaultBacklinkDto,
+  VaultNoteSummaryDto,
+  VaultSearchResultDto,
+} from "../types";
+import { MarkdownRenderer } from "./MarkdownRenderer";
 import { QuickCaptureModal } from "./QuickCaptureModal";
+import { renderHighlightedSnippet } from "@/lib/snippet";
+
+type EditorMode = "edit" | "split" | "preview";
+
+function formatRelativeTime(ts: number): string {
+  if (!ts) return "";
+  const d = new Date(ts * 1000);
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const hh = String(d.getHours()).padStart(2, "0");
+  const min = String(d.getMinutes()).padStart(2, "0");
+  return `${dd}/${mm} ${hh}:${min}`;
+}
+
+function folderLabel(folder: string): string {
+  if (folder === "notes" || folder === "root") return "Chung";
+  if (folder === "algo") return "Thuật toán";
+  if (folder === "academic") return "Môn học";
+  if (folder === "onenote") return "OneNote";
+  return folder;
+}
 
 export const VaultDashboard: React.FC = () => {
-  const [stats, setStats] = useState<VaultStatsDto | null>(null);
   const [vaultPath, setVaultPath] = useState<string>("");
-  const [isSyncing, setIsSyncing] = useState<boolean>(false);
-  const [syncMessage, setSyncMessage] = useState<string | null>(null);
-  const [syncError, setSyncError] = useState<string | null>(null);
-  const [isQuickCaptureOpen, setIsQuickCaptureOpen] = useState<boolean>(false);
-  const [coursesCount, setCoursesCount] = useState<number>(0);
-  const [isScaffolding, setIsScaffolding] = useState<boolean>(false);
-  const [isWatcherActive, setIsWatcherActive] = useState<boolean>(false);
-  const [lastSyncedFile, setLastSyncedFile] = useState<string | null>(null);
+  const [notes, setNotes] = useState<VaultNoteSummaryDto[]>([]);
+  const [selectedFolder, setSelectedFolder] = useState<string>("all");
+  const [isLoadingList, setIsLoadingList] = useState<boolean>(true);
+
+  // Active note editor state
+  const [activeNoteId, setActiveNoteId] = useState<string | null>(null);
+  const [title, setTitle] = useState<string>("");
+  const [folder, setFolder] = useState<string>("notes");
+  const [tagsInput, setTagsInput] = useState<string>("");
+  const [noteType, setNoteType] = useState<string>("GENERAL");
+  const [externalUri, setExternalUri] = useState<string>("");
+  const [content, setContent] = useState<string>("");
+  const [backlinks, setBacklinks] = useState<VaultBacklinkDto[]>([]);
+  const [isLoadingNote, setIsLoadingNote] = useState<boolean>(false);
+
+  // Save state
+  const [saveState, setSaveState] = useState<"saved" | "dirty" | "saving">("saved");
+  const [editorError, setEditorError] = useState<string | null>(null);
+  const [editorMode, setEditorMode] = useState<EditorMode>("split");
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   // Search state
   const [searchQuery, setSearchQuery] = useState<string>("");
-  const [isSearching, setIsSearching] = useState<boolean>(false);
   const [searchResults, setSearchResults] = useState<VaultSearchResultDto[]>([]);
-  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [isSearching, setIsSearching] = useState<boolean>(false);
 
-  const loadStats = useCallback(async () => {
+  // Secondary vault tools
+  const [showVaultTools, setShowVaultTools] = useState<boolean>(false);
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  const [isQuickCaptureOpen, setIsQuickCaptureOpen] = useState<boolean>(false);
+  const [toolMessage, setToolMessage] = useState<string | null>(null);
+
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const autosaveTimerRef = useRef<number | null>(null);
+  const activeNoteIdRef = useRef<string | null>(null);
+  activeNoteIdRef.current = activeNoteId;
+
+  const refreshNotesList = useCallback(async (selectIdIfEmpty = true) => {
     try {
-      const data = await getVaultStats();
-      setStats(data);
+      const list = await listVaultNotes();
+      setNotes(list);
+      if (selectIdIfEmpty && !activeNoteIdRef.current && list.length > 0) {
+        const first = list[0];
+        setIsLoadingNote(true);
+        try {
+          const detail = await readVaultNote(first.id);
+          setActiveNoteId(detail.id);
+          setTitle(detail.title);
+          setFolder(detail.folder);
+          setTagsInput(detail.tags.join(", "));
+          setNoteType(detail.noteType);
+          setExternalUri(detail.externalUri);
+          setContent(detail.content);
+          setBacklinks(detail.backlinks);
+          setSaveState("saved");
+        } finally {
+          setIsLoadingNote(false);
+        }
+      }
     } catch (err) {
-      console.error("Failed to load vault stats:", err);
+      setEditorError(typeof err === "string" ? err : "Không thể tải danh sách ghi chú.");
     }
   }, []);
 
   useEffect(() => {
-    void loadStats();
-    void (async () => {
+    let mounted = true;
+    const init = async () => {
+      setIsLoadingList(true);
       try {
-        const [saved, moodleCourses] = await Promise.all([
-          getVaultPath().catch(() => null),
-          getMoodleCourses().catch(() => []),
-        ]);
-        if (saved) {
-          setVaultPath(saved);
-        }
-        if (moodleCourses && moodleCourses.length > 0) {
-          setCoursesCount(moodleCourses.length);
-        }
+        const path = await ensureDefaultVaultPath();
+        if (mounted) setVaultPath(path);
+        await refreshNotesList(true);
       } catch (err) {
-        console.error("Failed to load initial vault context:", err);
+        if (mounted) {
+          setEditorError(typeof err === "string" ? err : "Không thể khởi tạo thư mục ghi chú.");
+        }
+      } finally {
+        if (mounted) setIsLoadingList(false);
       }
-    })();
-  }, [loadStats]);
+    };
+    void init();
+    return () => {
+      mounted = false;
+    };
+  }, [refreshNotesList]);
 
-  // Lắng nghe sự kiện đồng bộ thời gian thực từ Rust Vault Watcher (debounce 800ms)
-  useTauriEvent<VaultSyncEvent>("vault-sync-event", (payload) => {
-    setIsWatcherActive(true);
-    setLastSyncedFile(payload.updated_file);
-    setStats((prev) => {
-      if (!prev) return prev;
-      return {
-        ...prev,
-        totalNotes: payload.total_notes,
-        totalTags: payload.distinct_tags,
-      };
-    });
-    void loadStats();
-    setTimeout(() => setLastSyncedFile(null), 3000);
+  useTauriEvent<VaultSyncEvent>("vault-synced", () => {
+    void refreshNotesList(false);
   });
 
-  // Tự động khởi động / kiểm tra Watcher khi vaultPath thay đổi
-  useEffect(() => {
-    if (vaultPath && vaultPath.trim()) {
-      void (async () => {
-        try {
-          await startVaultWatcher(vaultPath.trim());
-          setIsWatcherActive(true);
-        } catch (err) {
-          console.error("Failed to start vault watcher:", err);
-          const active = await getVaultWatcherStatus().catch(() => false);
-          setIsWatcherActive(active);
-        }
-      })();
-    } else {
-      setIsWatcherActive(false);
+  const openNoteById = useCallback(async (noteId: string) => {
+    if (autosaveTimerRef.current) {
+      window.clearTimeout(autosaveTimerRef.current);
+      autosaveTimerRef.current = null;
     }
-  }, [vaultPath]);
-
-  const handleScaffoldVault = async () => {
-    if (!vaultPath || !vaultPath.trim()) {
-      setSyncError("Vui lòng chọn thư mục Vault trước khi khởi tạo cấu trúc!");
-      return;
-    }
-    setIsScaffolding(true);
-    setSyncError(null);
-    setSyncMessage(null);
+    setEditorError(null);
+    setConfirmDeleteId(null);
+    setIsLoadingNote(true);
     try {
-      const res = await scaffoldSemesterVault(vaultPath, "HK2 2025-2026");
-      setSyncMessage(
-        `Khởi tạo HK2 thành công: Đã tạo ${res.createdFolders} thư mục, ${res.createdNotes} ghi chú môn học mới (Bỏ qua ${res.skippedNotes} ghi chú đã tồn tại để tránh ghi đè).`
-      );
-      await loadStats();
-      await triggerScanVault(vaultPath);
+      const detail = await readVaultNote(noteId);
+      setActiveNoteId(detail.id);
+      setTitle(detail.title);
+      setFolder(detail.folder);
+      setTagsInput(detail.tags.join(", "));
+      setNoteType(detail.noteType);
+      setExternalUri(detail.externalUri);
+      setContent(detail.content);
+      setBacklinks(detail.backlinks);
+      setSaveState("saved");
     } catch (err) {
-      setSyncError(typeof err === "string" ? err : "Lỗi khi khởi tạo cấu trúc Vault");
+      setEditorError(typeof err === "string" ? err : "Không thể mở ghi chú.");
     } finally {
-      setIsScaffolding(false);
+      setIsLoadingNote(false);
     }
-  };
+  }, []);
 
-  const renderNoteTypeBadge = (type?: NoteType | string) => {
-    switch (type) {
-      case "ALGO_TRICK":
-        return (
-          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-blue-950/60 text-blue-300 border border-blue-800/40">
-            ALGO
-          </span>
-        );
-      case "TEACHING_SHEET":
-        return (
-          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-950/60 text-emerald-300 border border-emerald-800/40">
-            TEACHING
-          </span>
-        );
-      case "ONENOTE_LINK":
-        return (
-          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-purple-950/60 text-purple-300 border border-purple-800/40">
-            ONENOTE
-          </span>
-        );
-      case "ACADEMIC_SUMMARY":
-        return (
-          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-950/60 text-amber-300 border border-amber-800/40">
-            ACADEMIC
-          </span>
-        );
-      default:
-        return (
-          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800/60 text-zinc-400 border border-zinc-700/40">
-            NOTE
-          </span>
-        );
+  const handleSaveNote = useCallback(
+    async (overrideContent?: string) => {
+      const bodyToSave = overrideContent ?? content;
+      const cleanTitle = title.trim() || "Ghi chú chưa đặt tên";
+      const parsedTags = tagsInput
+        .split(",")
+        .map((t) => t.trim().replace(/^#/, ""))
+        .filter((t) => t.length > 0);
+
+      setSaveState("saving");
+      setEditorError(null);
+      try {
+        const saved = await saveVaultNote({
+          id: activeNoteId ?? undefined,
+          folder,
+          title: cleanTitle,
+          noteType,
+          tags: parsedTags,
+          content: bodyToSave,
+          externalUri: externalUri || undefined,
+        });
+        setActiveNoteId(saved.id);
+        setTitle(saved.title);
+        setFolder(saved.folder);
+        setBacklinks(saved.backlinks);
+        setSaveState("saved");
+        await refreshNotesList(false);
+      } catch (err) {
+        setSaveState("dirty");
+        setEditorError(typeof err === "string" ? err : "Lỗi khi lưu ghi chú.");
+      }
+    },
+    [activeNoteId, content, externalUri, folder, noteType, refreshNotesList, tagsInput, title]
+  );
+
+  // Debounced autosave for existing or edited notes
+  useEffect(() => {
+    if (saveState !== "dirty") return;
+    if (!title.trim() && !content.trim() && !activeNoteId) return;
+
+    if (autosaveTimerRef.current) {
+      window.clearTimeout(autosaveTimerRef.current);
     }
-  };
+    autosaveTimerRef.current = window.setTimeout(() => {
+      void handleSaveNote();
+    }, 800);
 
-  // Debounced search handler (200ms)
-  const handleQueryChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.value;
-    setSearchQuery(val);
+    return () => {
+      if (autosaveTimerRef.current) {
+        window.clearTimeout(autosaveTimerRef.current);
+      }
+    };
+  }, [activeNoteId, content, handleSaveNote, saveState, tagsInput, title]);
 
-    if (searchDebounceRef.current) {
-      clearTimeout(searchDebounceRef.current);
-    }
+  // Ctrl+S shortcut
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        void handleSaveNote();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [handleSaveNote]);
 
-    if (!val.trim()) {
+  // FTS5 Search debounce
+  useEffect(() => {
+    const trimmed = searchQuery.trim();
+    if (!trimmed) {
       setSearchResults([]);
       setIsSearching(false);
       return;
     }
 
     setIsSearching(true);
-    searchDebounceRef.current = setTimeout(async () => {
+    const timer = window.setTimeout(async () => {
       try {
-        const results = await searchVault(val);
+        const results = await searchVault(trimmed);
         setSearchResults(results);
-      } catch (err) {
-        console.error("Search failed:", err);
+      } catch {
         setSearchResults([]);
       } finally {
         setIsSearching(false);
       }
-    }, 200);
+    }, 180);
+
+    return () => window.clearTimeout(timer);
+  }, [searchQuery]);
+
+  const handleCreateNewNote = () => {
+    if (autosaveTimerRef.current) {
+      window.clearTimeout(autosaveTimerRef.current);
+      autosaveTimerRef.current = null;
+    }
+    setActiveNoteId(null);
+    setTitle("");
+    setFolder(selectedFolder !== "all" ? selectedFolder : "notes");
+    setTagsInput("");
+    setNoteType("GENERAL");
+    setExternalUri("");
+    setContent("# Ghi chú mới\n\n- [ ] Việc cần làm đầu tiên\n");
+    setBacklinks([]);
+    setSaveState("dirty");
+    setEditorError(null);
+    setEditorMode((prev) => (prev === "preview" ? "split" : prev));
   };
 
-  const triggerScanVault = async (targetPath: string) => {
-    if (!targetPath.trim()) {
-      setSyncError("Vui lòng chọn thư mục Vault hợp lệ");
+  const handleDeleteNote = async (noteId: string) => {
+    try {
+      await deleteVaultNote(noteId);
+      setConfirmDeleteId(null);
+      if (activeNoteId === noteId) {
+        setActiveNoteId(null);
+        setTitle("");
+        setContent("");
+        setTagsInput("");
+        setBacklinks([]);
+        setSaveState("saved");
+      }
+      await refreshNotesList(true);
+    } catch (err) {
+      setEditorError(typeof err === "string" ? err : "Không thể xóa ghi chú.");
+    }
+  };
+
+  const handleToggleTaskLine = (lineIndex: number) => {
+    const lines = content.split(/\r?\n/);
+    if (lineIndex < 0 || lineIndex >= lines.length) return;
+    const line = lines[lineIndex];
+    if (/^\s*[-*]\s+\[ \]/.test(line)) {
+      lines[lineIndex] = line.replace(/^(\s*[-*]\s+)\[ \]/, "$1[x]");
+    } else if (/^\s*[-*]\s+\[[xX]\]/.test(line)) {
+      lines[lineIndex] = line.replace(/^(\s*[-*]\s+)\[[xX]\]/, "$1[ ]");
+    } else {
       return;
     }
+    const updated = lines.join("\n");
+    setContent(updated);
+    setSaveState("dirty");
+  };
 
-    setIsSyncing(true);
-    setSyncError(null);
-    setSyncMessage(null);
+  const handleOpenWikilink = async (target: string) => {
+    const targetLower = target.toLowerCase();
+    const matched = notes.find(
+      (n) =>
+        n.title.toLowerCase() === targetLower ||
+        n.id.toLowerCase() === targetLower ||
+        n.id.toLowerCase() === `${targetLower}.md` ||
+        n.id.toLowerCase().endsWith(`/${targetLower}.md`)
+    );
+    if (matched) {
+      await openNoteById(matched.id);
+      return;
+    }
+    // Create a new draft note with this wikilink title
+    setActiveNoteId(null);
+    setTitle(target);
+    setFolder("notes");
+    setTagsInput("");
+    setNoteType("GENERAL");
+    setExternalUri("");
+    setContent(`# ${target}\n\n`);
+    setBacklinks([]);
+    setSaveState("dirty");
+    setEditorMode((prev) => (prev === "preview" ? "split" : prev));
+  };
 
+  const insertSnippet = (before: string, after = "", placeholder = "") => {
+    const el = textareaRef.current;
+    if (!el) {
+      setContent((prev) => `${prev}${prev.endsWith("\n") || prev === "" ? "" : "\n"}${before}${placeholder}${after}`);
+      setSaveState("dirty");
+      return;
+    }
+    const start = el.selectionStart;
+    const end = el.selectionEnd;
+    const selected = content.slice(start, end) || placeholder;
+    const nextText = `${content.slice(0, start)}${before}${selected}${after}${content.slice(end)}`;
+    setContent(nextText);
+    setSaveState("dirty");
+    window.requestAnimationFrame(() => {
+      el.focus();
+      const cursorPos = start + before.length + selected.length;
+      el.setSelectionRange(cursorPos, cursorPos);
+    });
+  };
+
+  const handleSelectVaultDir = async () => {
     try {
-      const result = await scanVault(targetPath.trim());
-      setStats(result);
-      setSyncMessage(
-        `Đồng bộ hoàn tất: ${result.totalNotes} notes, ${result.totalLinks} links, ${result.totalTags} tags.`
-      );
-      // If active query, re-run search
-      if (searchQuery.trim()) {
-        const results = await searchVault(searchQuery.trim());
-        setSearchResults(results);
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        title: "Chọn thư mục lưu ghi chú (hỗ trợ Obsidian Vault)",
+      });
+      if (selected && typeof selected === "string") {
+        setIsSyncing(true);
+        await setVaultPathBackend(selected);
+        await scanVault(selected);
+        setVaultPath(selected);
+        setToolMessage("Đã liên kết và đồng bộ thư mục ghi chú.");
+        await refreshNotesList(true);
       }
     } catch (err) {
-      setSyncError(typeof err === "string" ? err : "Đồng bộ thất bại. Kiểm tra lại đường dẫn.");
+      setEditorError(typeof err === "string" ? err : "Không thể mở thư mục Vault.");
     } finally {
       setIsSyncing(false);
     }
   };
 
-  const handlePickDirectory = async () => {
+  const handleRescan = async () => {
+    if (!vaultPath.trim()) return;
+    setIsSyncing(true);
     try {
-      const selected = await open({ directory: true, multiple: false });
-      if (selected && typeof selected === "string") {
-        const clean = selected.trim();
-        setVaultPath(clean);
-        await setVaultPathBackend(clean);
-        try {
-          await startVaultWatcher(clean);
-          setIsWatcherActive(true);
-        } catch (watcherErr) {
-          console.error("Failed to start watcher on chosen directory:", watcherErr);
-        }
-        await triggerScanVault(clean);
-      }
+      await scanVault(vaultPath);
+      await refreshNotesList(false);
+      setToolMessage("Đã quét lại các file Markdown.");
     } catch (err) {
-      console.error("Error picking vault directory:", err);
+      setEditorError(typeof err === "string" ? err : "Lỗi khi quét lại thư mục.");
+    } finally {
+      setIsSyncing(false);
     }
   };
 
+  const handleScaffoldFolders = async () => {
+    if (!vaultPath.trim()) return;
+    setIsSyncing(true);
+    try {
+      const res = await scaffoldSemesterVault(vaultPath);
+      await scanVault(vaultPath);
+      await refreshNotesList(false);
+      setToolMessage(
+        `Đã tạo ${res.createdFolders} thư mục môn học và ${res.createdNotes} ghi chú mẫu.`
+      );
+    } catch (err) {
+      setEditorError(typeof err === "string" ? err : "Không thể tạo thư mục môn học.");
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const folders = useMemo(() => {
+    const set = new Set<string>(["notes"]);
+    for (const n of notes) {
+      if (n.folder) set.add(n.folder);
+    }
+    return ["all", ...Array.from(set)];
+  }, [notes]);
+
+  const visibleNotes = useMemo(() => {
+    if (selectedFolder === "all") return notes;
+    return notes.filter((n) => n.folder === selectedFolder);
+  }, [notes, selectedFolder]);
+
   return (
-    <div className="space-y-6">
-      {/* Top Banner / Sync Controls */}
-      <div className="rounded-xl bg-zinc-900 border border-zinc-800 p-5 shadow-sm">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <FolderGit2 className="w-5 h-5 text-violet-400" />
-              <h2 className="text-base font-semibold text-zinc-100">Native Vault Engine</h2>
-              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-violet-950/60 text-violet-300 border border-violet-800/40">
-                SQLite FTS5
-              </span>
-            </div>
-            <p className="text-xs text-zinc-400">
-              Quét tệp Markdown theo dõi thay đổi incremental, trích xuất wikilinks và tra cứu snippet tốc độ cao.
-            </p>
-          </div>
-
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full md:w-auto flex-wrap">
-            <div className="flex items-center gap-2">
+    <div className="mx-auto max-w-7xl space-y-3">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 min-h-[calc(100vh-120px)]">
+        {/* LEFT PANE: Note Sidebar */}
+        <aside className="lg:col-span-4 xl:col-span-3 flex flex-col rounded-xl border border-zinc-800 bg-zinc-900/70 overflow-hidden">
+          <div className="p-3 border-b border-zinc-800 space-y-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <h2 className="text-sm font-semibold text-zinc-100">Ghi chú học tập</h2>
+                <p className="text-[11px] text-zinc-500">{notes.length} ghi chú đã lưu</p>
+              </div>
               <button
                 type="button"
-                onClick={handlePickDirectory}
-                disabled={isSyncing}
-                className="flex items-center justify-center gap-2 px-3.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 text-zinc-200 text-xs font-medium rounded-lg transition-colors border border-zinc-700 shadow-sm whitespace-nowrap"
+                onClick={handleCreateNewNote}
+                className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 px-2.5 py-1.5 text-xs font-semibold text-white transition-colors cursor-pointer"
               >
-                <Folder className="w-4 h-4 text-violet-400" />
-                <span>Chọn thư mục Vault</span>
+                <Plus className="h-3.5 w-3.5" />
+                <span>Ghi chú mới</span>
               </button>
-              {vaultPath ? (
-                <span
-                  className="text-xs text-zinc-300 font-mono truncate max-w-[200px] sm:max-w-[260px] px-2.5 py-1 bg-zinc-950 border border-zinc-800 rounded-lg"
-                  title={vaultPath}
-                >
-                  {vaultPath}
-                </span>
+            </div>
+
+            {/* Instant Search */}
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-500" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Tìm nhanh tiêu đề, nội dung, code..."
+                className="w-full rounded-lg border border-zinc-800 bg-zinc-950 pl-8 pr-3 py-1.5 text-xs text-zinc-200 placeholder-zinc-500 focus:border-emerald-500 focus:outline-none"
+              />
+            </div>
+
+            {/* Folder pills */}
+            {!searchQuery.trim() && (
+              <div className="flex flex-wrap gap-1">
+                {folders.map((f) => (
+                  <button
+                    key={f}
+                    type="button"
+                    onClick={() => setSelectedFolder(f)}
+                    className={`rounded-md px-2 py-0.5 text-[11px] font-medium transition-colors cursor-pointer ${
+                      selectedFolder === f
+                        ? "bg-emerald-600/20 text-emerald-300 border border-emerald-500/40"
+                        : "bg-zinc-950/60 text-zinc-400 border border-zinc-800 hover:text-zinc-200"
+                    }`}
+                  >
+                    {f === "all" ? "Tất cả" : folderLabel(f)}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Note / Search Results List */}
+          <div className="flex-1 overflow-y-auto p-2 space-y-1">
+            {searchQuery.trim() ? (
+              isSearching ? (
+                <div className="flex items-center justify-center gap-2 py-8 text-xs text-zinc-500">
+                  <Loader2 className="h-4 w-4 animate-spin text-emerald-400" />
+                  <span>Đang tìm...</span>
+                </div>
+              ) : searchResults.length === 0 ? (
+                <div className="py-8 text-center text-xs text-zinc-500">
+                  Không thấy ghi chú nào khớp &ldquo;{searchQuery.trim()}&rdquo;.
+                </div>
               ) : (
-                <span className="text-xs text-zinc-500 italic">Chưa chọn thư mục</span>
-              )}
-            </div>
-            <button
-              onClick={() => setIsQuickCaptureOpen(true)}
-              className="flex items-center justify-center gap-1.5 px-3.5 py-1.5 bg-violet-600 hover:bg-violet-500 text-white text-xs font-medium rounded-lg transition-colors shadow-sm whitespace-nowrap cursor-pointer"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>+ Quick Note</span>
-            </button>
-            <button
-              onClick={() => triggerScanVault(vaultPath)}
-              disabled={isSyncing || !vaultPath.trim()}
-              className="flex items-center justify-center gap-2 px-4 py-1.5 bg-zinc-800 hover:bg-zinc-700 disabled:bg-zinc-900/50 disabled:opacity-50 text-zinc-200 text-xs font-medium rounded-lg transition-colors border border-zinc-700 shadow-sm whitespace-nowrap cursor-pointer"
-            >
-              {isSyncing ? (
-                <>
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  <span>Đang quét...</span>
-                </>
-              ) : (
-                <>
-                  <RefreshCw className="w-3.5 h-3.5" />
-                  <span>Sync Vault</span>
-                </>
-              )}
-            </button>
-
-            {/* Live Watcher Status Badge */}
-            {isWatcherActive && vaultPath ? (
-              <span
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-950/60 text-emerald-400 border border-emerald-800/40 shadow-sm whitespace-nowrap"
-                title={`Live Watcher đang chạy. Tự động đồng bộ FTS5 theo thời gian thực từ: ${vaultPath}`}
-              >
-                <span className="relative flex h-2 w-2">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                </span>
-                <span>🟢 Tự động đồng bộ (Live Watcher)</span>
-              </span>
-            ) : (
-              <span
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-zinc-900 text-zinc-400 border border-zinc-800 shadow-sm whitespace-nowrap"
-                title={vaultPath ? "Live Watcher đang dừng hoặc chưa kết nối" : "Chưa chọn thư mục Vault"}
-              >
-                <span className="h-2 w-2 rounded-full bg-zinc-500"></span>
-                <span>⚪ Chưa kích hoạt</span>
-              </span>
-            )}
-
-            {vaultPath && (
-              <button
-                type="button"
-                onClick={handleScaffoldVault}
-                disabled={isScaffolding || isSyncing}
-                className="flex items-center justify-center gap-1.5 px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-semibold rounded-lg transition-colors shadow-sm whitespace-nowrap border border-indigo-500/40 cursor-pointer"
-                title="Tự động tạo cây thư mục môn học HK2 và ghi chú khởi tạo từ Moodle"
-              >
-                {isScaffolding ? (
-                  <>
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    <span>Đang tạo cấu trúc...</span>
-                  </>
-                ) : (
-                  <>
-                    <Zap className="w-3.5 h-3.5 text-amber-300" />
-                    <span>Khởi tạo cấu trúc HK2 ({coursesCount > 0 ? `${coursesCount} môn` : "8 môn"})</span>
-                  </>
-                )}
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Sync status messages & Live Watcher toast */}
-        {lastSyncedFile && (
-          <div className="mt-3 text-xs text-emerald-300 bg-emerald-950/60 border border-emerald-800/60 px-3 py-2 rounded-lg flex items-center gap-2">
-            <span className="h-2 w-2 rounded-full bg-emerald-400 animate-ping"></span>
-            <span>Live Watcher đã cập nhật index cho ghi chú: <strong className="font-mono">{lastSyncedFile}</strong></span>
-          </div>
-        )}
-        {syncMessage && (
-          <div className="mt-3 text-xs text-emerald-400 bg-emerald-950/40 border border-emerald-900/60 px-3 py-2 rounded-lg">
-            {syncMessage}
-          </div>
-        )}
-        {syncError && (
-          <div className="mt-3 text-xs text-red-400 bg-red-950/40 border border-red-900/60 px-3 py-2 rounded-lg">
-            {syncError}
-          </div>
-        )}
-      </div>
-
-      {/* Metrics Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="rounded-xl bg-zinc-900 border border-zinc-800 p-4 flex items-center gap-4">
-          <div className="p-2.5 rounded-lg bg-violet-950/50 border border-violet-800/40 text-violet-400">
-            <FileText className="w-5 h-5" />
-          </div>
-          <div>
-            <div className="text-xs text-zinc-400 font-medium">Total Notes</div>
-            <div className="text-2xl font-bold font-mono text-zinc-100">
-              {stats ? stats.totalNotes : "—"}
-            </div>
-          </div>
-        </div>
-
-        <div className="rounded-xl bg-zinc-900 border border-zinc-800 p-4 flex items-center gap-4">
-          <div className="p-2.5 rounded-lg bg-emerald-950/50 border border-emerald-800/40 text-emerald-400">
-            <Link2 className="w-5 h-5" />
-          </div>
-          <div>
-            <div className="text-xs text-zinc-400 font-medium">Wikilinks</div>
-            <div className="text-2xl font-bold font-mono text-zinc-100">
-              {stats ? stats.totalLinks : "—"}
-            </div>
-          </div>
-        </div>
-
-        <div className="rounded-xl bg-zinc-900 border border-zinc-800 p-4 flex items-center gap-4">
-          <div className="p-2.5 rounded-lg bg-amber-950/50 border border-amber-800/40 text-amber-400">
-            <Hash className="w-5 h-5" />
-          </div>
-          <div>
-            <div className="text-xs text-zinc-400 font-medium">Distinct Tags</div>
-            <div className="text-2xl font-bold font-mono text-zinc-100">
-              {stats ? stats.totalTags : "—"}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Quick Search & Results HUD */}
-      <div className="rounded-xl bg-zinc-900 border border-zinc-800 p-5 space-y-4 shadow-sm">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <h3 className="text-sm font-semibold text-zinc-200 flex items-center gap-2">
-            <Search className="w-4 h-4 text-violet-400" />
-            FTS5 Full-Text Search
-          </h3>
-          <div className="relative w-full sm:w-80">
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={handleQueryChange}
-              placeholder="Tìm kiếm nội dung note, keyword..."
-              className="w-full pl-9 pr-3 py-1.5 text-xs bg-zinc-950 border border-zinc-800 rounded-lg text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-violet-500"
-            />
-            <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-3 top-2.5" />
-            {isSearching && (
-              <Loader2 className="w-3.5 h-3.5 text-violet-400 animate-spin absolute right-3 top-2.5" />
-            )}
-          </div>
-        </div>
-
-        {/* Search Results List */}
-        {searchQuery.trim() !== "" ? (
-          <div className="space-y-2 pt-2 border-t border-zinc-800/80">
-            {searchResults.length === 0 && !isSearching ? (
-              <div className="py-8 text-center text-xs text-zinc-500">
-                Không tìm thấy kết quả phù hợp cho &quot;{searchQuery}&quot;
+                searchResults.map((res) => (
+                  <button
+                    key={res.id}
+                    type="button"
+                    onClick={() => void openNoteById(res.id)}
+                    className={`w-full text-left rounded-lg border p-2.5 transition-colors cursor-pointer ${
+                      activeNoteId === res.id
+                        ? "border-emerald-500/40 bg-emerald-950/25"
+                        : "border-zinc-800/80 bg-zinc-950/50 hover:border-zinc-700"
+                    }`}
+                  >
+                    <div className="text-xs font-semibold text-zinc-100 truncate">{res.title}</div>
+                    <div className="mt-1 text-[11px] text-zinc-400 line-clamp-2">
+                      {renderHighlightedSnippet(
+                        res.snippet,
+                        res.title,
+                        "rounded bg-emerald-500/20 px-0.5 text-emerald-300"
+                      )}
+                    </div>
+                  </button>
+                ))
+              )
+            ) : isLoadingList ? (
+              <div className="flex items-center justify-center gap-2 py-8 text-xs text-zinc-500">
+                <Loader2 className="h-4 w-4 animate-spin text-emerald-400" />
+                <span>Đang tải ghi chú...</span>
+              </div>
+            ) : visibleNotes.length === 0 ? (
+              <div className="py-8 px-3 text-center text-xs text-zinc-500 space-y-2">
+                <FileText className="mx-auto h-6 w-6 text-zinc-600" />
+                <p>Chưa có ghi chú nào. Bấm &ldquo;Ghi chú mới&rdquo; để bắt đầu viết ngay.</p>
               </div>
             ) : (
-              <div className="space-y-2">
-                {searchResults.map((item) => (
+              visibleNotes.map((item) => {
+                const isSelected = activeNoteId === item.id;
+                const isConfirming = confirmDeleteId === item.id;
+                return (
                   <div
                     key={item.id}
-                    className="p-3 rounded-lg bg-zinc-950/60 border border-zinc-800 hover:border-zinc-700 transition-colors"
+                    className={`group rounded-lg border p-2.5 transition-colors ${
+                      isSelected
+                        ? "border-emerald-500/40 bg-emerald-950/25"
+                        : "border-zinc-800/60 bg-zinc-950/40 hover:border-zinc-700"
+                    }`}
                   >
-                    <div className="flex items-center justify-between gap-2 mb-1.5">
-                      <span className="text-xs font-semibold text-violet-300 font-mono">
-                        {item.title}
-                      </span>
-                      <span className="text-[11px] text-zinc-500 font-mono truncate max-w-[200px]">
-                        {item.id}
-                      </span>
-                    </div>
-                    <div
-                      className="text-xs text-zinc-400 font-sans line-clamp-2 [&>b]:text-amber-300 [&>b]:bg-amber-950/40 [&>b]:px-1 [&>b]:py-0.5 [&>b]:rounded"
-                      dangerouslySetInnerHTML={{ __html: item.snippet || "Không có đoạn trích" }}
-                    />
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        ) : (
-          /* Recent Notes feed when no search query */
-          <div className="pt-2 border-t border-zinc-800/80">
-            <h4 className="text-xs font-medium text-zinc-400 mb-2.5">Gần đây</h4>
-            {stats?.recentNotes && stats.recentNotes.length > 0 ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                {stats.recentNotes.map((note) => (
-                  <div
-                    key={note.id}
-                    className="p-2.5 rounded-lg bg-zinc-950/50 border border-zinc-800/60 flex items-center justify-between hover:border-zinc-700 transition-colors gap-3"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2 mb-0.5">
-                        {renderNoteTypeBadge(note.noteType)}
-                        <div className="text-xs font-medium text-zinc-200 truncate">
-                          {note.title}
+                    <div className="flex items-start justify-between gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void openNoteById(item.id)}
+                        className="min-w-0 flex-1 text-left cursor-pointer"
+                      >
+                        <div className="text-xs font-semibold text-zinc-100 truncate">{item.title}</div>
+                        <div className="mt-1 flex items-center gap-2 text-[10px] text-zinc-500 font-mono">
+                          <span>{folderLabel(item.folder)}</span>
+                          <span>·</span>
+                          <span>{formatRelativeTime(item.updatedAt)}</span>
                         </div>
-                      </div>
-                      <div className="text-[10px] text-zinc-500 font-mono truncate">
-                        {note.id}
-                      </div>
-                    </div>
+                      </button>
 
-                    <div className="flex items-center gap-2 shrink-0">
-                      {note.externalUri && note.externalUri.trim().length > 0 && (
+                      {isConfirming ? (
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => void handleDeleteNote(item.id)}
+                            className="rounded bg-rose-600 px-1.5 py-0.5 text-[10px] font-semibold text-white hover:bg-rose-500 cursor-pointer"
+                          >
+                            Xóa
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteId(null)}
+                            className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-300 hover:bg-zinc-700 cursor-pointer"
+                          >
+                            Hủy
+                          </button>
+                        </div>
+                      ) : (
                         <button
-                          onClick={() => void openOnenoteLink(note.externalUri!)}
-                          title={`Mở trong OneNote: ${note.externalUri}`}
-                          className="p-1 rounded bg-purple-950/50 hover:bg-purple-900/60 text-purple-400 hover:text-purple-300 border border-purple-800/40 transition-colors"
+                          type="button"
+                          onClick={() => setConfirmDeleteId(item.id)}
+                          className="opacity-0 group-hover:opacity-100 rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-rose-400 transition-opacity cursor-pointer"
+                          title="Xóa ghi chú"
                         >
-                          <ExternalLink className="w-3.5 h-3.5" />
+                          <Trash2 className="h-3.5 w-3.5" />
                         </button>
                       )}
-                      <span className="text-[10px] text-zinc-500 whitespace-nowrap font-mono">
-                        {new Date(note.updatedAt * 1000).toLocaleDateString()}
-                      </span>
                     </div>
+
+                    {item.tags.length > 0 && (
+                      <div className="mt-1.5 flex flex-wrap gap-1">
+                        {item.tags.slice(0, 3).map((tag) => (
+                          <span
+                            key={tag}
+                            className="rounded bg-zinc-800/80 px-1.5 py-0.5 text-[10px] font-mono text-zinc-400"
+                          >
+                            #{tag}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                ))}
-              </div>
-            ) : (
-              <div className="py-6 text-center text-xs text-zinc-500">
-                Chưa có note nào trong vault. Bấm &quot;Chọn thư mục Vault&quot; để bắt đầu.
+                );
+              })
+            )}
+          </div>
+
+          {/* Bottom Secondary Tools (Vault directory & Obsidian) */}
+          <div className="border-t border-zinc-800 p-2.5">
+            <button
+              type="button"
+              onClick={() => setShowVaultTools((prev) => !prev)}
+              className="flex w-full items-center justify-between text-[11px] font-medium text-zinc-400 hover:text-zinc-200 cursor-pointer"
+            >
+              <span className="flex items-center gap-1.5">
+                <FolderOpen className="h-3.5 w-3.5 text-zinc-500" />
+                <span>Thư mục lưu &amp; Obsidian</span>
+              </span>
+              {showVaultTools ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+            </button>
+
+            {showVaultTools && (
+              <div className="mt-2.5 space-y-2 text-[11px]">
+                <div className="truncate font-mono text-[10px] text-zinc-500" title={vaultPath}>
+                  {vaultPath || "Chưa thiết lập thư mục"}
+                </div>
+                {toolMessage && <div className="text-emerald-400">{toolMessage}</div>}
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => void handleSelectVaultDir()}
+                    disabled={isSyncing}
+                    className="rounded border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 px-2 py-1 text-zinc-200 cursor-pointer"
+                  >
+                    Đổi thư mục
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleRescan()}
+                    disabled={isSyncing}
+                    className="inline-flex items-center gap-1 rounded border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 px-2 py-1 text-zinc-200 cursor-pointer"
+                  >
+                    <RefreshCw className={`h-3 w-3 ${isSyncing ? "animate-spin" : ""}`} />
+                    <span>Quét lại</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleScaffoldFolders()}
+                    disabled={isSyncing}
+                    className="rounded border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 px-2 py-1 text-zinc-200 cursor-pointer"
+                  >
+                    Tạo theo môn học
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsQuickCaptureOpen(true)}
+                    className="inline-flex items-center gap-1 rounded border border-emerald-700/60 bg-emerald-950/30 hover:bg-emerald-900/40 px-2 py-1 text-emerald-300 cursor-pointer"
+                  >
+                    <Zap className="h-3 w-3" />
+                    <span>Lưu nhanh</span>
+                  </button>
+                </div>
               </div>
             )}
           </div>
-        )}
+        </aside>
+
+        {/* RIGHT PANE: Markdown Editor & Preview */}
+        <section className="lg:col-span-8 xl:col-span-9 flex flex-col rounded-xl border border-zinc-800 bg-zinc-900/50 overflow-hidden">
+          {isLoadingNote ? (
+            <div className="flex-1 flex items-center justify-center gap-2 text-xs text-zinc-500">
+              <Loader2 className="h-4 w-4 animate-spin text-emerald-400" />
+              <span>Đang mở ghi chú...</span>
+            </div>
+          ) : (
+            <>
+              {/* Title + Metadata Bar */}
+              <div className="border-b border-zinc-800 px-5 pt-4 pb-3 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <input
+                    type="text"
+                    value={title}
+                    onChange={(e) => {
+                      setTitle(e.target.value);
+                      setSaveState("dirty");
+                    }}
+                    placeholder="Tiêu đề ghi chú..."
+                    className="min-w-0 flex-1 bg-transparent text-lg font-bold text-zinc-100 placeholder-zinc-600 focus:outline-none"
+                  />
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span
+                      className={`text-[11px] font-medium px-2 py-0.5 rounded border ${
+                        saveState === "saving"
+                          ? "border-amber-700/50 bg-amber-950/30 text-amber-300"
+                          : saveState === "dirty"
+                          ? "border-zinc-700 bg-zinc-800 text-zinc-300"
+                          : "border-emerald-800/50 bg-emerald-950/30 text-emerald-400"
+                      }`}
+                    >
+                      {saveState === "saving"
+                        ? "Đang lưu..."
+                        : saveState === "dirty"
+                        ? "Chưa lưu"
+                        : "Đã lưu"}
+                    </span>
+
+                    <button
+                      type="button"
+                      onClick={() => void handleSaveNote()}
+                      className="inline-flex items-center gap-1 rounded-lg border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 px-2.5 py-1 text-xs font-medium text-zinc-200 transition-colors cursor-pointer"
+                    >
+                      <Save className="h-3.5 w-3.5 text-emerald-400" />
+                      <span>Lưu</span>
+                    </button>
+
+                    {/* View mode switcher */}
+                    <div className="flex rounded-lg border border-zinc-800 bg-zinc-950 p-0.5 text-[11px]">
+                      <button
+                        type="button"
+                        onClick={() => setEditorMode("edit")}
+                        className={`inline-flex items-center gap-1 rounded-md px-2 py-1 cursor-pointer ${
+                          editorMode === "edit"
+                            ? "bg-zinc-800 text-zinc-100 font-semibold"
+                            : "text-zinc-400 hover:text-zinc-200"
+                        }`}
+                      >
+                        <Pencil className="h-3 w-3" />
+                        <span>Soạn thảo</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditorMode("split")}
+                        className={`inline-flex items-center gap-1 rounded-md px-2 py-1 cursor-pointer ${
+                          editorMode === "split"
+                            ? "bg-zinc-800 text-zinc-100 font-semibold"
+                            : "text-zinc-400 hover:text-zinc-200"
+                        }`}
+                      >
+                        <Columns2 className="h-3 w-3" />
+                        <span>Chia đôi</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditorMode("preview")}
+                        className={`inline-flex items-center gap-1 rounded-md px-2 py-1 cursor-pointer ${
+                          editorMode === "preview"
+                            ? "bg-zinc-800 text-zinc-100 font-semibold"
+                            : "text-zinc-400 hover:text-zinc-200"
+                        }`}
+                      >
+                        <Eye className="h-3 w-3" />
+                        <span>Đọc</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Folder + Tags row */}
+                <div className="flex flex-wrap items-center gap-3 text-xs">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[11px] text-zinc-500">Thư mục:</span>
+                    <input
+                      type="text"
+                      value={folder}
+                      onChange={(e) => {
+                        if (!activeNoteId) {
+                          setFolder(e.target.value);
+                          setSaveState("dirty");
+                        }
+                      }}
+                      readOnly={Boolean(activeNoteId)}
+                      className={`w-28 rounded border border-zinc-800 bg-zinc-950 px-2 py-0.5 font-mono text-[11px] text-zinc-300 focus:border-emerald-500 focus:outline-none ${
+                        activeNoteId ? "opacity-75" : ""
+                      }`}
+                    />
+                  </div>
+
+                  <div className="flex flex-1 min-w-[200px] items-center gap-1.5">
+                    <Hash className="h-3.5 w-3.5 text-zinc-500 shrink-0" />
+                    <input
+                      type="text"
+                      value={tagsInput}
+                      onChange={(e) => {
+                        setTagsInput(e.target.value);
+                        setSaveState("dirty");
+                      }}
+                      placeholder="Thẻ: it004, on-thi, thuat-toan..."
+                      className="w-full rounded border border-zinc-800 bg-zinc-950 px-2 py-0.5 text-[11px] text-zinc-300 placeholder-zinc-600 focus:border-emerald-500 focus:outline-none"
+                    />
+                  </div>
+
+                  {externalUri && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (externalUri.startsWith("onenote:")) {
+                          void openOnenoteLink(externalUri);
+                        } else {
+                          void openExternalUrl(externalUri);
+                        }
+                      }}
+                      className="inline-flex items-center gap-1 rounded border border-emerald-700/50 bg-emerald-950/30 px-2 py-0.5 text-[11px] text-emerald-300 hover:bg-emerald-900/40 cursor-pointer"
+                    >
+                      <ExternalLink className="h-3 w-3" />
+                      <span>Mở liên kết gốc</span>
+                    </button>
+                  )}
+                </div>
+
+                {/* Formatting Toolbar */}
+                {editorMode !== "preview" && (
+                  <div className="flex flex-wrap items-center gap-1 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => insertSnippet("# ", "", "Tiêu đề")}
+                      className="rounded border border-zinc-800 bg-zinc-950 px-2 py-0.5 text-[11px] font-semibold text-zinc-300 hover:border-zinc-700 cursor-pointer"
+                    >
+                      H1
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => insertSnippet("## ", "", "Mục nhỏ")}
+                      className="rounded border border-zinc-800 bg-zinc-950 px-2 py-0.5 text-[11px] font-semibold text-zinc-300 hover:border-zinc-700 cursor-pointer"
+                    >
+                      H2
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => insertSnippet("**", "**", "in đậm")}
+                      className="rounded border border-zinc-800 bg-zinc-950 px-2 py-0.5 text-[11px] font-bold text-zinc-300 hover:border-zinc-700 cursor-pointer"
+                    >
+                      Đậm
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => insertSnippet("*", "*", "in nghiêng")}
+                      className="rounded border border-zinc-800 bg-zinc-950 px-2 py-0.5 text-[11px] italic text-zinc-300 hover:border-zinc-700 cursor-pointer"
+                    >
+                      Nghiêng
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => insertSnippet("\n- [ ] ", "", "Việc cần làm")}
+                      className="rounded border border-zinc-800 bg-zinc-950 px-2 py-0.5 text-[11px] text-zinc-300 hover:border-zinc-700 cursor-pointer"
+                    >
+                      Checklist
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => insertSnippet("\n```cpp\n", "\n```\n", "// code")}
+                      className="rounded border border-zinc-800 bg-zinc-950 px-2 py-0.5 text-[11px] font-mono text-zinc-300 hover:border-zinc-700 cursor-pointer"
+                    >
+                      Code
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => insertSnippet("\n> [!note] Lưu ý\n> ", "", "Nội dung cần nhớ")}
+                      className="rounded border border-zinc-800 bg-zinc-950 px-2 py-0.5 text-[11px] text-zinc-300 hover:border-zinc-700 cursor-pointer"
+                    >
+                      Callout
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        insertSnippet(
+                          "\n| Cột 1 | Cột 2 |\n| --- | --- |\n| ",
+                          " | giá trị |\n",
+                          "mục"
+                        )
+                      }
+                      className="rounded border border-zinc-800 bg-zinc-950 px-2 py-0.5 text-[11px] text-zinc-300 hover:border-zinc-700 cursor-pointer"
+                    >
+                      Bảng
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => insertSnippet("[[", "]]", "Tên ghi chú")}
+                      className="rounded border border-zinc-800 bg-zinc-950 px-2 py-0.5 text-[11px] text-emerald-300 hover:border-zinc-700 cursor-pointer"
+                    >
+                      [[Link]]
+                    </button>
+                  </div>
+                )}
+
+                {editorError && (
+                  <div className="rounded-lg border border-rose-800/60 bg-rose-950/30 px-3 py-2 text-xs text-rose-300">
+                    {editorError}
+                  </div>
+                )}
+              </div>
+
+              {/* Editor + Preview Body */}
+              <div
+                className={`flex-1 min-h-0 grid ${
+                  editorMode === "split" ? "grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-zinc-800" : "grid-cols-1"
+                }`}
+              >
+                {editorMode !== "preview" && (
+                  <textarea
+                    ref={textareaRef}
+                    value={content}
+                    onChange={(e) => {
+                      setContent(e.target.value);
+                      setSaveState("dirty");
+                    }}
+                    placeholder="Viết ghi chú bằng Markdown... Hỗ trợ # tiêu đề, - [ ] checklist, > [!tip] callout, bảng, khối code và [[Liên kết ghi chú]]."
+                    className="h-full min-h-[380px] w-full resize-none bg-zinc-950/40 p-5 font-mono text-xs leading-relaxed text-zinc-200 placeholder-zinc-600 focus:outline-none"
+                  />
+                )}
+
+                {editorMode !== "edit" && (
+                  <div className="h-full min-h-[380px] overflow-y-auto p-5 bg-zinc-900/20">
+                    <MarkdownRenderer
+                      content={content}
+                      onToggleTaskLine={handleToggleTaskLine}
+                      onOpenWikilink={(target) => void handleOpenWikilink(target)}
+                      onOpenExternalUrl={(url) => void openExternalUrl(url)}
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* Backlinks Footer */}
+              <div className="border-t border-zinc-800 bg-zinc-950/50 px-5 py-2.5">
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-zinc-400">
+                    <Link2 className="h-3.5 w-3.5 text-emerald-400" />
+                    <span>Liên kết trỏ tới ({backlinks.length}):</span>
+                  </span>
+                  {backlinks.length === 0 ? (
+                    <span className="text-[11px] text-zinc-600">
+                      Chưa có ghi chú nào nhắc tới trang này qua [[{title || "..."}]].
+                    </span>
+                  ) : (
+                    backlinks.map((bl) => (
+                      <button
+                        key={bl.id}
+                        type="button"
+                        onClick={() => void openNoteById(bl.id)}
+                        className="rounded border border-zinc-700 bg-zinc-800 hover:border-emerald-500/50 hover:text-emerald-300 px-2 py-0.5 text-[11px] text-zinc-300 transition-colors cursor-pointer"
+                      >
+                        {bl.title}
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+            </>
+          )}
+        </section>
       </div>
 
-      {/* Quick Capture Modal */}
       <QuickCaptureModal
         isOpen={isQuickCaptureOpen}
         onClose={() => setIsQuickCaptureOpen(false)}
         onSuccess={() => {
-          setSyncMessage("Tạo note mới thành công!");
-          void loadStats();
-          if (vaultPath.trim()) {
-            void triggerScanVault(vaultPath);
-          }
+          setToolMessage("Đã thêm ghi chú mới.");
+          void refreshNotesList(false);
         }}
         vaultPath={vaultPath}
       />

@@ -260,6 +260,7 @@ pub fn init_db(db_path: &Path) -> SqlResult<Connection> {
     ensure_wecode_schema(&conn)?;
     ensure_sync_state_schema(&conn)?;
     ensure_moodle_schema(&conn)?;
+    crate::db::portal_extra::ensure_portal_extra_schema(&conn)?;
     ensure_matrix_schema(&conn)?;
     ensure_exam_schema(&conn)?;
     ensure_plugin_and_activity_schema(&conn)?;
@@ -281,6 +282,7 @@ pub fn create_tables(conn: &Connection) -> SqlResult<()> {
     ensure_curriculum_schema(conn)?;
     ensure_wecode_schema(conn)?;
     ensure_moodle_schema(conn)?;
+    crate::db::portal_extra::ensure_portal_extra_schema(conn)?;
     ensure_matrix_schema(conn)?;
     ensure_exam_schema(conn)?;
     ensure_plugin_and_activity_schema(conn)?;

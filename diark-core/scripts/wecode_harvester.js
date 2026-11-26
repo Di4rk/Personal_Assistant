@@ -4,6 +4,7 @@
 
     const WECODE_STORAGE_KEY = "__DIARK_WECODE_HARVEST_BUFFER__";
     const LOCAL_SERVER_URL = "http://127.0.0.1:3030/api/v1/sync/wecode";
+    const SYNC_TOKEN = window.__DIARK_SYNC_TOKEN__ || "";
     const BATCH_SIZE = 20;
 
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -196,7 +197,9 @@
                 let finishTime = "";
                 const finishTd = row.querySelector("td:nth-child(6)");
                 if (finishTd) {
-                    finishTime = (finishTd.querySelector("small")?.innerText || finishTd.innerText || "").trim();
+                    const rawFinish = (finishTd.querySelector("small")?.innerText || finishTd.innerText || "").trim();
+                    // Wecode dùng mốc 1999 (Sun, 4 Apr 1999) làm sentinel cho bài không giới hạn hạn nộp
+                    finishTime = rawFinish.includes("1999") ? "" : rawFinish;
                 }
 
                 assignmentMap.set(assignId, {
@@ -221,8 +224,23 @@
             parseAssignmentRows(document);
         }
 
-        // 2. Nếu chưa có (ví dụ người dùng đang ở trang /assignment/.../0 hoặc profile),
-        // luôn fetch trang canonical /home (trang danh mục chuẩn của Wecode UIT)
+        // 2. Nếu chưa có (ví dụ người dùng đang ở trang /assignment/.../0 hoặc /home),
+        // fetch trang /assignments trước (chứa bảng tr[data-id] đầy đủ) rồi fallback sang /home
+        if (assignmentMap.size === 0) {
+            try {
+                const assignResp = await fetch(`${basePrefix}/assignments`, { credentials: "include" });
+                if (assignResp.ok) {
+                    const assignHtml = await assignResp.text();
+                    const parser = new DOMParser();
+                    const assignDoc = parser.parseFromString(assignHtml, "text/html");
+                    parseAssignmentRows(assignDoc);
+                }
+            } catch (err) {
+                console.warn("[Diark Wecode] Lỗi fetch /assignments:", err);
+            }
+        }
+
+        // 3. Fallback: fetch từ /home nếu /assignments không có
         if (assignmentMap.size === 0) {
             try {
                 const homeResp = await fetch(`${basePrefix}/home`, { credentials: "include" });
@@ -234,21 +252,6 @@
                 }
             } catch (err) {
                 console.warn("[Diark Wecode] Lỗi fetch /home:", err);
-            }
-        }
-
-        // 3. Fallback: fetch từ /assignments nếu /home không có
-        if (assignmentMap.size === 0) {
-            try {
-                const assignResp = await fetch(`${basePrefix}/assignments`, { credentials: "include" });
-                if (assignResp.ok) {
-                    const assignHtml = await assignResp.text();
-                    const parser = new DOMParser();
-                    const assignDoc = parser.parseFromString(assignHtml, "text/html");
-                    parseAssignmentRows(assignDoc);
-                }
-            } catch (err) {
-                console.warn("[Diark Wecode] Lỗi fetch assignments:", err);
             }
         }
 
@@ -438,7 +441,10 @@
         try {
             const resp = await fetch(LOCAL_SERVER_URL, {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-Diark-Sync-Token": SYNC_TOKEN
+                },
                 body: JSON.stringify(syncPayload)
             });
             if (resp.ok) {

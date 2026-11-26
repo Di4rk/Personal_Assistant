@@ -9,7 +9,6 @@ import {
   Search,
   BookOpen,
   Code2,
-  Sparkles,
   ChevronRight,
   RefreshCw,
 } from 'lucide-react';
@@ -17,6 +16,7 @@ import {
   getMoodleTasks,
   getWecodeAssignments,
   getWecodeProblems,
+  markMoodleTaskSubmitted,
   openExternalUrl,
   MoodleTask,
 } from '../../../lib/tauri-client';
@@ -259,9 +259,27 @@ export const UnifiedQuestHub: React.FC = () => {
     };
   }, [filteredQuests, nowSec]);
 
+  const [togglingQuestId, setTogglingQuestId] = useState<string | null>(null);
+
   const handleOpenLink = (url?: string) => {
     if (url) {
       openExternalUrl(url);
+    }
+  };
+
+  const handleToggleSubmitted = async (quest: UnifiedQuestItem) => {
+    if (quest.source !== 'moodle') return;
+    const numericId = Number(quest.id.replace('moodle-', ''));
+    if (!Number.isFinite(numericId)) return;
+
+    setTogglingQuestId(quest.id);
+    try {
+      await markMoodleTaskSubmitted(numericId, !quest.isSubmitted);
+      await loadAllData();
+    } catch (err) {
+      console.error('Không thể cập nhật trạng thái nộp bài:', err);
+    } finally {
+      setTogglingQuestId(null);
     }
   };
 
@@ -280,15 +298,15 @@ export const UnifiedQuestHub: React.FC = () => {
         <div>
           <div className="flex items-center gap-2">
             <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/20">
-              <Sparkles className="h-4 w-4" />
+              <BookOpen className="h-4 w-4" />
             </span>
-            <h2 className="text-lg font-bold tracking-tight text-white">Unified Quest Hub</h2>
+            <h2 className="text-lg font-bold tracking-tight text-white">Bài tập &amp; Deadline</h2>
             <span className="rounded-full bg-zinc-800 px-2.5 py-0.5 text-xs font-mono font-medium text-zinc-400">
-              {allQuests.length} Nhiệm vụ
+              {allQuests.length} nhiệm vụ
             </span>
           </div>
           <p className="mt-1 text-xs text-zinc-400">
-            Hợp nhất thời hạn bài tập Courses Moodle UIT và thực hành lập trình Wecode theo độ khẩn cấp.
+            Theo dõi bài tập Courses Moodle và Wecode theo hạn nộp. Nếu bạn đã nộp trên Moodle nhưng vẫn hiện đỏ, bấm Đã nộp để ẩn bớt.
           </p>
         </div>
 
@@ -357,10 +375,10 @@ export const UnifiedQuestHub: React.FC = () => {
 
       {/* Overview Stat Badges */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <div className="flex items-center justify-between p-3.5 rounded-xl border border-rose-500/20 bg-rose-950/10 backdrop-blur-sm">
+        <div className="flex items-center justify-between p-3.5 rounded-xl border border-rose-500/20 bg-rose-950/10">
           <div className="flex items-center gap-3">
             <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-rose-500/20 text-rose-400">
-              <AlertTriangle className="h-5 w-5 animate-pulse" />
+              <AlertTriangle className="h-5 w-5" />
             </div>
             <div>
               <div className="text-xs text-rose-300 font-medium">Khẩn cấp (&lt; 24h / Quá hạn)</div>
@@ -372,7 +390,7 @@ export const UnifiedQuestHub: React.FC = () => {
           </span>
         </div>
 
-        <div className="flex items-center justify-between p-3.5 rounded-xl border border-amber-500/20 bg-amber-950/10 backdrop-blur-sm">
+        <div className="flex items-center justify-between p-3.5 rounded-xl border border-amber-500/20 bg-amber-950/10">
           <div className="flex items-center gap-3">
             <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-amber-500/20 text-amber-400">
               <Calendar className="h-5 w-5" />
@@ -387,22 +405,22 @@ export const UnifiedQuestHub: React.FC = () => {
           </span>
         </div>
 
-        <div className="flex items-center justify-between p-3.5 rounded-xl border border-indigo-500/20 bg-indigo-950/10 backdrop-blur-sm">
+        <div className="flex items-center justify-between p-3.5 rounded-xl border border-zinc-800 bg-zinc-900/60">
           <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-500/20 text-indigo-400">
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-zinc-800 text-zinc-300">
               <Code2 className="h-5 w-5" />
             </div>
             <div>
-              <div className="text-xs text-indigo-300 font-medium">Luyện tập tự do</div>
-              <div className="text-lg font-black text-indigo-400 font-mono">{openEndedQuests.length}</div>
+              <div className="text-xs text-zinc-300 font-medium">Luyện tập tự do</div>
+              <div className="text-lg font-black text-zinc-100 font-mono">{openEndedQuests.length}</div>
             </div>
           </div>
-          <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+          <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-zinc-800 text-zinc-300 border border-zinc-700">
             KHÔNG HẠN
           </span>
         </div>
 
-        <div className="flex items-center justify-between p-3.5 rounded-xl border border-emerald-500/20 bg-emerald-950/10 backdrop-blur-sm">
+        <div className="flex items-center justify-between p-3.5 rounded-xl border border-emerald-500/20 bg-emerald-950/10">
           <div className="flex items-center gap-3">
             <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-500/20 text-emerald-400">
               <CheckCircle2 className="h-5 w-5" />
@@ -479,18 +497,32 @@ export const UnifiedQuestHub: React.FC = () => {
                       </div>
 
                       {/* Actions */}
-                      <div className="flex items-center gap-2 self-end sm:self-center">
+                      <div className="flex flex-wrap items-center gap-2 self-end sm:self-center">
+                        {quest.source === 'moodle' && (
+                          <button
+                            type="button"
+                            onClick={() => void handleToggleSubmitted(quest)}
+                            disabled={togglingQuestId === quest.id}
+                            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-emerald-700/60 bg-emerald-950/40 hover:bg-emerald-900/50 text-xs font-medium text-emerald-300 transition-colors cursor-pointer disabled:opacity-50"
+                            title="Đánh dấu bài này đã nộp để bỏ khỏi mục cần nộp gấp"
+                          >
+                            <CheckCircle2 className="h-3.5 w-3.5" />
+                            <span>{togglingQuestId === quest.id ? 'Đang lưu...' : 'Đã nộp'}</span>
+                          </button>
+                        )}
                         {quest.templateUrl && (
                           <button
+                            type="button"
                             onClick={() => handleOpenLink(quest.templateUrl)}
                             className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-xs text-zinc-300 transition-colors"
                             title="Tải file đề bài / template mẫu"
                           >
-                            <Download className="h-3.5 w-3.5 text-sky-400" />
+                            <Download className="h-3.5 w-3.5 text-zinc-300" />
                             <span>Mẫu đề</span>
                           </button>
                         )}
                         <button
+                          type="button"
                           onClick={() => handleOpenLink(quest.actionUrl)}
                           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 font-semibold text-xs text-white shadow-sm transition-colors cursor-pointer"
                         >
@@ -565,16 +597,29 @@ export const UnifiedQuestHub: React.FC = () => {
                         <span className="text-zinc-500 text-[11px] font-mono">{quest.statusLabel}</span>
 
                         <div className="flex items-center gap-2">
+                          {quest.source === 'moodle' && (
+                            <button
+                              type="button"
+                              onClick={() => void handleToggleSubmitted(quest)}
+                              disabled={togglingQuestId === quest.id}
+                              className="flex items-center gap-1 px-2 py-0.5 rounded border border-emerald-700/60 bg-emerald-950/30 hover:bg-emerald-900/50 text-[11px] font-medium text-emerald-300 transition-colors cursor-pointer disabled:opacity-50"
+                            >
+                              <CheckCircle2 className="h-3 w-3" />
+                              <span>{togglingQuestId === quest.id ? 'Đang lưu...' : 'Đã nộp'}</span>
+                            </button>
+                          )}
                           {quest.templateUrl && (
                             <button
+                              type="button"
                               onClick={() => handleOpenLink(quest.templateUrl)}
-                              className="text-zinc-400 hover:text-sky-400 p-1 rounded transition-colors"
+                              className="text-zinc-400 hover:text-zinc-200 p-1 rounded transition-colors"
                               title="Tải template mẫu"
                             >
                               <Download className="h-3.5 w-3.5" />
                             </button>
                           )}
                           <button
+                            type="button"
                             onClick={() => handleOpenLink(quest.actionUrl)}
                             className="flex items-center gap-1 text-xs text-amber-400 hover:text-amber-300 font-medium transition-colors"
                           >
@@ -644,18 +689,31 @@ export const UnifiedQuestHub: React.FC = () => {
                         <span className="text-zinc-500 text-[11px] font-mono">{quest.statusLabel}</span>
 
                         <div className="flex items-center gap-2">
+                          {quest.source === 'moodle' && (
+                            <button
+                              type="button"
+                              onClick={() => void handleToggleSubmitted(quest)}
+                              disabled={togglingQuestId === quest.id}
+                              className="flex items-center gap-1 px-2 py-0.5 rounded border border-emerald-700/60 bg-emerald-950/30 hover:bg-emerald-900/50 text-[11px] font-medium text-emerald-300 transition-colors cursor-pointer disabled:opacity-50"
+                            >
+                              <CheckCircle2 className="h-3 w-3" />
+                              <span>{togglingQuestId === quest.id ? 'Đang lưu...' : 'Đã nộp'}</span>
+                            </button>
+                          )}
                           {quest.templateUrl && (
                             <button
+                              type="button"
                               onClick={() => handleOpenLink(quest.templateUrl)}
-                              className="text-zinc-400 hover:text-sky-400 p-1 rounded transition-colors"
+                              className="text-zinc-400 hover:text-zinc-200 p-1 rounded transition-colors"
                               title="Tải template mẫu"
                             >
                               <Download className="h-3.5 w-3.5" />
                             </button>
                           )}
                           <button
+                            type="button"
                             onClick={() => handleOpenLink(quest.actionUrl)}
-                            className="flex items-center gap-1 text-xs text-sky-400 hover:text-sky-300 font-medium transition-colors"
+                            className="flex items-center gap-1 text-xs text-zinc-200 hover:text-white font-medium transition-colors"
                           >
                             <span>Chi tiết</span>
                             <ChevronRight className="h-3.5 w-3.5" />
@@ -672,10 +730,10 @@ export const UnifiedQuestHub: React.FC = () => {
           {/* SECTION 4: LUYỆN TẬP TỰ DO & KHÔNG GIỚI HẠN THỜI GIAN */}
           {openEndedQuests.length > 0 && (
             <div className="space-y-3 pt-2">
-              <div className="flex items-center gap-2 text-xs font-semibold text-indigo-400 uppercase tracking-wider">
-                <Code2 className="h-4 w-4" />
+              <div className="flex items-center gap-2 text-xs font-semibold text-zinc-300 uppercase tracking-wider">
+                <Code2 className="h-4 w-4 text-emerald-400" />
                 <span>Luyện tập tự do & Không giới hạn thời gian</span>
-                <span className="ml-1 rounded-full bg-indigo-500/20 px-2 py-0.2 text-[11px] font-mono">
+                <span className="ml-1 rounded-full bg-zinc-800 px-2 py-0.5 text-[11px] font-mono text-zinc-300">
                   {openEndedQuests.length}
                 </span>
               </div>
@@ -689,7 +747,7 @@ export const UnifiedQuestHub: React.FC = () => {
                   return (
                     <div
                       key={quest.id}
-                      className="group flex flex-col justify-between p-3.5 rounded-xl border border-zinc-800 bg-zinc-900/80 hover:border-indigo-500/40 transition-all space-y-3"
+                      className="group flex flex-col justify-between p-3.5 rounded-xl border border-zinc-800 bg-zinc-900/80 hover:border-zinc-700 transition-all space-y-3"
                     >
                       <div className="space-y-2.5">
                         <div className="flex items-center justify-between gap-2">
@@ -697,8 +755,8 @@ export const UnifiedQuestHub: React.FC = () => {
                             <span
                               className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold uppercase ${
                                 quest.source === 'moodle'
-                                  ? 'bg-sky-500/10 text-sky-400 border border-sky-500/20'
-                                  : 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20'
+                                  ? 'bg-zinc-800 text-zinc-200 border border-zinc-700'
+                                  : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
                               }`}
                             >
                               {quest.source === 'moodle' ? 'Moodle' : 'Wecode'}
@@ -713,7 +771,7 @@ export const UnifiedQuestHub: React.FC = () => {
                           </span>
                         </div>
 
-                        <div className="font-semibold text-xs text-zinc-200 group-hover:text-indigo-300 transition-colors line-clamp-2">
+                        <div className="font-semibold text-xs text-zinc-200 group-hover:text-emerald-300 transition-colors line-clamp-2">
                           {quest.title}
                         </div>
 
@@ -722,11 +780,11 @@ export const UnifiedQuestHub: React.FC = () => {
                           <div className="space-y-1">
                             <div className="flex items-center justify-between text-[10px] font-mono text-zinc-400">
                               <span>Tiến độ: {solved}/{total} bài</span>
-                              <span className="text-indigo-400 font-bold">{percent}%</span>
+                              <span className="text-emerald-400 font-bold">{percent}%</span>
                             </div>
                             <div className="h-1.5 w-full rounded-full bg-zinc-800 overflow-hidden">
                               <div
-                                className="h-full bg-indigo-500 rounded-full transition-all duration-300"
+                                className="h-full bg-emerald-500 rounded-full transition-all duration-300"
                                 style={{ width: `${percent}%` }}
                               />
                             </div>
@@ -740,18 +798,31 @@ export const UnifiedQuestHub: React.FC = () => {
                         </span>
 
                         <div className="flex items-center gap-2">
+                          {quest.source === 'moodle' && (
+                            <button
+                              type="button"
+                              onClick={() => void handleToggleSubmitted(quest)}
+                              disabled={togglingQuestId === quest.id}
+                              className="flex items-center gap-1 px-2 py-0.5 rounded border border-emerald-700/60 bg-emerald-950/30 hover:bg-emerald-900/50 text-[11px] font-medium text-emerald-300 transition-colors cursor-pointer disabled:opacity-50"
+                            >
+                              <CheckCircle2 className="h-3 w-3" />
+                              <span>{togglingQuestId === quest.id ? 'Đang lưu...' : 'Đã nộp'}</span>
+                            </button>
+                          )}
                           {quest.templateUrl && (
                             <button
+                              type="button"
                               onClick={() => handleOpenLink(quest.templateUrl)}
-                              className="text-zinc-400 hover:text-sky-400 p-1 rounded transition-colors"
+                              className="text-zinc-400 hover:text-zinc-200 p-1 rounded transition-colors"
                               title="Tải template mẫu"
                             >
                               <Download className="h-3.5 w-3.5" />
                             </button>
                           )}
                           <button
+                            type="button"
                             onClick={() => handleOpenLink(quest.actionUrl)}
-                            className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300 font-medium transition-colors"
+                            className="flex items-center gap-1 text-xs text-emerald-400 hover:text-emerald-300 font-medium transition-colors"
                           >
                             <span>Chi tiết</span>
                             <ChevronRight className="h-3.5 w-3.5" />
@@ -771,7 +842,7 @@ export const UnifiedQuestHub: React.FC = () => {
               <div className="flex items-center gap-2 text-xs font-semibold text-emerald-400 uppercase tracking-wider">
                 <CheckCircle2 className="h-4 w-4" />
                 <span>Nhiệm vụ đã hoàn thành / Đã nộp</span>
-                <span className="ml-1 rounded-full bg-emerald-500/20 px-2 py-0.2 text-[11px] font-mono">
+                <span className="ml-1 rounded-full bg-emerald-500/20 px-2 py-0.5 text-[11px] font-mono">
                   {completedQuests.length}
                 </span>
               </div>
@@ -794,7 +865,19 @@ export const UnifiedQuestHub: React.FC = () => {
                       <span className="text-[11px] font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
                         {quest.statusLabel}
                       </span>
+                      {quest.source === 'moodle' && (
+                        <button
+                          type="button"
+                          onClick={() => void handleToggleSubmitted(quest)}
+                          disabled={togglingQuestId === quest.id}
+                          className="text-[11px] font-medium text-zinc-400 hover:text-zinc-200 px-2 py-0.5 rounded border border-zinc-700 bg-zinc-800/80 transition-colors cursor-pointer disabled:opacity-50"
+                          title="Đưa bài này về danh sách chưa nộp"
+                        >
+                          {togglingQuestId === quest.id ? '...' : 'Hoàn tác'}
+                        </button>
+                      )}
                       <button
+                        type="button"
                         onClick={() => handleOpenLink(quest.actionUrl)}
                         className="text-zinc-400 hover:text-zinc-200 p-1"
                         title="Xem lại bài nộp"

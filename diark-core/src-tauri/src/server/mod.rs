@@ -1,6 +1,6 @@
 use axum::{
     extract::State,
-    http::{Request, StatusCode},
+    http::{header, HeaderMap, HeaderName, HeaderValue, Method, Request, StatusCode},
     middleware::{self, Next},
     response::{IntoResponse, Json, Response},
     routing::post,
@@ -15,6 +15,20 @@ use crate::db::{insert_submission_and_update_daily, DbPools};
 pub const SERVER_PORT: u16 = 3030;
 
 use std::sync::{Arc, Mutex, OnceLock};
+
+static LOCAL_SYNC_TOKEN: OnceLock<String> = OnceLock::new();
+
+pub fn get_sync_token() -> &'static str {
+    LOCAL_SYNC_TOKEN
+        .get_or_init(|| {
+            format!(
+                "{}{}",
+                uuid::Uuid::new_v4().simple(),
+                uuid::Uuid::new_v4().simple()
+            )
+        })
+        .as_str()
+}
 
 #[derive(Clone)]
 pub struct ServerState {
@@ -450,12 +464,181 @@ async fn handle_sync_exam_schedule(
     }
 }
 
+#[derive(Debug, Clone, Deserialize)]
+struct SsoCredentialsPayload {
+    username: String,
+    password: String,
+}
+
+/// Handler: POST /api/v1/sync/sso-credentials
+async fn handle_sync_sso_credentials(
+    State(state): State<ServerState>,
+    Json(payload): Json<SsoCredentialsPayload>,
+) -> impl IntoResponse {
+    let username = payload.username.trim().to_string();
+    let password = payload.password;
+    if username.is_empty() || password.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "status": "error", "message": "Empty credentials" })),
+        )
+            .into_response();
+    }
+
+    let encrypted_password = match crate::db::secret_store::encrypt_secret(&password) {
+        Ok(enc) => enc,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "status": "error", "message": e })),
+            )
+                .into_response();
+        }
+    };
+
+    let write_res = state
+        .db
+        .write(move |conn| {
+            crate::db::set_setting(conn, "sso_uit_username", &username)
+                .map_err(crate::error::AppError::Database)?;
+            crate::db::set_setting(conn, "sso_uit_password", &encrypted_password)
+                .map_err(crate::error::AppError::Database)?;
+            crate::db::set_setting(conn, "sso_uit_auto_login", "true")
+                .map_err(crate::error::AppError::Database)?;
+            Ok(())
+        })
+        .await;
+
+    match write_res {
+        Ok(()) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "status": "ok" })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "status": "error", "message": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+/// Handler: POST /api/v1/sync/portal-extra
+async fn handle_sync_portal_extra(
+    State(state): State<ServerState>,
+    Json(payload): Json<crate::db::portal_extra::PortalExtraSyncPayload>,
+) -> impl IntoResponse {
+    let commit_res = state
+        .db
+        .write(move |conn| {
+            crate::db::portal_extra::commit_portal_extra_payload(conn, &payload)
+                .map_err(crate::error::AppError::Sync)
+        })
+        .await;
+
+    match commit_res {
+        Ok(stats) => {
+            println!(
+                "[SyncPortalExtra] Committed {} classes, {} timetable slots, {} tuition, {} certs, {} activities!",
+                stats.classes_count,
+                stats.timetable_count,
+                stats.tuition_count,
+                stats.certificates_count,
+                stats.activities_count
+            );
+            let _ = state.app.emit("portal-extra-synced", &stats);
+            let _ = state.app.emit("academic-data-synced", ());
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "status": "ok",
+                    "message": "Portal extra data committed successfully",
+                    "stats": stats
+                })),
+            )
+                .into_response()
+        }
+        Err(e) => {
+            eprintln!("[SyncPortalExtra] Error committing portal extra data: {e}");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "status": "error", "message": e.to_string() })),
+            )
+                .into_response()
+        }
+    }
+}
+
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (&x, &y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
+
+fn has_valid_sync_token(headers: &HeaderMap) -> bool {
+    let Some(val) = headers.get("x-diark-sync-token") else {
+        return false;
+    };
+    let Ok(provided) = val.to_str() else {
+        return false;
+    };
+    constant_time_eq(provided.trim().as_bytes(), get_sync_token().as_bytes())
+}
+
+async fn require_sync_token_middleware(request: Request<axum::body::Body>, next: Next) -> Response {
+    if request.method() == Method::OPTIONS {
+        return next.run(request).await;
+    }
+    if !has_valid_sync_token(request.headers()) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({
+                "status": "error",
+                "message": "Unauthorized sync token"
+            })),
+        )
+            .into_response();
+    }
+    next.run(request).await
+}
+
+fn build_strict_cors_layer() -> CorsLayer {
+    let allowed_origins = [
+        "https://portal.uit.edu.vn",
+        "https://courses.uit.edu.vn",
+        "https://khmt.uit.edu.vn",
+        "https://wecode.uit.edu.vn",
+        "https://auth.uit.edu.vn",
+        "https://sso.uit.edu.vn",
+        "http://localhost:1420",
+        "http://127.0.0.1:1420",
+        "tauri://localhost",
+        "http://tauri.localhost",
+    ]
+    .into_iter()
+    .filter_map(|origin| HeaderValue::from_str(origin).ok())
+    .collect::<Vec<_>>();
+
+    CorsLayer::new()
+        .allow_origin(allowed_origins)
+        .allow_methods([Method::POST, Method::OPTIONS])
+        .allow_headers([
+            header::CONTENT_TYPE,
+            HeaderName::from_static("x-diark-sync-token"),
+        ])
+}
+
 /// Middleware tự động tiêm Access-Control-Allow-Private-Network cho Chrome Private Network Access
 async fn allow_private_network_middleware(request: Request<axum::body::Body>, next: Next) -> Response {
     let mut response = next.run(request).await;
     response.headers_mut().insert(
-        axum::http::HeaderName::from_static("access-control-allow-private-network"),
-        axum::http::HeaderValue::from_static("true"),
+        HeaderName::from_static("access-control-allow-private-network"),
+        HeaderValue::from_static("true"),
     );
     response
 }
@@ -466,12 +649,61 @@ fn build_router(state: ServerState) -> Router {
         .route("/api/v1/academic/transcript", post(handle_academic_transcript))
         .route("/api/v1/academic/drl", post(handle_academic_drl))
         .route("/api/v1/sync/portal", post(handle_sync_portal))
+        .route("/api/v1/sync/portal-extra", post(handle_sync_portal_extra))
+        .route("/api/v1/sync/sso-credentials", post(handle_sync_sso_credentials))
         .route("/api/v1/sync/wecode", post(handle_sync_wecode))
         .route("/api/v1/sync/moodle", post(handle_sync_moodle))
         .route("/api/v1/sync/exam-schedule", post(handle_sync_exam_schedule))
-        .layer(CorsLayer::permissive())
+        .layer(middleware::from_fn(require_sync_token_middleware))
+        .layer(build_strict_cors_layer())
         .layer(middleware::from_fn(allow_private_network_middleware))
         .with_state(state)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn sync_token_middleware_rejects_missing_or_invalid_and_accepts_valid() {
+        let app = Router::new()
+            .route(
+                "/test-protected",
+                post(|| async { (StatusCode::OK, "ok") }),
+            )
+            .layer(middleware::from_fn(require_sync_token_middleware))
+            .layer(build_strict_cors_layer());
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server_handle = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let client = reqwest::Client::new();
+        let url = format!("http://{addr}/test-protected");
+
+        let resp_missing = client.post(&url).send().await.unwrap();
+        assert_eq!(resp_missing.status(), reqwest::StatusCode::UNAUTHORIZED);
+
+        let resp_bad = client
+            .post(&url)
+            .header("X-Diark-Sync-Token", "invalid-token")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp_bad.status(), reqwest::StatusCode::UNAUTHORIZED);
+
+        let resp_ok = client
+            .post(&url)
+            .header("X-Diark-Sync-Token", get_sync_token())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp_ok.status(), reqwest::StatusCode::OK);
+
+        server_handle.abort();
+    }
 }
 
 /// Khởi động server trong background.

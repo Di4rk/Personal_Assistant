@@ -1,7 +1,7 @@
 import type { AcademicCourseRecord, UitWorkloadEvaluation } from "../types";
 
 export interface ForecastParams {
-  currentEarnedCredits: number;
+  currentEarnedCredits?: number;
   currentGpaCredits: number;
   currentTotalWeighted10: number; // sum(score_10 * credits)
   targetGpa10: number;            // e.g. 8.5 (Giỏi) hoặc 9.0 (Xuất sắc)
@@ -17,20 +17,65 @@ export interface ForecastResult {
 }
 
 /**
+ * Loại trùng môn học lại / học cải thiện theo mã môn, giữ bản ghi điểm cao nhất
+ * (ưu tiên môn đã đạt / đã có điểm tổng kết).
+ */
+export function deduplicateCoursesByHighestScore(
+  courses: AcademicCourseRecord[]
+): AcademicCourseRecord[] {
+  const bestByCode = new Map<string, AcademicCourseRecord>();
+
+  for (const course of courses) {
+    const code = course.courseCode.trim().toUpperCase();
+    if (!code) continue;
+
+    const existing = bestByCode.get(code);
+    if (!existing) {
+      bestByCode.set(code, course);
+      continue;
+    }
+
+    const existingScore =
+      existing.summaryScore10 !== null && existing.summaryScore10 !== undefined
+        ? existing.summaryScore10
+        : -1;
+    const currentScore =
+      course.summaryScore10 !== null && course.summaryScore10 !== undefined
+        ? course.summaryScore10
+        : -1;
+
+    if (currentScore > existingScore) {
+      bestByCode.set(code, course);
+    } else if (
+      currentScore === existingScore &&
+      course.isPassed &&
+      !existing.isPassed
+    ) {
+      bestByCode.set(code, course);
+    }
+  }
+
+  return Array.from(bestByCode.values());
+}
+
+/**
  * Tính toán dự báo tốt nghiệp và GPA yêu cầu theo mục tiêu.
  */
 export function calculateGraduationForecast(params: ForecastParams): ForecastResult {
-  const remainingCredits = Math.max(0, params.totalDegreeCredits - params.currentGpaCredits);
+  const earnedCredits = params.currentEarnedCredits ?? params.currentGpaCredits;
+  const remainingCredits = Math.max(0, params.totalDegreeCredits - earnedCredits);
   if (remainingCredits === 0) {
     return { remainingCredits: 0, requiredAverageGpa10: 0, isAchievable: true, termsRemaining: 0 };
   }
 
-  const targetTotalPoints = params.targetGpa10 * params.totalDegreeCredits;
+  const safeCreditsPerTerm = Math.max(1, params.estimatedCreditsPerTerm || 1);
+  const totalGpaCreditsAtGraduation = params.currentGpaCredits + remainingCredits;
+  const targetTotalPoints = params.targetGpa10 * totalGpaCreditsAtGraduation;
   const requiredRemainingPoints = targetTotalPoints - params.currentTotalWeighted10;
   const requiredAverageGpa10 = Number((requiredRemainingPoints / remainingCredits).toFixed(2));
 
   const isAchievable = requiredAverageGpa10 <= 10.0;
-  const termsRemaining = Math.ceil(remainingCredits / params.estimatedCreditsPerTerm);
+  const termsRemaining = Math.ceil(remainingCredits / safeCreditsPerTerm);
 
   return {
     remainingCredits,
@@ -132,11 +177,22 @@ export interface CategoryAxisData {
 const FOUNDATIONAL_CODES = new Set([
   "IT002",
   "IT003",
-  "IT012",
-  "CS005",
   "IT004",
   "IT005",
   "IT007",
+  "IT012",
+  "CS005",
+  "NT101",
+  "NT105",
+  "NT106",
+  "NT109",
+  "NT113",
+  "SE104",
+  "IS201",
+  "IS207",
+  "CE103",
+  "CE118",
+  "DS102",
 ]);
 
 /**
@@ -203,7 +259,9 @@ export function computeCategoryRadarData(courses: AcademicCourseRecord[]): Categ
     auxiliary: { totalWeightedScore: 0, scoreCredits: 0, totalCredits: 0, passedCredits: 0, courseCount: 0 },
   };
 
-  for (const course of courses) {
+  const uniqueCourses = deduplicateCoursesByHighestScore(courses);
+
+  for (const course of uniqueCourses) {
     const cat = classifyCourseCategory(course.courseCode);
     const acc = accumulators[cat];
     acc.courseCount += 1;
@@ -212,10 +270,14 @@ export function computeCategoryRadarData(courses: AcademicCourseRecord[]): Categ
       acc.passedCredits += course.credits;
     }
 
-    if (course.summaryScore10 !== null && course.summaryScore10 !== undefined) {
-      const weight = course.credits > 0 ? course.credits : 1;
-      acc.totalWeightedScore += course.summaryScore10 * weight;
-      acc.scoreCredits += weight;
+    if (
+      course.isGpaCalculated &&
+      course.credits > 0 &&
+      course.summaryScore10 !== null &&
+      course.summaryScore10 !== undefined
+    ) {
+      acc.totalWeightedScore += course.summaryScore10 * course.credits;
+      acc.scoreCredits += course.credits;
     }
   }
 

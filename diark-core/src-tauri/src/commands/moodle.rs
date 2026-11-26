@@ -70,6 +70,23 @@ pub fn update_moodle_course_instructor(
     .map_err(|e| format!("Update moodle course instructor error: {e}"))
 }
 
+#[tauri::command]
+pub fn mark_moodle_task_submitted(
+    app: tauri::AppHandle,
+    db: State<'_, SharedDb>,
+    task_id: i64,
+    is_submitted: bool,
+) -> Result<(), String> {
+    use tauri::Emitter;
+    {
+        let conn = db.lock().map_err(|e| format!("DB lock error: {e}"))?;
+        crate::db::moodle::set_moodle_task_submitted(&conn, task_id, is_submitted)
+            .map_err(|e| format!("Cập nhật trạng thái bài tập Moodle thất bại: {e}"))?;
+    }
+    let _ = app.emit("moodle-data-synced", 0usize);
+    Ok(())
+}
+
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct MaterialDownloadProgress {
     pub course_id: i64,

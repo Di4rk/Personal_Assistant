@@ -77,10 +77,10 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
 
 /// Restore and focus the main dashboard without opening the HUD / Quick Note overlay.
 pub fn show_and_focus_main(window: &tauri::WebviewWindow) -> Result<(), String> {
-    window.unminimize().map_err(|e| e.to_string())?;
+    let _ = window.unminimize();
     window.show().map_err(|e| e.to_string())?;
     let _ = window.set_always_on_top(true);
-    window.set_focus().map_err(|e| e.to_string())?;
+    let _ = window.set_focus();
     let _ = window.set_always_on_top(false);
     Ok(())
 }

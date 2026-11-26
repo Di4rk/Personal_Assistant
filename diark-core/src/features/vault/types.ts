@@ -3,8 +3,7 @@
  * Matches Rust DTOs in `src-tauri/src/commands/vault.rs` and `src-tauri/src/modules/vault/scanner.rs`.
  */
 
-// Khớp chính xác với default value bên SQLite schema
-export type NoteType = 'GENERAL' | 'ALGO_TRICK' | 'ACADEMIC_SUMMARY' | 'TEACHING_SHEET' | 'ONENOTE_LINK';
+export type NoteType = 'GENERAL' | 'ALGO_TRICK' | 'ACADEMIC_SUMMARY' | 'ONENOTE_LINK';
 
 export interface CreateStructuredNoteDto {
   title: string;
@@ -35,6 +34,43 @@ export interface VaultSearchResultDto {
   id: string;
   title: string;
   snippet: string;
+}
+
+export interface VaultNoteSummaryDto {
+  id: string;
+  title: string;
+  folder: string;
+  tags: string[];
+  noteType: string;
+  updatedAt: number;
+  externalUri: string;
+}
+
+export interface VaultBacklinkDto {
+  id: string;
+  title: string;
+}
+
+export interface VaultNoteDetailDto {
+  id: string;
+  title: string;
+  folder: string;
+  tags: string[];
+  noteType: string;
+  content: string;
+  externalUri: string;
+  updatedAt: number;
+  backlinks: VaultBacklinkDto[];
+}
+
+export interface SaveVaultNoteDto {
+  id?: string;
+  folder?: string;
+  title: string;
+  noteType: string;
+  tags: string[];
+  content: string;
+  externalUri?: string;
 }
 
 export interface ScaffoldResultDto {

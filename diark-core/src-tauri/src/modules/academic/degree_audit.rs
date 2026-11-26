@@ -686,66 +686,129 @@ pub fn match_slug_from_catalog(analysis: &AcademicCurriculumCodeAnalysis) -> Opt
     }
 }
 
-/// Xác định active curriculum slug dựa trên ưu tiên truyền vào hoặc cơ sở dữ liệu settings.
-fn resolve_active_curriculum_slug(conn: &Connection, preferred_slug: Option<&str>) -> AppResult<String> {
-    // 0. Ưu tiên slug truyền vào trực tiếp nếu hợp lệ
+/// Xác định active curriculum slug dựa trên ưu tiên truyền vào hoặc thông tin hồ sơ sinh viên.
+pub fn resolve_active_curriculum_slug(conn: &Connection, preferred_slug: Option<&str>) -> AppResult<String> {
+    // 0. Ưu tiên slug truyền vào trực tiếp từ dropdown chọn CTĐT
     if let Some(s) = preferred_slug {
-        if !s.trim().is_empty() {
-            let exists: bool = conn.query_row(
-                "SELECT COUNT(*) FROM curriculum_index WHERE slug = ?1",
-                params![s],
-                |row| row.get::<_, i64>(0),
-            ).map(|c| c > 0).unwrap_or(false);
-            if exists {
-                return Ok(s.to_string());
-            }
+        let trimmed = s.trim();
+        if !trimmed.is_empty() {
+            return Ok(trimmed.to_string());
         }
     }
 
-    // 1. Phân tích trực tiếp từ thông tin học vụ (curriculum_code, ví dụ "KHMT-CQUI-D480101 K20")
+    // 1. Phân tích trực tiếp từ thông tin học vụ (curriculum_code, student_class, specialization, student_id)
     let curriculum_code: Option<String> = conn.query_row(
         "SELECT value FROM settings WHERE key = 'curriculum_code'",
         [],
         |row| row.get(0),
     ).ok();
 
-    if let Some(ref ccode) = curriculum_code {
-        let mut analysis = parse_curriculum_code_hint(ccode);
+    let student_id: Option<String> = conn.query_row(
+        "SELECT value FROM settings WHERE key = 'student_id'",
+        [],
+        |row| row.get(0),
+    ).ok();
 
-        // Bổ sung cohort từ student_id nếu mã học vụ chưa có năm
+    let student_class: Option<String> = conn.query_row(
+        "SELECT value FROM settings WHERE key = 'student_class'",
+        [],
+        |row| row.get(0),
+    ).ok();
+
+    let user_major: Option<String> = conn.query_row(
+        "SELECT value FROM settings WHERE key IN ('specialization', 'user_major', 'major_code') ORDER BY rowid DESC LIMIT 1",
+        [],
+        |row| row.get(0),
+    ).ok();
+
+    let mut analysis = parse_curriculum_code_hint(curriculum_code.as_deref().unwrap_or(""));
+
+    if analysis.cohort_year.is_none() {
+        if let Some(ref sid) = student_id {
+            if sid.len() >= 2 {
+                if let Ok(prefix) = sid[..2].parse::<i32>() {
+                    analysis.cohort_year = Some(2000 + prefix);
+                    analysis.cohort_num = Some(2000 + prefix - 2005);
+                }
+            }
+        }
+    }
+    if analysis.cohort_year.is_none() {
+        if let Some(ref sclass) = student_class {
+            if let Ok(re) = Regex::new(r"20\d{2}") {
+                if let Some(m) = re.find(sclass) {
+                    if let Ok(yr) = m.as_str().parse::<i32>() {
+                        analysis.cohort_year = Some(yr);
+                        analysis.cohort_num = Some(yr - 2005);
+                    }
+                }
+            }
+        }
+    }
+
+    if analysis.major_token.is_empty() {
+        if let Some(ref sclass) = student_class {
+            let upper = sclass.to_uppercase();
+            for token in ["KHMT", "KTPM", "ATTT", "HTTT", "MMT", "KTMT", "KHDL", "TMDT", "TTNT", "TKVM", "TTDPT", "CNTT"] {
+                if upper.contains(token) {
+                    analysis.major_token = token.to_string();
+                    break;
+                }
+            }
+        }
+    }
+
+    if analysis.major_token.is_empty() {
+        if let Some(ref m) = user_major {
+            if let Some(mapped) = crate::services::curriculum_harvester::major_name_to_code(m) {
+                analysis.major_token = mapped;
+            } else {
+                let m_upper = m.trim().to_uppercase();
+                match m_upper.as_str() {
+                    "CS" | "KHMT" => analysis.major_token = "KHMT".to_string(),
+                    "SE" | "KTPM" => analysis.major_token = "KTPM".to_string(),
+                    "IS" | "HTTT" => analysis.major_token = "HTTT".to_string(),
+                    "CE" | "KTMT" => analysis.major_token = "KTMT".to_string(),
+                    "NT" | "ATTT" => analysis.major_token = "ATTT".to_string(),
+                    "NET" | "MMT" => analysis.major_token = "MMT".to_string(),
+                    "DS" | "KHDL" => analysis.major_token = "KHDL".to_string(),
+                    "AI" | "TTNT" => analysis.major_token = "TTNT".to_string(),
+                    "EC" | "TMDT" => analysis.major_token = "TMDT".to_string(),
+                    "IC" | "TKVM" => analysis.major_token = "TKVM".to_string(),
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    if analysis.major_token.is_empty() {
+        let intro_code: Option<String> = conn.query_row(
+            "SELECT course_code FROM academic_curriculum WHERE course_code IN ('CS005', 'SE005', 'IS005', 'CE005', 'NT015', 'DS005', 'EC005') LIMIT 1",
+            [],
+            |r| r.get(0),
+        ).ok();
+        if let Some(ref icode) = intro_code {
+            match icode.as_str() {
+                "CS005" => analysis.major_token = "KHMT".to_string(),
+                "SE005" => analysis.major_token = "KTPM".to_string(),
+                "IS005" => analysis.major_token = "HTTT".to_string(),
+                "CE005" => analysis.major_token = "KTMT".to_string(),
+                "NT015" => analysis.major_token = "ATTT".to_string(),
+                "DS005" => analysis.major_token = "KHDL".to_string(),
+                "EC005" => analysis.major_token = "TMDT".to_string(),
+                _ => {}
+            }
+        }
+    }
+
+    if !analysis.major_token.is_empty() {
+        if analysis.tot_code.is_empty() {
+            analysis.tot_code = "CQUI".to_string();
+        }
         if analysis.cohort_year.is_none() {
-            let student_id: Option<String> = conn.query_row(
-                "SELECT value FROM settings WHERE key = 'student_id'",
-                [],
-                |row| row.get(0),
-            ).ok();
-            if let Some(ref sid) = student_id {
-                if sid.len() >= 2 {
-                    if let Ok(prefix) = sid[..2].parse::<i32>() {
-                        analysis.cohort_year = Some(2000 + prefix);
-                    }
-                }
-            }
+            analysis.cohort_year = Some(2025);
+            analysis.cohort_num = Some(20);
         }
-
-        // Bổ sung major_token từ student_class hoặc user_major nếu thiếu
-        if analysis.major_token.is_empty() {
-            let student_class: Option<String> = conn.query_row(
-                "SELECT value FROM settings WHERE key = 'student_class'",
-                [],
-                |row| row.get(0),
-            ).ok();
-            if let Some(ref sclass) = student_class {
-                let upper = sclass.to_uppercase();
-                for token in ["KHMT", "KTPM", "ATTT", "HTTT", "MMT", "KTMT", "KHDL", "TMDT", "TTNT", "TKVM", "TTDPT", "CNTT"] {
-                    if upper.contains(token) {
-                        analysis.major_token = token.to_string();
-                        break;
-                    }
-                }
-            }
-        }
-
         if let Some(matched_slug) = match_slug_from_catalog(&analysis) {
             let _ = conn.execute(
                 "INSERT INTO settings (key, value) VALUES ('curriculum_slug', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -767,120 +830,7 @@ fn resolve_active_curriculum_slug(conn: &Connection, preferred_slug: Option<&str
         }
     }
 
-    // 3. Fallback: Phân tích theo intro course trong academic_curriculum / user_major / student_class / student_id
-    let student_id: Option<String> = conn.query_row(
-        "SELECT value FROM settings WHERE key = 'student_id'",
-        [],
-        |row| row.get(0),
-    ).ok();
-
-    let student_class: Option<String> = conn.query_row(
-        "SELECT value FROM settings WHERE key = 'student_class'",
-        [],
-        |row| row.get(0),
-    ).ok();
-
-    let user_major: Option<String> = conn.query_row(
-        "SELECT value FROM settings WHERE key IN ('user_major', 'major_code') ORDER BY rowid DESC LIMIT 1",
-        [],
-        |row| row.get(0),
-    ).ok();
-
-    let mut detected_cohort_year = None;
-    if let Some(ref sid) = student_id {
-        if sid.len() >= 2 {
-            if let Ok(prefix) = sid[..2].parse::<i32>() {
-                detected_cohort_year = Some(2000 + prefix);
-            }
-        }
-    }
-
-    if detected_cohort_year.is_none() {
-        if let Some(ref sclass) = student_class {
-            if let Ok(re) = Regex::new(r"20\d{2}") {
-                if let Some(m) = re.find(sclass) {
-                    detected_cohort_year = m.as_str().parse::<i32>().ok();
-                }
-            }
-        }
-    }
-
-    let cohort_year = detected_cohort_year.unwrap_or(2025);
-
-    // Tìm major_token:
-    let mut major_token = String::new();
-    if let Some(ref sclass) = student_class {
-        let norm = crate::services::curriculum_harvester::normalize_major_name(sclass);
-        for (token, key) in [
-            ("KHMT", "khmt"), ("KTPM", "ktpm"), ("ATTT", "attt"), ("HTTT", "httt"),
-            ("MMT", "mmt"), ("KTMT", "ktmt"), ("KHDL", "khdl"), ("TMDT", "tmdt"),
-            ("TTNT", "ttnt"), ("TKVM", "tkvm"), ("TTDPT", "ttdpt"), ("CNTT", "cntt"),
-        ] {
-            if norm.contains(key) {
-                major_token = token.to_string();
-                break;
-            }
-        }
-    }
-
-    if major_token.is_empty() {
-        if let Some(ref m) = user_major {
-            let m_upper = m.trim().to_uppercase();
-            match m_upper.as_str() {
-                "CS" | "KHMT" => major_token = "KHMT".to_string(),
-                "SE" | "KTPM" => major_token = "KTPM".to_string(),
-                "IS" | "HTTT" => major_token = "HTTT".to_string(),
-                "CE" | "KTMT" => major_token = "KTMT".to_string(),
-                "NT" | "ATTT" => major_token = "ATTT".to_string(),
-                "NET" | "MMT" => major_token = "MMT".to_string(),
-                "DS" | "KHDL" => major_token = "KHDL".to_string(),
-                "AI" | "TTNT" => major_token = "TTNT".to_string(),
-                "EC" | "TMDT" => major_token = "TMDT".to_string(),
-                "IC" | "TKVM" => major_token = "TKVM".to_string(),
-                _ => {}
-            }
-        }
-    }
-
-    // Nếu vẫn chưa có, kiểm tra môn Giới thiệu ngành trong academic_curriculum
-    if major_token.is_empty() {
-        let intro_code: Option<String> = conn.query_row(
-            "SELECT course_code FROM academic_curriculum WHERE course_code IN ('CS005', 'SE005', 'IS005', 'CE005', 'NT015', 'DS005', 'EC005') LIMIT 1",
-            [],
-            |r| r.get(0),
-        ).ok();
-        if let Some(ref icode) = intro_code {
-            match icode.as_str() {
-                "CS005" => major_token = "KHMT".to_string(),
-                "SE005" => major_token = "KTPM".to_string(),
-                "IS005" => major_token = "HTTT".to_string(),
-                "CE005" => major_token = "KTMT".to_string(),
-                "NT015" => major_token = "ATTT".to_string(),
-                "DS005" => major_token = "KHDL".to_string(),
-                "EC005" => major_token = "TMDT".to_string(),
-                _ => {}
-            }
-        }
-    }
-
-    if !major_token.is_empty() {
-        let analysis = AcademicCurriculumCodeAnalysis {
-            major_token: major_token.clone(),
-            tot_code: "CQUI".to_string(),
-            major_code: String::new(),
-            cohort_num: Some(cohort_year - 2005),
-            cohort_year: Some(cohort_year),
-        };
-        if let Some(matched_slug) = match_slug_from_catalog(&analysis) {
-            let _ = conn.execute(
-                "INSERT INTO settings (key, value) VALUES ('curriculum_slug', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-                params![matched_slug],
-            );
-            return Ok(matched_slug);
-        }
-    }
-
-    // 4. Default Fallback
+    // 3. Default Fallback từ cache
     let default_slug: Option<String> = conn.query_row(
         "SELECT slug FROM curriculum_index ORDER BY is_cached DESC, cohort_year DESC LIMIT 1",
         [],
@@ -1185,5 +1135,21 @@ mod tests {
         // Tìm một khối kiến thức có môn tự chọn (ví dụ khối Chuyên ngành CN hoặc tự chọn)
         let has_any_electives = report.block_audits.iter().any(|b| !b.remaining_electives.is_empty());
         assert!(has_any_electives, "Phải có ít nhất một khối kiến thức có remaining_electives khi sinh viên chưa học");
+    }
+
+    #[test]
+    fn test_resolve_active_curriculum_slug_detects_attt_without_curriculum_code() {
+        let conn = setup_test_curriculum_and_db();
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('student_class', 'ATTT2025.1'), ('student_id', '25520123')",
+            [],
+        )
+        .unwrap();
+
+        let slug = resolve_active_curriculum_slug(&conn, None).unwrap();
+        assert!(
+            slug.contains("an-toan-thong-tin"),
+            "Sinh viên lớp ATTT2025.1 phải tự nhận diện sang ngành ATTT, nhận được: {slug}"
+        );
     }
 }

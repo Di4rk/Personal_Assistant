@@ -52,9 +52,11 @@ pub mod models {
         #[serde(default)]
         pub score_ck: Option<f64>,
         #[serde(default)]
-        pub score_10: f64,
+        pub score_10: Option<f64>,
         #[serde(default)]
         pub is_passed: i64,
+        #[serde(default)]
+        pub is_exempt: bool,
     }
 
     #[derive(Deserialize, Serialize, Clone, Debug, Default)]
@@ -301,6 +303,16 @@ pub mod models {
         })
     }
 
+    pub fn is_exempt_point_str(s: &Option<String>) -> bool {
+        let Some(v) = s.as_deref() else {
+            return false;
+        };
+        let norm = v.trim().to_lowercase();
+        matches!(norm.as_str(), "miễn" | "mien" | "m" | "đạt" | "dat" | "mt")
+            || norm.starts_with("miễn ")
+            || norm.starts_with("mien ")
+    }
+
     pub fn convert_official_uit_payload(
         official: OfficialUitTranscriptPayload,
     ) -> (PortalProfilePayload, Vec<DrlItem>, Vec<AcademicCourseItem>, Option<PortalSummaryPayload>, Option<f64>) {
@@ -309,8 +321,17 @@ pub mod models {
         for grp in &official.bySemester.semester_groups {
             let sem_label = &grp.semester_label;
             for subj in &grp.subjects {
-                let score_10 = parse_point_string(&subj.course_point).unwrap_or(0.0);
-                let is_passed = if score_10 >= 5.0 { 1 } else { 0 };
+                let is_exempt = is_exempt_point_str(&subj.course_point);
+                let score_10 = if is_exempt {
+                    None
+                } else {
+                    parse_point_string(&subj.course_point)
+                };
+                let is_passed = if is_exempt || score_10.map(|s| s >= 5.0).unwrap_or(false) {
+                    1
+                } else {
+                    0
+                };
 
                 courses.push(AcademicCourseItem {
                     course_code: subj.subject_code.clone(),
@@ -323,6 +344,7 @@ pub mod models {
                     score_ck: parse_point_string(&subj.final_point),
                     score_10,
                     is_passed,
+                    is_exempt,
                 });
             }
         }
@@ -333,17 +355,31 @@ pub mod models {
         let mut semester_summaries = Vec::new();
         if let Some(ref terms) = official.termSummaries {
             for t in terms {
-                let term_sem_num = t.semester.as_deref().unwrap_or("");
+                let term_sem_num = t.semester.as_deref().unwrap_or("").trim();
+                let year_opt = t.yearName.as_deref().map(str::trim).filter(|s| !s.is_empty());
                 let matched_group = official.bySemester.semester_groups.iter().find(|g| {
-                    g.semester_key == format!("semester_{}", term_sem_num)
-                        || (t.yearName.as_deref().map(|y| g.year_name.starts_with(y)).unwrap_or(false)
-                            && g.semester_label.contains(term_sem_num))
+                    let sem_matches = g.semester_key == format!("semester_{}", term_sem_num)
+                        || g.semester_label.starts_with(&format!("Học kỳ {}/", term_sem_num))
+                        || g.semester_label.starts_with(&format!("HK{}/", term_sem_num));
+                    let year_matches = match year_opt {
+                        Some(y) => g.year_name.starts_with(y) || g.semester_label.contains(y),
+                        None => true,
+                    };
+                    sem_matches && year_matches
                 });
 
                 let sem_str = if let Some(g) = matched_group {
                     g.semester_label.clone()
                 } else {
-                    format!("Học kỳ {}/{}", term_sem_num, t.yearName.as_deref().unwrap_or_default())
+                    let expanded_year = match year_opt {
+                        Some(y) if y.len() == 4 => y
+                            .parse::<i32>()
+                            .map(|yr| format!("{yr}-{}", yr + 1))
+                            .unwrap_or_else(|_| y.to_string()),
+                        Some(y) => y.to_string(),
+                        None => String::new(),
+                    };
+                    format!("Học kỳ {}/{}", term_sem_num, expanded_year)
                 };
 
                 semester_summaries.push(SemesterSummaryItem {
@@ -774,37 +810,88 @@ impl PortalIngestionEngine {
             ).map_err(|e| format!("Failed to upsert academic_drl: {}", e))?;
         }
 
-        // 6. Upsert danh sách khóa học vào academic_courses
+        // 6. Upsert danh sách khóa học vào academic_courses và tính trạng thái hoàn tất từng kỳ
         let now = chrono::Utc::now().timestamp();
+        let resolve_sem_tuple = |raw_sem: &str| -> (String, String, i64) {
+            if let Some(parsed) = crate::services::uit_portal::parse_semester_header(raw_sem) {
+                parsed
+            } else {
+                let s = if raw_sem.trim().is_empty() {
+                    "2025_2026_HK1".to_string()
+                } else {
+                    raw_sem.trim().replace(' ', "_")
+                };
+                (s, "2025-2026".to_string(), 1)
+            }
+        };
+
+        let mut sem_all_graded: HashMap<String, bool> = HashMap::new();
+        let mut sem_credits_total: HashMap<String, i64> = HashMap::new();
+        let mut sem_meta_map: HashMap<String, (String, i64)> = HashMap::new();
+
+        for c in &courses {
+            if c.course_code.trim().is_empty() {
+                continue;
+            }
+            let (sem_id, acad_year, term) = resolve_sem_tuple(&c.semester);
+            let is_done = c.score_10.is_some() || c.is_exempt;
+            sem_all_graded
+                .entry(sem_id.clone())
+                .and_modify(|all| *all = *all && is_done)
+                .or_insert(is_done);
+            *sem_credits_total.entry(sem_id.clone()).or_insert(0) += c.credits;
+            sem_meta_map.entry(sem_id).or_insert((acad_year, term));
+        }
+
+        for (sem_id, (acad_year, term)) in &sem_meta_map {
+            let is_comp = if *sem_all_graded.get(sem_id).unwrap_or(&false) { 1 } else { 0 };
+            let _ = tx.execute(
+                "INSERT INTO academic_semesters (id, academic_year, semester_term, is_completed, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?5)
+                 ON CONFLICT(id) DO UPDATE SET is_completed = excluded.is_completed, updated_at = excluded.updated_at",
+                params![sem_id, acad_year, term, is_comp, now],
+            );
+        }
+
         for c in courses {
             if c.course_code.trim().is_empty() {
                 continue;
             }
-            let (sem_id, acad_year, term) = if let Some(parsed) = crate::services::uit_portal::parse_semester_header(&c.semester) {
-                parsed
+            let (sem_id, _acad_year, _term) = resolve_sem_tuple(&c.semester);
+
+            let is_gpa = if !c.is_exempt
+                && c.credits > 0
+                && crate::services::uit_portal::is_course_gpa_calculated(&c.course_code)
+            {
+                1
             } else {
-                let s = if c.semester.trim().is_empty() {
-                    "2025_2026_HK1".to_string()
-                } else {
-                    c.semester.trim().replace(' ', "_")
-                };
-                (s, "2025-2026".to_string(), 1)
+                0
+            };
+            let (summary_score_4, grade_char) = if let Some(s10) = c.score_10 {
+                let scale = crate::db::academic::GradeScale::from_score_10(s10);
+                (Some(scale.to_scale_4()), Some(scale.as_char().to_string()))
+            } else if c.is_exempt {
+                (None, Some("M".to_string()))
+            } else {
+                (None, None)
+            };
+            let course_point_col = c.score_10.unwrap_or(0.0);
+            let result_status = if c.is_exempt {
+                "Miễn"
+            } else if c.score_10.is_none() {
+                "Đang học"
+            } else if c.is_passed == 1 {
+                "Đạt"
+            } else {
+                "Không đạt"
             };
 
-            // Đảm bảo semester tồn tại cho foreign key
-            let _ = tx.execute(
-                "INSERT INTO academic_semesters (id, academic_year, semester_term, is_completed, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, 1, ?4, ?4)
-                 ON CONFLICT(id) DO UPDATE SET updated_at = excluded.updated_at",
-                params![sem_id, acad_year, term, now],
-            );
-
-            let is_gpa = if crate::services::uit_portal::is_course_gpa_calculated(&c.course_code) { 1 } else { 0 };
-            let scale = crate::db::academic::GradeScale::from_score_10(c.score_10);
-            let (summary_score_4, grade_char) = (Some(scale.to_scale_4()), Some(scale.as_char().to_string()));
-
             let code_norm = c.course_code.trim().to_uppercase();
-            let category = if ["IT002", "IT003", "IT012", "CS005"].contains(&code_norm.as_str()) {
+            let category = if [
+                "IT002", "IT003", "IT004", "IT005", "IT007", "IT012", "CS005",
+                "NT101", "NT105", "NT106", "NT109", "NT113", "SE104",
+                "IS201", "IS207", "CE103", "CE118", "DS102",
+            ].contains(&code_norm.as_str()) {
                 "co_so_nganh"
             } else if code_norm.starts_with("PE") || code_norm.starts_with("ME") {
                 "auxiliary"
@@ -820,9 +907,9 @@ impl PortalIngestionEngine {
                     id, semester_id, course_code, course_name, credits,
                     process_point, practice_point, midterm_score, final_point,
                     course_point, final_score, summary_score_10,
-                    summary_score_4, grade_4, grade_char, category,
+                    summary_score_4, grade_4, grade_char, result_status, category,
                     is_passed, is_gpa_calculated, updated_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10, ?10, ?11, ?11, ?12, ?13, ?14, ?15, ?16)
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?17, ?17, ?11, ?11, ?12, ?18, ?13, ?14, ?15, ?16)
                 ON CONFLICT(semester_id, course_code) DO UPDATE SET
                     course_name = excluded.course_name,
                     credits = excluded.credits,
@@ -836,6 +923,7 @@ impl PortalIngestionEngine {
                     summary_score_4 = excluded.summary_score_4,
                     grade_4 = excluded.grade_4,
                     grade_char = excluded.grade_char,
+                    result_status = excluded.result_status,
                     category = excluded.category,
                     is_passed = excluded.is_passed,
                     is_gpa_calculated = excluded.is_gpa_calculated,
@@ -850,16 +938,36 @@ impl PortalIngestionEngine {
                     c.score_th,
                     c.score_gk,
                     c.score_ck,
-                    c.score_10,
+                    course_point_col,
                     summary_score_4,
                     grade_char,
                     category,
                     c.is_passed,
                     is_gpa,
                     now,
+                    c.score_10,
+                    result_status,
                 ],
             ).map_err(|e| format!("Failed to upsert academic_courses: {}", e))?;
         }
+
+        // Helper khớp điểm rèn luyện chính xác theo học kỳ và năm học
+        let find_drl_for_semester = |sem_id: &str, acad_year: &str, term_num: i64| -> Option<i64> {
+            drl_list
+                .iter()
+                .find(|d| {
+                    if let Some((parsed_id, _, _)) =
+                        crate::services::uit_portal::parse_semester_header(&d.semester)
+                    {
+                        parsed_id == sem_id
+                    } else {
+                        d.semester.contains(acad_year)
+                            && (d.semester.contains(&format!("Học kỳ {term_num}"))
+                                || d.semester.contains(&format!("HK{term_num}")))
+                    }
+                })
+                .map(|d| d.score)
+        };
 
         // 7. Cập nhật Macro Metrics nếu có summary
         if let Some(ref sum) = summary {
@@ -887,26 +995,25 @@ impl PortalIngestionEngine {
                 params![sum.cgpa_10, latest_drl, sum.total_credits as i64, effective_total_credits],
             );
 
+            let mut covered_sem_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+
             for sem in &sum.semester_summaries {
                 if let Some(ref s_name) = sem.semester {
-                    let (sem_id, acad_year, term_num) = if let Some(p) = crate::services::uit_portal::parse_semester_header(s_name) {
-                        p
-                    } else {
-                        (s_name.replace(' ', "_").replace('/', "."), "2025-2026".to_string(), 1)
-                    };
+                    let (sem_id, acad_year, term_num) = resolve_sem_tuple(s_name);
+                    covered_sem_ids.insert(sem_id.clone());
 
-                    let sem_drl = drl_list.iter()
-                        .find(|d| d.semester.contains(s_name) || s_name.contains(&d.semester) || d.semester.contains(&format!("Học kỳ {term_num}")))
-                        .map(|d| d.score)
-                        .or(latest_drl.map(|v| v.round() as i64));
-
+                    let sem_drl = find_drl_for_semester(&sem_id, &acad_year, term_num);
                     let sem_label = format!("Học kỳ {}/{}", term_num, acad_year);
+                    let is_ongoing = sem.gpa_semester.is_none()
+                        && sem.cpa_cumulative.is_none()
+                        && !*sem_all_graded.get(&sem_id).unwrap_or(&true);
+                    let default_rank = if is_ongoing { "Đang học" } else { "Chưa xếp loại" };
 
                     let _ = tx.execute(
                         "INSERT INTO academic_macro_metrics (
                             semester_id, semester_label, year_name, term_gpa, cumulative_gpa, classification, rank_label,
                             term_credits, cumulative_credits, drl, drl_score, updated_at
-                        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6, ?7, ?8, ?9, ?9, strftime('%s', 'now'))
+                        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6, ?7, ?8, ?9, ?10, strftime('%s', 'now'))
                         ON CONFLICT(semester_id) DO UPDATE SET
                             semester_label = excluded.semester_label,
                             year_name = excluded.year_name,
@@ -925,13 +1032,50 @@ impl PortalIngestionEngine {
                             acad_year,
                             sem.gpa_semester.unwrap_or(0.0),
                             sem.cpa_cumulative.unwrap_or(0.0),
-                            sem.ranking.as_deref().unwrap_or("Giỏi"),
+                            sem.ranking.as_deref().unwrap_or(default_rank),
                             sem.credits_semester.unwrap_or(0),
                             sem.credits_cumulative.unwrap_or(0),
+                            sem_drl,
                             sem_drl.unwrap_or(0),
                         ],
                     );
                 }
+            }
+
+            // Bảo đảm các học kỳ đang học (chưa có trong termSummaries) vẫn có bản ghi macro đúng, không bị gán nhầm kỳ trước
+            for (sem_id, (acad_year, term_num)) in &sem_meta_map {
+                if covered_sem_ids.contains(sem_id) {
+                    continue;
+                }
+                let term_cred = *sem_credits_total.get(sem_id).unwrap_or(&0);
+                let sem_drl = find_drl_for_semester(sem_id, acad_year, *term_num);
+                let sem_label = format!("Học kỳ {}/{}", term_num, acad_year);
+                let _ = tx.execute(
+                    "INSERT INTO academic_macro_metrics (
+                        semester_id, semester_label, year_name, term_gpa, cumulative_gpa, classification, rank_label,
+                        term_credits, cumulative_credits, drl, drl_score, updated_at
+                    ) VALUES (?1, ?2, ?3, 0.0, 0.0, 'Đang học', 'Đang học', ?4, 0, ?5, ?6, strftime('%s', 'now'))
+                    ON CONFLICT(semester_id) DO UPDATE SET
+                        semester_label = excluded.semester_label,
+                        year_name = excluded.year_name,
+                        term_gpa = 0.0,
+                        cumulative_gpa = 0.0,
+                        classification = 'Đang học',
+                        rank_label = 'Đang học',
+                        term_credits = excluded.term_credits,
+                        cumulative_credits = 0,
+                        drl = excluded.drl,
+                        drl_score = excluded.drl_score,
+                        updated_at = excluded.updated_at",
+                    params![
+                        sem_id,
+                        sem_label,
+                        acad_year,
+                        term_cred,
+                        sem_drl,
+                        sem_drl.unwrap_or(0),
+                    ],
+                );
             }
 
             // 8. Đảm bảo bảng academic_curriculum tồn tại và nạp danh mục môn học theo khung CTĐT
@@ -1121,6 +1265,8 @@ mod tests {
                 id TEXT PRIMARY KEY,
                 academic_year TEXT NOT NULL,
                 semester_term INTEGER NOT NULL,
+                target_gpa REAL,
+                target_drl INTEGER,
                 is_completed INTEGER NOT NULL DEFAULT 0,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
@@ -1141,6 +1287,7 @@ mod tests {
                 summary_score_4 REAL,
                 grade_4 REAL,
                 grade_char TEXT,
+                result_status TEXT NOT NULL DEFAULT 'Đang học',
                 category TEXT NOT NULL DEFAULT 'dai_cuong',
                 is_passed INTEGER NOT NULL DEFAULT 0,
                 is_gpa_calculated INTEGER NOT NULL DEFAULT 1,
@@ -1252,8 +1399,9 @@ mod tests {
                 score_th: Some(9.0),
                 score_gk: Some(8.5),
                 score_ck: Some(9.5),
-                score_10: 9.0,
+                score_10: Some(9.0),
                 is_passed: 1,
+                is_exempt: false,
             },
             AcademicCourseItem {
                 course_code: "MA006".to_string(),
@@ -1264,8 +1412,9 @@ mod tests {
                 score_th: None,
                 score_gk: Some(8.0),
                 score_ck: Some(9.0),
-                score_10: 8.5,
+                score_10: Some(8.5),
                 is_passed: 1,
+                is_exempt: false,
             }
         ];
 
@@ -1421,7 +1570,7 @@ mod tests {
 
         assert_eq!(courses.len(), 2);
         assert_eq!(courses[0].course_code, "IT002");
-        assert_eq!(courses[0].score_10, 8.0);
+        assert_eq!(courses[0].score_10, Some(8.0));
         assert_eq!(courses[0].score_qt, Some(10.0));
         assert_eq!(courses[0].score_gk, None);
         assert_eq!(courses[0].score_th, Some(9.0));
@@ -1483,5 +1632,207 @@ mod tests {
         assert_eq!(c_name, "Giới thiệu ngành Khoa học Máy tính");
         assert_eq!(c_status, "Đã qua");
         assert_eq!(c_score, Some(9.7));
+    }
+
+    #[test]
+    fn test_exempt_and_ungraded_courses_excluded_from_gpa() {
+        let json_data = r#"{
+            "bySemester": {
+                "semester_groups": [
+                    {
+                        "semester_key": "semester_1",
+                        "semester_label": "Học kỳ 1/2025-2026",
+                        "year_name": "2025-2026",
+                        "subjects": [
+                            {
+                                "subject_code": "ENG01",
+                                "subject_name": "Anh văn 1",
+                                "number_of_credit": 4,
+                                "course_point": "Miễn"
+                            },
+                            {
+                                "subject_code": "IT004",
+                                "subject_name": "Cơ sở dữ liệu",
+                                "number_of_credit": 4,
+                                "course_point": ""
+                            },
+                            {
+                                "subject_code": "IT001",
+                                "subject_name": "Nhập môn lập trình",
+                                "number_of_credit": 4,
+                                "course_point": "9.0"
+                            }
+                        ]
+                    }
+                ]
+            }
+        }"#;
+
+        let official: OfficialUitTranscriptPayload = serde_json::from_str(json_data).unwrap();
+        let (profile, drl_records, courses, summary, avg_drl) =
+            convert_official_uit_payload(official);
+
+        assert_eq!(courses[0].course_code, "ENG01");
+        assert!(courses[0].is_exempt);
+        assert_eq!(courses[0].is_passed, 1);
+        assert_eq!(courses[0].score_10, None);
+
+        assert_eq!(courses[1].course_code, "IT004");
+        assert!(!courses[1].is_exempt);
+        assert_eq!(courses[1].is_passed, 0);
+        assert_eq!(courses[1].score_10, None);
+
+        let db = setup_test_db();
+        PortalIngestionEngine::commit_academic_records(
+            db.clone(),
+            profile,
+            drl_records,
+            courses,
+            summary,
+            avg_drl,
+            1,
+            1,
+        )
+        .unwrap();
+
+        let conn = db.lock().unwrap();
+        let (eng_s10, eng_gpa, eng_passed, eng_char): (Option<f64>, i64, i64, Option<String>) = conn
+            .query_row(
+                "SELECT summary_score_10, is_gpa_calculated, is_passed, grade_char FROM academic_courses WHERE course_code = 'ENG01'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(eng_s10, None);
+        assert_eq!(eng_gpa, 0);
+        assert_eq!(eng_passed, 1);
+        assert_eq!(eng_char.as_deref(), Some("M"));
+
+        crate::db::academic::ensure_academic_schema(&conn).unwrap();
+        let stats = crate::db::academic::get_all_semesters_with_stats(&conn).unwrap();
+        assert_eq!(stats.len(), 1);
+        assert!((stats[0].actual_gpa_10.unwrap() - 9.0).abs() < 0.001);
+        assert_eq!(stats[0].passed_credits, 8);
+    }
+
+    #[test]
+    fn test_ongoing_semester_isolated_from_previous_year_term_summary() {
+        let json_data = r#"{
+            "bySemester": {
+                "semester_groups": [
+                    {
+                        "semester_key": "semester_1",
+                        "semester_label": "Học kỳ 1/2026-2027",
+                        "year_name": "2026-2027",
+                        "subjects": [
+                            {
+                                "subject_code": "IT004",
+                                "subject_name": "Cơ sở dữ liệu",
+                                "number_of_credit": 4,
+                                "midterm_score": "8.0",
+                                "course_point": ""
+                            }
+                        ]
+                    },
+                    {
+                        "semester_key": "semester_1",
+                        "semester_label": "Học kỳ 1/2025-2026",
+                        "year_name": "2025-2026",
+                        "subjects": [
+                            {
+                                "subject_code": "IT001",
+                                "subject_name": "Nhập môn lập trình",
+                                "number_of_credit": 4,
+                                "course_point": "8.2"
+                            }
+                        ]
+                    }
+                ],
+                "summary": {
+                    "accumulated_credits": 18,
+                    "gpa_accumulated": 8.20
+                }
+            },
+            "termSummaries": [
+                {
+                    "yearName": "2025",
+                    "semester": "1",
+                    "termGpa": 8.20,
+                    "cumulativeGpa": 8.20,
+                    "termCredit": 18,
+                    "accumulatedCredit": 18,
+                    "classifyLabel": "Giỏi"
+                }
+            ],
+            "drl_records": [
+                {
+                    "semester": "Học kỳ 1/2025-2026",
+                    "score": 95,
+                    "grade_text": "Xuất sắc"
+                }
+            ]
+        }"#;
+
+        let official: OfficialUitTranscriptPayload = serde_json::from_str(json_data).unwrap();
+        let (profile, drl_records, courses, summary, avg_drl) =
+            convert_official_uit_payload(official);
+
+        let sum = summary.as_ref().unwrap();
+        assert_eq!(sum.semester_summaries.len(), 1);
+        assert_eq!(
+            sum.semester_summaries[0].semester.as_deref(),
+            Some("Học kỳ 1/2025-2026")
+        );
+
+        let db = setup_test_db();
+        PortalIngestionEngine::commit_academic_records(
+            db.clone(),
+            profile,
+            drl_records,
+            courses,
+            summary,
+            avg_drl,
+            1,
+            1,
+        )
+        .unwrap();
+
+        let conn = db.lock().unwrap();
+        let (comp_25, comp_26): (i64, i64) = (
+            conn.query_row(
+                "SELECT is_completed FROM academic_semesters WHERE id = '2025-2026.1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap(),
+            conn.query_row(
+                "SELECT is_completed FROM academic_semesters WHERE id = '2026-2027.1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap(),
+        );
+        assert_eq!(comp_25, 1);
+        assert_eq!(comp_26, 0);
+
+        let (gpa_26, drl_26): (f64, i64) = conn
+            .query_row(
+                "SELECT term_gpa, drl_score FROM academic_macro_metrics WHERE semester_id = '2026-2027.1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(gpa_26, 0.0);
+        assert_eq!(drl_26, 0);
+
+        let (gpa_25, drl_25): (f64, i64) = conn
+            .query_row(
+                "SELECT term_gpa, drl_score FROM academic_macro_metrics WHERE semester_id = '2025-2026.1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert!((gpa_25 - 8.2).abs() < 0.001);
+        assert_eq!(drl_25, 95);
     }
 }

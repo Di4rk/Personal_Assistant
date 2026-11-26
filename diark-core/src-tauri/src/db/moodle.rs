@@ -102,6 +102,10 @@ pub struct MoodleSyncPayload {
     pub progress_total: Option<usize>,
     #[serde(default)]
     pub progress_pct: Option<f64>,
+    #[serde(default)]
+    pub grades: Vec<crate::db::portal_extra::MoodleGradeRecord>,
+    #[serde(default)]
+    pub notifications: Vec<crate::db::portal_extra::MoodleNotificationRecord>,
 }
 
 /// Atomic Transaction: commit toàn bộ payload Moodle (Courses, Tasks, Materials) vào SQLite.
@@ -110,6 +114,7 @@ pub fn commit_moodle_payload(
     payload: MoodleSyncPayload,
 ) -> Result<(usize, usize, usize), String> {
     crate::db::schema::ensure_moodle_schema(conn).map_err(|e| format!("Schema error: {e}"))?;
+    crate::db::portal_extra::ensure_portal_extra_schema(conn).map_err(|e| format!("Extra schema error: {e}"))?;
     crate::db::schema::ensure_sync_state_schema(conn).map_err(|e| format!("Sync schema error: {e}"))?;
 
     let tx = conn
@@ -294,7 +299,15 @@ pub fn commit_moodle_payload(
         }
     }
 
-    // 4. Update sync_state
+    // 4. Upsert Moodle grades & notifications (nếu có trong payload)
+    crate::db::portal_extra::upsert_moodle_grades_and_notifications(
+        &tx,
+        &payload.grades,
+        &payload.notifications,
+        now_ts,
+    )?;
+
+    // 5. Update sync_state
     tx.execute(
         r#"
         INSERT INTO sync_state (service, last_synced_at)
@@ -528,6 +541,34 @@ pub fn update_moodle_course_instructor(
     Ok(())
 }
 
+/// Đánh dấu hoặc bỏ đánh dấu trạng thái đã nộp cho một bài tập/quiz Moodle.
+pub fn set_moodle_task_submitted(
+    conn: &Connection,
+    task_id: i64,
+    is_submitted: bool,
+) -> Result<(), rusqlite::Error> {
+    let now_ts = chrono::Utc::now().timestamp();
+    let submitted_int: i64 = if is_submitted { 1 } else { 0 };
+    let status_text = if is_submitted {
+        "Đã nộp (thủ công)"
+    } else {
+        "Chưa nộp"
+    };
+
+    conn.execute(
+        r#"
+        UPDATE moodle_tasks
+        SET is_submitted = ?1,
+            submission_status = ?2,
+            updated_at = ?3
+        WHERE task_id = ?4
+        "#,
+        params![submitted_int, status_text, now_ts, task_id],
+    )?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -693,5 +734,50 @@ mod tests {
         assert_eq!(preserved[0].instructor_name, "TS. Nguyễn Văn A");
         assert_eq!(preserved[0].instructor_mail, "anguyen@uit.edu.vn");
         assert_eq!(preserved[0].instructor_phone, "0909123456");
+    }
+
+    #[test]
+    fn test_set_moodle_task_submitted_toggles_status() {
+        let mut conn = setup_test_db();
+        let payload = MoodleSyncPayload {
+            courses: vec![MoodleCourseRecord {
+                course_id: 2001,
+                course_code: "IT005.R114".to_string(),
+                fullname: "Nhập môn mạng máy tính".to_string(),
+                term: "HK1 2026-2027".to_string(),
+                instructor_name: "".to_string(),
+                instructor_mail: "".to_string(),
+                instructor_phone: "".to_string(),
+                course_url: "https://courses.uit.edu.vn/course/view.php?id=2001".to_string(),
+                status: "active".to_string(),
+                updated_at: 100,
+            }],
+            tasks: vec![MoodleTaskRecord {
+                task_id: 9001,
+                course_id: 2001,
+                title: "Link nộp bài Lab3".to_string(),
+                task_type: "assign".to_string(),
+                due_date: 1700000000,
+                is_submitted: false,
+                submission_status: "Chưa nộp".to_string(),
+                template_file_url: "".to_string(),
+                task_url: "https://courses.uit.edu.vn/mod/assign/view.php?id=9001".to_string(),
+                updated_at: 100,
+                course_name: None,
+                course_code: None,
+            }],
+            materials: vec![],
+            ..Default::default()
+        };
+
+        commit_moodle_payload(&mut conn, payload).unwrap();
+
+        set_moodle_task_submitted(&conn, 9001, true).unwrap();
+        let after_mark = get_moodle_tasks(&conn, None).unwrap();
+        assert!(after_mark[0].is_submitted);
+
+        set_moodle_task_submitted(&conn, 9001, false).unwrap();
+        let after_unmark = get_moodle_tasks(&conn, None).unwrap();
+        assert!(!after_unmark[0].is_submitted);
     }
 }

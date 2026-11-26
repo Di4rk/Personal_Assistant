@@ -1,7 +1,7 @@
 import { create } from "zustand";
 
 export interface QuickNotePrefill {
-  mode: "algo" | "onenote" | "teaching";
+  mode: "algo" | "onenote" | "general";
   title: string;
   platformLink: string;
   tags: string[];

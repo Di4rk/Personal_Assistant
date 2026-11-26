@@ -56,6 +56,7 @@ anyhow = "1"
 # --- Utils ---
 # Timezone Lock (UTC+7 Asia/Ho_Chi_Minh)
 chrono = { version = "0.4", features = ["serde", "clock"] }
+chrono-tz = "0.10"
 uuid = { version = "1", features = ["v4"] }
 scraper = "0.22"
 walkdir = "2.4"
@@ -79,6 +80,8 @@ tauri-plugin-single-instance = "2.5.1"
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.52", features = [
     "Win32_Foundation",
+    "Win32_Security_Cryptography",
+    "Win32_System_Memory",
     "Win32_System_Threading",
     "Win32_System_ProcessStatus",
 ] }
