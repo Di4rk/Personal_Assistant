@@ -28,6 +28,8 @@ src-tauri/gen/
 *.db-shm
 *.sqlite3-wal
 *.sqlite3-shm
+*.har
+*.ics
 
 # Environment variables
 .env
