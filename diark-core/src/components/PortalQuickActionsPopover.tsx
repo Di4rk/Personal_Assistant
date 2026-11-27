@@ -57,7 +57,7 @@ export const PortalQuickActionsPopover: React.FC = () => {
         onClick={() => setIsOpen((prev) => !prev)}
         aria-expanded={isOpen}
         aria-haspopup="menu"
-        className="flex h-8 items-center gap-1.5 rounded-lg border border-white/[0.08] bg-[#121213] px-2.5 text-xs font-medium text-zinc-300 transition-colors duration-150 ease-out hover:border-white/[0.15] hover:bg-[#19191b] hover:text-white active:scale-[0.98] cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-zinc-600"
+        className="flex h-8 items-center gap-1.5 rounded-lg border border-[#1D263B] bg-[#0F1420] px-2.5 text-xs font-medium text-zinc-300 transition-colors duration-150 ease-out hover:border-[#2F6BFF]/30 hover:bg-[#151C2C] hover:text-white active:scale-[0.98] cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#2F6BFF]/50"
       >
         <span>Thủ tục Portal</span>
         <ChevronDown
@@ -71,9 +71,9 @@ export const PortalQuickActionsPopover: React.FC = () => {
       {isOpen && (
         <div
           role="menu"
-          className="absolute right-0 top-10 z-50 w-80 origin-top-right rounded-xl border border-white/[0.08] bg-[#121213] shadow-2xl"
+          className="absolute right-0 top-10 z-50 w-80 origin-top-right rounded-xl border border-[#1D263B] bg-[#0F1420] shadow-2xl"
         >
-          <div className="flex items-center gap-2 border-b border-zinc-800 px-3 py-2">
+          <div className="flex items-center gap-2 border-b border-[#1D263B] px-3 py-2">
             <Search className="h-3.5 w-3.5 shrink-0 text-zinc-500" aria-hidden="true" />
             <input
               ref={inputRef}
@@ -105,7 +105,7 @@ export const PortalQuickActionsPopover: React.FC = () => {
                         type="button"
                         role="menuitem"
                         onClick={() => handleOpenLink(item.url)}
-                        className="flex w-full items-center justify-between px-3 py-1.5 text-left text-xs text-zinc-300 transition-colors duration-100 hover:bg-zinc-800/70 hover:text-zinc-100 cursor-pointer"
+                        className="flex w-full items-center justify-between px-3 py-1.5 text-left text-xs text-zinc-300 transition-colors duration-100 hover:bg-[#151C2C] hover:text-zinc-100 cursor-pointer"
                       >
                         <span className="truncate">{item.label}</span>
                         <ExternalLink className="h-3 w-3 shrink-0 text-zinc-600" aria-hidden="true" />

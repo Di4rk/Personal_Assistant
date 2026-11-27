@@ -1,4 +1,9 @@
-export type PortalLinkCategory = "Học vụ" | "Thi cử" | "Tài chính & Giấy tờ" | "Hành chính & Khác";
+export type PortalLinkCategory =
+  | "Học vụ"
+  | "Thi cử"
+  | "Tài chính & Giấy tờ"
+  | "Tài liệu & Ôn thi"
+  | "Hành chính & Khác";
 
 export interface PortalQuickLink {
   id: string;
@@ -143,6 +148,27 @@ export const PORTAL_QUICK_LINKS: PortalQuickLink[] = [
     keywords: "kham suc khoe ho so",
   },
   {
+    id: "resource-bhtcnpm",
+    label: "Kho tài liệu BHT CNPM",
+    category: "Tài liệu & Ôn thi",
+    url: "https://www.bhtcnpm.com/",
+    keywords: "bht cnpm tai lieu de thi so tay on thi training",
+  },
+  {
+    id: "resource-svuit-mmtt",
+    label: "Study Vault UIT (SVUIT MMTT)",
+    category: "Tài liệu & Ôn thi",
+    url: "https://svuit.org/mmtt/",
+    keywords: "svuit mmtt tai lieu slide do an on thi mang may tinh",
+  },
+  {
+    id: "portal-nms",
+    label: "Hệ thống NMS UIT",
+    category: "Hành chính & Khác",
+    url: "https://nms.uit.edu.vn/",
+    keywords: "nms uit mang he thong quan ly",
+  },
+  {
     id: "portal-ho-tro",
     label: "Hỗ trợ Helpdesk UIT",
     category: "Hành chính & Khác",
@@ -155,5 +181,6 @@ export const PORTAL_LINK_CATEGORIES: PortalLinkCategory[] = [
   "Học vụ",
   "Thi cử",
   "Tài chính & Giấy tờ",
+  "Tài liệu & Ôn thi",
   "Hành chính & Khác",
 ];

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { fetchTodayStats, fetchLevelInfo, fetchRecentSubmissions } from "./lib/tauri-client";
 import type { SyncCompletePayload } from "./lib/tauri-client";
 import { useTauriEvent } from "./hooks/useTauriEvent";
@@ -88,6 +88,25 @@ export default function App() {
     }
   });
   const isPortalSyncing = useSyncOrchestratorStore((s) => s.serviceState.portal.isSyncing);
+  const navItemRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
+  const [navIndicator, setNavIndicator] = useState<{
+    y: number;
+    h: number;
+    visible: boolean;
+  }>({ y: 0, h: 20, visible: false });
+
+  useLayoutEffect(() => {
+    const el = navItemRefs.current.get(activeTab);
+    if (!el) {
+      setNavIndicator((prev) => (prev.visible ? { ...prev, visible: false } : prev));
+      return;
+    }
+    setNavIndicator({
+      y: el.offsetTop,
+      h: el.offsetHeight,
+      visible: true,
+    });
+  }, [activeTab, sidebarCollapsed, plugins.length, profileState.status]);
 
   const toggleSidebar = useCallback(() => {
     setSidebarCollapsed((prev) => {
@@ -431,10 +450,10 @@ export default function App() {
   const enabledPlugins = plugins.filter((p) => p.isEnabled);
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-[#080808] text-zinc-100">
-      {/* Collapsible Monochrome Left Sidebar */}
+    <div className="flex h-screen w-screen overflow-hidden bg-[#080B12] text-zinc-100">
+      {/* Collapsible UIT Navy Left Sidebar */}
       <aside
-        className={`flex shrink-0 flex-col border-r border-white/[0.06] bg-[#080808] transition-[width] duration-200 ease-out ${
+        className={`flex shrink-0 flex-col border-r border-[#1D263B]/80 bg-[#060910] transition-[width] duration-200 ease-out ${
           sidebarCollapsed ? "w-[68px]" : "w-[236px]"
         }`}
       >
@@ -478,7 +497,7 @@ export default function App() {
             onClick={() => {
               window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }));
             }}
-            className={`flex h-8 w-full items-center rounded-lg border border-white/[0.07] bg-[#121213] text-xs text-zinc-400 transition-colors hover:border-white/[0.14] hover:text-zinc-200 cursor-pointer ${
+            className={`flex h-8 w-full items-center rounded-lg border border-[#1D263B] bg-[#0F1420] text-xs text-zinc-400 transition-colors hover:border-[#2F6BFF]/30 hover:bg-[#151C2C] hover:text-zinc-200 cursor-pointer ${
               sidebarCollapsed ? "justify-center px-0" : "justify-between px-2.5"
             }`}
             title="Tìm kiếm nhanh (Ctrl+K)"
@@ -488,7 +507,7 @@ export default function App() {
               {!sidebarCollapsed && <span>Tìm kiếm...</span>}
             </span>
             {!sidebarCollapsed && (
-              <kbd className="rounded bg-[#1b1b1e] px-1.5 py-0.5 font-mono text-[10px] text-zinc-400 border border-white/[0.05]">
+              <kbd className="rounded border border-[#1D263B] bg-[#151C2C] px-1.5 py-0.5 font-mono text-[10px] text-zinc-400">
                 Ctrl K
               </kbd>
             )}
@@ -497,75 +516,98 @@ export default function App() {
 
         {/* Navigation Links */}
         <nav className="flex-1 overflow-y-auto px-2.5 space-y-5" aria-label="Main navigation">
-          <div className="space-y-0.5">
+          <div className="relative space-y-0.5">
             {!sidebarCollapsed && (
               <div className="px-2.5 pb-1 text-[11px] font-medium text-zinc-500">
                 Học tập
               </div>
             )}
 
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute left-0 top-0 z-20 w-[2px] rounded-r bg-[#2F6BFF] shadow-[0_0_8px_rgba(47,107,255,0.8)] transition-transform duration-200 ease-[cubic-bezier(0.22,1,0.36,1)]"
+              style={{
+                height: `${Math.max(16, navIndicator.h - 12)}px`,
+                transform: `translateY(${navIndicator.y + 6}px)`,
+                opacity: navIndicator.visible ? 1 : 0,
+              }}
+            />
+
             <button
+              ref={(el) => {
+                if (el) navItemRefs.current.set("home", el);
+                else navItemRefs.current.delete("home");
+              }}
               type="button"
               onClick={() => setActiveTab("home")}
               aria-current={activeTab === "home" ? "page" : undefined}
               title="Hôm nay"
-              className={`flex h-8 w-full items-center rounded-lg text-xs font-medium transition-colors duration-150 cursor-pointer ${
+              className={`relative flex h-8 w-full items-center rounded-lg text-xs font-medium transition-colors duration-150 cursor-pointer ${
                 sidebarCollapsed ? "justify-center px-0" : "gap-2.5 px-2.5"
               } ${
                 activeTab === "home"
-                  ? "border border-white/[0.07] bg-[#18181b] text-white"
-                  : "border border-transparent text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200"
+                  ? "border border-[#2F6BFF]/30 bg-[#2F6BFF]/[0.14] text-white"
+                  : "border border-transparent text-zinc-400 hover:bg-[#151C2C] hover:text-zinc-200"
               }`}
             >
-              <Home className="h-4 w-4 shrink-0" aria-hidden="true" />
+              <Home className={`h-4 w-4 shrink-0 ${activeTab === "home" ? "text-[#2F6BFF]" : ""}`} aria-hidden="true" />
               {!sidebarCollapsed && <span>Hôm nay</span>}
             </button>
 
             <button
+              ref={(el) => {
+                if (el) navItemRefs.current.set("schedule", el);
+                else navItemRefs.current.delete("schedule");
+              }}
               type="button"
               onClick={() => setActiveTab("schedule")}
               aria-current={activeTab === "schedule" ? "page" : undefined}
               title="Lịch"
-              className={`flex h-8 w-full items-center rounded-lg text-xs font-medium transition-colors duration-150 cursor-pointer ${
+              className={`relative flex h-8 w-full items-center rounded-lg text-xs font-medium transition-colors duration-150 cursor-pointer ${
                 sidebarCollapsed ? "justify-center px-0" : "gap-2.5 px-2.5"
               } ${
                 activeTab === "schedule"
-                  ? "border border-white/[0.07] bg-[#18181b] text-white"
-                  : "border border-transparent text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200"
+                  ? "border border-[#2F6BFF]/30 bg-[#2F6BFF]/[0.14] text-white"
+                  : "border border-transparent text-zinc-400 hover:bg-[#151C2C] hover:text-zinc-200"
               }`}
             >
-              <CalendarDays className="h-4 w-4 shrink-0" aria-hidden="true" />
+              <CalendarDays className={`h-4 w-4 shrink-0 ${activeTab === "schedule" ? "text-[#2F6BFF]" : ""}`} aria-hidden="true" />
               {!sidebarCollapsed && <span>Lịch</span>}
             </button>
 
             <button
+              ref={(el) => {
+                if (el) navItemRefs.current.set("academic", el);
+                else navItemRefs.current.delete("academic");
+              }}
               type="button"
               onClick={() => setActiveTab("academic")}
               aria-current={activeTab === "academic" ? "page" : undefined}
               title="Học vụ"
-              className={`flex h-8 w-full items-center rounded-lg text-xs font-medium transition-colors duration-150 cursor-pointer ${
+              className={`relative flex h-8 w-full items-center rounded-lg text-xs font-medium transition-colors duration-150 cursor-pointer ${
                 sidebarCollapsed ? "justify-center px-0" : "gap-2.5 px-2.5"
               } ${
                 activeTab === "academic"
-                  ? "border border-white/[0.07] bg-[#18181b] text-white"
-                  : "border border-transparent text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200"
+                  ? "border border-[#2F6BFF]/30 bg-[#2F6BFF]/[0.14] text-white"
+                  : "border border-transparent text-zinc-400 hover:bg-[#151C2C] hover:text-zinc-200"
               }`}
             >
-              <GraduationCap className="h-4 w-4 shrink-0" aria-hidden="true" />
+              <GraduationCap className={`h-4 w-4 shrink-0 ${activeTab === "academic" ? "text-[#2F6BFF]" : ""}`} aria-hidden="true" />
               {!sidebarCollapsed && <span>Học vụ</span>}
             </button>
 
             {enabledPlugins.map((p) => {
               const isSelected = activeTab === p.pluginId;
+              const iconCls = `h-4 w-4 shrink-0 ${isSelected ? "text-[#2F6BFF]" : ""}`;
               const iconEl =
                 p.pluginId === "cp-codeforces" ? (
-                  <Code2 className="h-4 w-4 shrink-0" aria-hidden="true" />
+                  <Code2 className={iconCls} aria-hidden="true" />
                 ) : p.pluginId === "uit-courses" ? (
-                  <BookOpen className="h-4 w-4 shrink-0" aria-hidden="true" />
+                  <BookOpen className={iconCls} aria-hidden="true" />
                 ) : p.pluginId === "uit-wecode" ? (
-                  <Terminal className="h-4 w-4 shrink-0" aria-hidden="true" />
+                  <Terminal className={iconCls} aria-hidden="true" />
                 ) : (
-                  <Blocks className="h-4 w-4 shrink-0" aria-hidden="true" />
+                  <Blocks className={iconCls} aria-hidden="true" />
                 );
               const shortName =
                 p.pluginId === "uit-courses"
@@ -578,16 +620,20 @@ export default function App() {
               return (
                 <button
                   key={p.pluginId}
+                  ref={(el) => {
+                    if (el) navItemRefs.current.set(p.pluginId, el);
+                    else navItemRefs.current.delete(p.pluginId);
+                  }}
                   type="button"
                   onClick={() => setActiveTab(p.pluginId)}
                   aria-current={isSelected ? "page" : undefined}
                   title={shortName}
-                  className={`flex h-8 w-full items-center rounded-lg text-xs font-medium transition-colors duration-150 cursor-pointer ${
+                  className={`relative flex h-8 w-full items-center rounded-lg text-xs font-medium transition-colors duration-150 cursor-pointer ${
                     sidebarCollapsed ? "justify-center px-0" : "gap-2.5 px-2.5"
                   } ${
                     isSelected
-                      ? "border border-white/[0.07] bg-[#18181b] text-white"
-                      : "border border-transparent text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200"
+                      ? "border border-[#2F6BFF]/30 bg-[#2F6BFF]/[0.14] text-white"
+                      : "border border-transparent text-zinc-400 hover:bg-[#151C2C] hover:text-zinc-200"
                   }`}
                 >
                   {iconEl}
@@ -597,19 +643,23 @@ export default function App() {
             })}
 
             <button
+              ref={(el) => {
+                if (el) navItemRefs.current.set("vault", el);
+                else navItemRefs.current.delete("vault");
+              }}
               type="button"
               onClick={() => setActiveTab("vault")}
               aria-current={activeTab === "vault" ? "page" : undefined}
               title="Ghi chú"
-              className={`flex h-8 w-full items-center rounded-lg text-xs font-medium transition-colors duration-150 cursor-pointer ${
+              className={`relative flex h-8 w-full items-center rounded-lg text-xs font-medium transition-colors duration-150 cursor-pointer ${
                 sidebarCollapsed ? "justify-center px-0" : "gap-2.5 px-2.5"
               } ${
                 activeTab === "vault"
-                  ? "border border-white/[0.07] bg-[#18181b] text-white"
-                  : "border border-transparent text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200"
+                  ? "border border-[#2F6BFF]/30 bg-[#2F6BFF]/[0.14] text-white"
+                  : "border border-transparent text-zinc-400 hover:bg-[#151C2C] hover:text-zinc-200"
               }`}
             >
-              <FolderGit2 className="h-4 w-4 shrink-0" aria-hidden="true" />
+              <FolderGit2 className={`h-4 w-4 shrink-0 ${activeTab === "vault" ? "text-[#2F6BFF]" : ""}`} aria-hidden="true" />
               {!sidebarCollapsed && <span>Ghi chú</span>}
             </button>
           </div>
@@ -625,7 +675,7 @@ export default function App() {
               type="button"
               onClick={() => setIsSsoLoginOpen(true)}
               title="Tài khoản UIT SSO"
-              className={`flex h-8 w-full items-center rounded-lg border border-transparent text-xs font-medium text-zinc-400 transition-colors duration-150 hover:bg-white/[0.04] hover:text-zinc-200 cursor-pointer ${
+              className={`flex h-8 w-full items-center rounded-lg border border-transparent text-xs font-medium text-zinc-400 transition-colors duration-150 hover:bg-[#151C2C] hover:text-zinc-200 cursor-pointer ${
                 sidebarCollapsed ? "justify-center px-0" : "justify-between px-2.5"
               }`}
             >
@@ -636,7 +686,7 @@ export default function App() {
               {!sidebarCollapsed && (
                 <span
                   className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                    ssoStatus?.has_password ? "bg-emerald-400" : "bg-zinc-600"
+                    ssoStatus?.has_password ? "bg-[#2F6BFF]" : "bg-zinc-600"
                   }`}
                 />
               )}
@@ -646,7 +696,7 @@ export default function App() {
               type="button"
               onClick={() => useSettingsStore.getState().openSettings()}
               title="Cài đặt hệ thống"
-              className={`flex h-8 w-full items-center rounded-lg border border-transparent text-xs font-medium text-zinc-400 transition-colors duration-150 hover:bg-white/[0.04] hover:text-zinc-200 cursor-pointer ${
+              className={`flex h-8 w-full items-center rounded-lg border border-transparent text-xs font-medium text-zinc-400 transition-colors duration-150 hover:bg-[#151C2C] hover:text-zinc-200 cursor-pointer ${
                 sidebarCollapsed ? "justify-center px-0" : "gap-2.5 px-2.5"
               }`}
             >
@@ -657,16 +707,16 @@ export default function App() {
         </nav>
 
         {/* Bottom SSO Status Card + User Profile Footer */}
-        <div className="shrink-0 p-2.5 space-y-2 border-t border-white/[0.06]">
+        <div className="shrink-0 space-y-2 border-t border-[#1D263B]/80 p-2.5">
           {!sidebarCollapsed && (
-            <div className="rounded-xl border border-white/[0.07] bg-[#111112] p-3 space-y-2.5">
+            <div className="space-y-2.5 rounded-xl border border-[#1D263B] bg-[#0F1420] p-3">
               <div className="flex items-center justify-between gap-2">
                 <span className="text-[11px] font-medium text-zinc-300">
                   {ssoStatus?.has_password ? "UIT SSO đã lưu" : "Chưa lưu SSO"}
                 </span>
                 <span
                   className={`h-1.5 w-1.5 rounded-full ${
-                    ssoStatus?.has_password ? "bg-emerald-400" : "bg-amber-400"
+                    ssoStatus?.has_password ? "bg-[#2F6BFF]" : "bg-amber-400"
                   }`}
                 />
               </div>
@@ -683,7 +733,7 @@ export default function App() {
                   }
                 }}
                 disabled={isPortalSyncing}
-                className="flex h-7 w-full items-center justify-center gap-1.5 rounded-lg border border-white/[0.08] bg-[#1a1a1d] text-[11px] font-medium text-zinc-100 transition-colors hover:bg-[#232327] disabled:opacity-50 cursor-pointer"
+                className="flex h-7 w-full items-center justify-center gap-1.5 rounded-lg border border-[#1D263B] bg-[#151C2C] text-[11px] font-medium text-zinc-100 transition-colors hover:border-[#2F6BFF]/30 hover:bg-[#1a2338] disabled:opacity-50 cursor-pointer"
               >
                 {ssoStatus?.has_password ? (
                   <>
@@ -704,12 +754,12 @@ export default function App() {
             type="button"
             onClick={() => setIsSsoLoginOpen(true)}
             title="Mở cửa sổ đăng nhập UIT SSO"
-            className={`flex h-9 w-full items-center rounded-lg border border-white/[0.06] bg-[#101012] text-left transition-colors hover:border-white/[0.12] hover:bg-[#151518] cursor-pointer ${
+            className={`flex h-9 w-full items-center rounded-lg border border-[#1D263B] bg-[#0F1420] text-left transition-colors hover:border-[#2F6BFF]/30 hover:bg-[#151C2C] cursor-pointer ${
               sidebarCollapsed ? "justify-center px-0" : "justify-between px-2.5"
             }`}
           >
             <span className="flex items-center gap-2 min-w-0">
-              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-white/[0.08] text-[11px] font-semibold text-zinc-100">
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-[#2F6BFF]/[0.18] text-[11px] font-semibold text-[#6B9BFF]">
                 {(ssoStatus?.username || profile.nickname || "U").slice(0, 2).toUpperCase()}
               </span>
               {!sidebarCollapsed && (
@@ -729,8 +779,37 @@ export default function App() {
       </aside>
 
       {/* Main Content Workspace */}
-      <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-[#0c0c0d]">
-        <header className="flex h-12 shrink-0 items-center justify-between border-b border-white/[0.06] bg-[#0c0c0d]/95 px-6">
+      <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-[#080B12]">
+        {/* Ambient UIT Blue Logo Background Watermark */}
+        <div
+          className="pointer-events-none absolute inset-0 overflow-hidden select-none"
+          aria-hidden="true"
+        >
+          <div
+            className="absolute inset-0"
+            style={{
+              background:
+                "radial-gradient(circle at 86% 84%, rgba(47,107,255,0.14) 0%, rgba(47,107,255,0.05) 36%, rgba(8,11,18,0) 70%)",
+            }}
+          />
+          <div
+            className="absolute -bottom-16 -right-14 h-[520px] w-[520px] opacity-[0.10] blur-[0.6px]"
+            style={{
+              background:
+                "linear-gradient(135deg, #6B9BFF 0%, #2F6BFF 58%, #163E9E 100%)",
+              WebkitMaskImage: `url(${uitLogoMono})`,
+              maskImage: `url(${uitLogoMono})`,
+              WebkitMaskRepeat: "no-repeat",
+              maskRepeat: "no-repeat",
+              WebkitMaskPosition: "center",
+              maskPosition: "center",
+              WebkitMaskSize: "contain",
+              maskSize: "contain",
+            }}
+          />
+        </div>
+
+        <header className="relative z-10 flex h-12 shrink-0 items-center justify-between border-b border-[#1D263B]/80 bg-[#080B12]/90 px-6 backdrop-blur-sm">
           <h1 className="text-sm font-semibold tracking-tight text-zinc-100">{pageTitle}</h1>
 
           <div className="flex items-center gap-2">
@@ -739,7 +818,7 @@ export default function App() {
             <button
               type="button"
               onClick={() => setIsSsoLoginOpen(true)}
-              className="flex h-8 items-center gap-1.5 rounded-lg border border-white/[0.08] bg-[#121213] px-2.5 text-xs font-medium text-zinc-300 transition-colors hover:border-white/[0.15] hover:bg-[#19191b] hover:text-white cursor-pointer"
+              className="flex h-8 items-center gap-1.5 rounded-lg border border-[#1D263B] bg-[#0F1420] px-2.5 text-xs font-medium text-zinc-300 transition-colors hover:border-[#2F6BFF]/30 hover:bg-[#151C2C] hover:text-white cursor-pointer"
               title="Đăng nhập hoặc đổi tài khoản SSO UIT"
             >
               <LogIn className="h-3.5 w-3.5 text-zinc-400" aria-hidden="true" />
@@ -750,7 +829,7 @@ export default function App() {
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto overflow-x-hidden px-6 py-5">
+        <main className="relative z-10 flex-1 overflow-y-auto overflow-x-hidden px-6 py-5">
         {activeTab === "home" ? (
           <HomeDashboard
             onNavigateTab={(tab) => setActiveTab(tab)}

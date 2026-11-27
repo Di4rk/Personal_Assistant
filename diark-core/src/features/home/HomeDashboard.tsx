@@ -1,6 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ExternalLink,
+  RefreshCw,
   ChevronRight,
 } from "lucide-react";
 import uitLogoMono from "../../assets/uit-logo-mono.png";
@@ -105,7 +106,7 @@ function buildDayTimeline(
       allDay: false,
       roomOrLocation: t.phong || "Chưa rõ phòng",
       sourceLabel: "TKB UIT",
-      dotColor: "#10b981",
+      dotColor: "#2F6BFF",
       meta: `Tiết ${t.tiet_bat_dau}–${t.tiet_ket_thuc}${t.ten_giang_vien ? ` · ${t.lecturer_title ? `${t.lecturer_title} ` : ""}${t.ten_giang_vien}` : ""}${t.trang_thai && t.trang_thai !== "normal" ? ` · ${t.trang_thai}` : ""}`,
     });
   }
@@ -126,7 +127,7 @@ function buildDayTimeline(
       allDay: ev.all_day,
       roomOrLocation: ev.location,
       sourceLabel: cal?.name ?? "Google Calendar",
-      dotColor: cal?.color ?? "#38bdf8",
+      dotColor: cal?.color ?? "#94a3b8",
       meta: ev.description ? ev.description.split("\n")[0] : "",
     });
   }
@@ -183,6 +184,48 @@ function formatDueBadge(dueUnix: number, nowUnix: number): { text: string; level
   return { text: `Còn ${days} ngày`, level: "normal" };
 }
 
+let hasCompletedHomeBootMotion = false;
+
+function useCountUp(target: number, shouldAnimate: boolean, durationMs = 420): number {
+  const [displayValue, setDisplayValue] = useState<number>(() =>
+    shouldAnimate ? 0 : target
+  );
+
+  useEffect(() => {
+    const reducedMotion =
+      typeof window !== "undefined" &&
+      window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    if (!shouldAnimate || target <= 0 || reducedMotion) {
+      setDisplayValue(target);
+      return;
+    }
+
+    let rafId = 0;
+    const start = performance.now();
+    const tick = (nowTs: number) => {
+      const elapsed = nowTs - start;
+      const t = Math.min(1, elapsed / durationMs);
+      const eased = 1 - Math.pow(1 - t, 3);
+      setDisplayValue(target * eased);
+      if (t < 1) {
+        rafId = requestAnimationFrame(tick);
+      } else {
+        setDisplayValue(target);
+      }
+    };
+    rafId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafId);
+  }, [target, shouldAnimate, durationMs]);
+
+  return shouldAnimate ? displayValue : target;
+}
+
+function handleKpiMouseMove(e: React.MouseEvent<HTMLElement>): void {
+  const rect = e.currentTarget.getBoundingClientRect();
+  e.currentTarget.style.setProperty("--mx", `${e.clientX - rect.left}px`);
+  e.currentTarget.style.setProperty("--my", `${e.clientY - rect.top}px`);
+}
+
 export const HomeDashboard: React.FC<HomeDashboardProps> = ({
   onNavigateTab,
   onSyncPortal,
@@ -202,9 +245,19 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [dayOverride, setDayOverride] = useState<"auto" | "today" | "tomorrow">("auto");
   const [greetingSeed] = useState<number>(() => Math.random());
+  const [animateBoot] = useState<boolean>(() => !hasCompletedHomeBootMotion);
+  const [creditShimmerKey, setCreditShimmerKey] = useState<number>(0);
   const [highlightedRowId, setHighlightedRowId] = useState<string | null>(null);
   const rowElementMapRef = useRef<Map<string, HTMLDivElement>>(new Map());
   const gapDividerRef = useRef<HTMLDivElement | null>(null);
+  const todayBtnRef = useRef<HTMLButtonElement | null>(null);
+  const tomorrowBtnRef = useRef<HTMLButtonElement | null>(null);
+  const prevSyncingRef = useRef<boolean>(isPortalSyncing);
+  const [togglePill, setTogglePill] = useState<{ x: number; w: number; ready: boolean }>({
+    x: 0,
+    w: 0,
+    ready: false,
+  });
 
   const todayIso = useMemo(() => toLocalDateIso(now), [now]);
   const tomorrowIso = useMemo(() => toLocalDateIso(addDays(now, 1)), [now]);
@@ -425,6 +478,33 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
     [macroMetrics]
   );
 
+  useEffect(() => {
+    if (!isLoading && animateBoot) {
+      hasCompletedHomeBootMotion = true;
+    }
+  }, [isLoading, animateBoot]);
+
+  useEffect(() => {
+    if (prevSyncingRef.current && !isPortalSyncing) {
+      setCreditShimmerKey((k) => k + 1);
+    }
+    prevSyncingRef.current = isPortalSyncing;
+  }, [isPortalSyncing]);
+
+  useLayoutEffect(() => {
+    const targetEl = effectiveDay === "today" ? todayBtnRef.current : tomorrowBtnRef.current;
+    if (!targetEl) return;
+    setTogglePill({
+      x: targetEl.offsetLeft,
+      w: targetEl.offsetWidth,
+      ready: true,
+    });
+  }, [effectiveDay, todayRows.length, tomorrowRows.length]);
+
+  const animatedGpa = useCountUp(latestMacro?.cumulativeGpa ?? 0, animateBoot && !isLoading, 420);
+  const animatedCredits = useCountUp(latestMacro?.cumulativeCredits ?? 0, animateBoot && !isLoading, 420);
+  const animatedDrl = useCountUp(latestMacro?.drlScore ?? 0, animateBoot && !isLoading, 420);
+
   const greetingBucket = getTimeBucket(now.getHours());
   const greetingText = useMemo(() => {
     const representativeHour: Record<typeof greetingBucket, number> = {
@@ -464,26 +544,36 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
 
   return (
     <div className="mx-auto max-w-7xl space-y-5">
-      {/* Ambient Emerald-Cyan Obsidian Hero Banner */}
-      <div className="relative overflow-hidden rounded-2xl border border-white/[0.08] bg-[#111214] px-5 py-4">
+      {/* Ambient UIT Blue Obsidian Hero Banner */}
+      <div className="relative overflow-hidden rounded-2xl border border-[#1D263B] bg-[#0F1420]/90 px-5 py-4 backdrop-blur-[2px]">
         <div
-          className="pointer-events-none absolute inset-0"
+          className="uit-glow-breathe pointer-events-none absolute inset-0"
           style={{
             background:
-              "radial-gradient(circle at 82% 20%, rgba(16,185,129,0.16) 0%, rgba(6,182,212,0.10) 32%, rgba(17,18,20,0) 68%)",
+              "radial-gradient(circle at 88% 45%, rgba(47,107,255,0.22) 0%, rgba(47,107,255,0.08) 32%, rgba(15,20,32,0) 64%), radial-gradient(circle at 18% 12%, rgba(47,107,255,0.10) 0%, rgba(15,20,32,0) 52%)",
           }}
           aria-hidden="true"
         />
-        <img
-          src={uitLogoMono}
-          alt=""
+        <div
           aria-hidden="true"
-          className="pointer-events-none absolute -right-4 -top-4 h-36 w-36 select-none object-contain opacity-[0.06]"
+          className="pointer-events-none absolute -right-4 -top-5 h-40 w-40 select-none opacity-[0.22]"
+          style={{
+            background:
+              "linear-gradient(135deg, #8BB2FF 0%, #2F6BFF 55%, #163E9E 100%)",
+            WebkitMaskImage: `url(${uitLogoMono})`,
+            maskImage: `url(${uitLogoMono})`,
+            WebkitMaskRepeat: "no-repeat",
+            maskRepeat: "no-repeat",
+            WebkitMaskPosition: "center",
+            maskPosition: "center",
+            WebkitMaskSize: "contain",
+            maskSize: "contain",
+          }}
         />
 
         <div className="relative z-10 space-y-1">
           <div className="flex items-center gap-2">
-            <span className="text-[11px] font-medium uppercase tracking-wider text-emerald-300/90">
+            <span className="text-[11px] font-medium uppercase tracking-wider text-[#6B9BFF]">
               Tổng quan học tập
             </span>
             {isPortalSyncing && (
@@ -493,120 +583,206 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
           <h2 className="text-lg font-semibold tracking-tight text-white">{greetingText}</h2>
           <p className="text-xs text-zinc-400">
             Hôm nay có{" "}
-            <span className="font-medium text-emerald-300">{todayRows.length} lịch</span>
+            <span className="font-medium text-[#6B9BFF]">{todayRows.length} lịch</span>
             {" · "}
-            <span className={criticalDeadlineCount > 0 ? "font-medium text-rose-300" : "text-zinc-300"}>
+            <span className={criticalDeadlineCount > 0 ? "font-medium text-red-400" : "text-zinc-300"}>
               {criticalDeadlineCount} deadline gấp
             </span>
             {" · "}
-            <span className={upcomingExams.length > 0 ? "font-medium text-amber-300" : "text-zinc-300"}>
+            <span className={upcomingExams.length > 0 ? "font-medium text-[#6B9BFF]" : "text-zinc-300"}>
               {upcomingExams.length} ca thi sắp tới
             </span>
           </p>
         </div>
       </div>
 
-      {/* Color-Coded 4-Card KPI Row with Icons, Sparklines & Progress */}
+      {/* Minimalist Obsidian + Navy + UIT Blue KPI Row */}
       <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 xl:grid-cols-4">
-        {/* Card 1: GPA tích lũy (Emerald) */}
-        <div className="rounded-xl border border-emerald-500/20 bg-gradient-to-br from-emerald-500/[0.08] via-[#121214] to-[#121214] p-4 transition-colors hover:border-emerald-400/35">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-xs font-medium text-zinc-300">GPA tích lũy</span>
-            <span className="inline-flex items-center rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-300">
-              {gpaRankLabel}
-            </span>
-          </div>
-          <div className="mt-3 flex items-end justify-between gap-2">
-            <div className="flex items-baseline gap-1.5">
-              <span className="text-2xl font-semibold tracking-tight text-white tabular-nums">
-                {latestMacro && latestMacro.cumulativeGpa > 0
-                  ? latestMacro.cumulativeGpa.toFixed(2)
-                  : "—"}
+        {/* Card 1: GPA tích lũy */}
+        <div
+          onMouseMove={handleKpiMouseMove}
+          style={animateBoot ? { animationDelay: "0ms" } : undefined}
+          className={`group relative overflow-hidden rounded-xl border border-[#1D263B] bg-[#0F1420]/90 p-4 backdrop-blur-[2px] transition-colors ${
+            animateBoot ? "uit-stagger-in" : ""
+          }`}
+        >
+          <span
+            aria-hidden="true"
+            className="kpi-spotlight-sheen pointer-events-none absolute inset-0 rounded-[inherit] opacity-0 transition-opacity duration-200 group-hover:opacity-100"
+          />
+          <span
+            aria-hidden="true"
+            className="kpi-spotlight-border pointer-events-none absolute inset-0 rounded-[inherit] opacity-0 transition-opacity duration-200 group-hover:opacity-100"
+          />
+          <div className="relative z-10">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-medium text-zinc-300">GPA tích lũy</span>
+              <span className="inline-flex items-center rounded-full border border-[#1D263B] bg-[#151C2C] px-2 py-0.5 text-[11px] font-medium text-zinc-300">
+                {gpaRankLabel}
               </span>
-              <span className="text-xs text-zinc-500">/ 10.0</span>
             </div>
-            <MiniSparkline values={gpaSeries} stroke="#10b981" gradientId="gpaSpark" minBound={5} maxBound={10} />
+            <div className="mt-3 flex items-end justify-between gap-2">
+              <div className="flex items-baseline gap-1.5">
+                <span className="text-2xl font-semibold tracking-tight text-white tabular-nums">
+                  {latestMacro && latestMacro.cumulativeGpa > 0
+                    ? animatedGpa.toFixed(2)
+                    : "—"}
+                </span>
+                <span className="text-xs text-zinc-500">/ 10.0</span>
+              </div>
+              <MiniSparkline values={gpaSeries} stroke="#2F6BFF" gradientId="gpaSpark" minBound={5} maxBound={10} />
+            </div>
           </div>
         </div>
 
-        {/* Card 2: Tiến độ tín chỉ (Cyan/Sky) */}
-        <div className="rounded-xl border border-cyan-500/20 bg-gradient-to-br from-cyan-500/[0.08] via-[#121214] to-[#121214] p-4 transition-colors hover:border-cyan-400/35">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-xs font-medium text-zinc-300">Tiến độ tín chỉ</span>
-            <span className="inline-flex items-center rounded-full border border-cyan-500/25 bg-cyan-500/10 px-2 py-0.5 font-mono text-[11px] font-medium text-cyan-300 tabular-nums">
-              {creditPct}%
-            </span>
-          </div>
-          <div className="mt-3 flex items-baseline gap-1.5">
-            <span className="text-2xl font-semibold tracking-tight text-white tabular-nums">
-              {latestMacro ? latestMacro.cumulativeCredits : 0}
-            </span>
-            <span className="text-xs text-zinc-500 tabular-nums">/ {curriculumCredits} TC</span>
-          </div>
-          <div className="mt-2.5 h-1.5 w-full overflow-hidden rounded-full bg-white/[0.07]">
-            <div
-              className="h-full rounded-full bg-gradient-to-r from-cyan-400 to-emerald-400 transition-all duration-300"
-              style={{ width: `${creditPct}%` }}
-            />
-          </div>
-        </div>
-
-        {/* Card 3: Điểm rèn luyện (Amber) */}
-        <div className="rounded-xl border border-amber-500/20 bg-gradient-to-br from-amber-500/[0.08] via-[#121214] to-[#121214] p-4 transition-colors hover:border-amber-400/35">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-xs font-medium text-zinc-300">Điểm rèn luyện</span>
-            <span className="inline-flex items-center rounded-full border border-amber-500/25 bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-300">
-              {drlRankLabel}
-            </span>
-          </div>
-          <div className="mt-3 flex items-end justify-between gap-2">
-            <div className="flex items-baseline gap-1.5">
-              <span className="text-2xl font-semibold tracking-tight text-white tabular-nums">
-                {latestMacro && latestMacro.drlScore > 0 ? latestMacro.drlScore : "—"}
+        {/* Card 2: Tiến độ tín chỉ */}
+        <div
+          onMouseMove={handleKpiMouseMove}
+          style={animateBoot ? { animationDelay: "50ms" } : undefined}
+          className={`group relative overflow-hidden rounded-xl border border-[#1D263B] bg-[#0F1420]/90 p-4 backdrop-blur-[2px] transition-colors ${
+            animateBoot ? "uit-stagger-in" : ""
+          }`}
+        >
+          <span
+            aria-hidden="true"
+            className="kpi-spotlight-sheen pointer-events-none absolute inset-0 rounded-[inherit] opacity-0 transition-opacity duration-200 group-hover:opacity-100"
+          />
+          <span
+            aria-hidden="true"
+            className="kpi-spotlight-border pointer-events-none absolute inset-0 rounded-[inherit] opacity-0 transition-opacity duration-200 group-hover:opacity-100"
+          />
+          <div className="relative z-10">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-medium text-zinc-300">Tiến độ tín chỉ</span>
+              <span className="inline-flex items-center rounded-full border border-[#2F6BFF]/30 bg-[#2F6BFF]/[0.14] px-2 py-0.5 font-mono text-[11px] font-medium text-[#6B9BFF] tabular-nums">
+                {creditPct}%
               </span>
-              <span className="text-xs text-zinc-500">học kỳ gần nhất</span>
             </div>
-            <MiniSparkline values={drlSeries} stroke="#f59e0b" gradientId="drlSpark" minBound={50} maxBound={100} />
+            <div className="mt-3 flex items-baseline gap-1.5">
+              <span className="text-2xl font-semibold tracking-tight text-white tabular-nums">
+                {latestMacro ? Math.round(animatedCredits) : 0}
+              </span>
+              <span className="text-xs text-zinc-500 tabular-nums">/ {curriculumCredits} TC</span>
+            </div>
+            <div className="mt-2.5 h-1.5 w-full overflow-hidden rounded-full bg-[#1D263B]">
+              <div
+                className="relative h-full overflow-hidden rounded-full bg-gradient-to-r from-[#2F6BFF] to-[#6B9BFF] transition-all duration-300"
+                style={{ width: `${creditPct}%` }}
+              >
+                {creditPct > 0 && (
+                  <span
+                    key={creditShimmerKey}
+                    aria-hidden="true"
+                    className="uit-shimmer-once pointer-events-none absolute inset-y-0 left-0 w-10 bg-gradient-to-r from-transparent via-white/45 to-transparent"
+                  />
+                )}
+              </div>
+            </div>
           </div>
         </div>
 
-        {/* Card 4: Học phí (Rose when debt > 0, Teal/Emerald when paid) */}
+        {/* Card 3: Điểm rèn luyện */}
+        <div
+          onMouseMove={handleKpiMouseMove}
+          style={animateBoot ? { animationDelay: "100ms" } : undefined}
+          className={`group relative overflow-hidden rounded-xl border border-[#1D263B] bg-[#0F1420]/90 p-4 backdrop-blur-[2px] transition-colors ${
+            animateBoot ? "uit-stagger-in" : ""
+          }`}
+        >
+          <span
+            aria-hidden="true"
+            className="kpi-spotlight-sheen pointer-events-none absolute inset-0 rounded-[inherit] opacity-0 transition-opacity duration-200 group-hover:opacity-100"
+          />
+          <span
+            aria-hidden="true"
+            className="kpi-spotlight-border pointer-events-none absolute inset-0 rounded-[inherit] opacity-0 transition-opacity duration-200 group-hover:opacity-100"
+          />
+          <div className="relative z-10">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-medium text-zinc-300">Điểm rèn luyện</span>
+              <span className="inline-flex items-center rounded-full border border-[#1D263B] bg-[#151C2C] px-2 py-0.5 text-[11px] font-medium text-zinc-300">
+                {drlRankLabel}
+              </span>
+            </div>
+            <div className="mt-3 flex items-end justify-between gap-2">
+              <div className="flex items-baseline gap-1.5">
+                <span className="text-2xl font-semibold tracking-tight text-white tabular-nums">
+                  {latestMacro && latestMacro.drlScore > 0 ? Math.round(animatedDrl) : "—"}
+                </span>
+                <span className="text-xs text-zinc-500">học kỳ gần nhất</span>
+              </div>
+              <MiniSparkline values={drlSeries} stroke="#6B9BFF" gradientId="drlSpark" minBound={50} maxBound={100} />
+            </div>
+          </div>
+        </div>
+
+        {/* Card 4: Học phí (Red only when debt > 0, Skeleton shimmer while syncing) */}
         <button
           type="button"
           onClick={() => onNavigateTab("academic")}
-          className={`group rounded-xl border p-4 text-left transition-colors cursor-pointer ${
+          onMouseMove={handleKpiMouseMove}
+          style={animateBoot ? { animationDelay: "150ms" } : undefined}
+          className={`group relative overflow-hidden rounded-xl border p-4 text-left backdrop-blur-[2px] transition-colors cursor-pointer ${
+            animateBoot ? "uit-stagger-in" : ""
+          } ${
             totalDebt > 0
-              ? "border-rose-500/25 bg-gradient-to-br from-rose-500/[0.09] via-[#121214] to-[#121214] hover:border-rose-400/40"
-              : "border-teal-500/20 bg-gradient-to-br from-teal-500/[0.08] via-[#121214] to-[#121214] hover:border-teal-400/35"
+              ? "border-red-500/30 bg-red-500/[0.05] hover:border-red-400/45"
+              : "border-[#1D263B] bg-[#0F1420]/90"
           }`}
         >
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-xs font-medium text-zinc-300">Học phí</span>
-            <span
-              className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${
-                totalDebt > 0
-                  ? "border-rose-500/30 bg-rose-500/15 text-rose-300"
-                  : tuitionRecords.length > 0
-                  ? "border-teal-500/25 bg-teal-500/10 text-teal-300"
-                  : "border-white/[0.08] bg-white/[0.06] text-zinc-400"
-              }`}
-            >
-              {totalDebt > 0
-                ? "Còn nợ"
-                : tuitionRecords.length > 0
-                ? "Đã đóng đủ"
-                : "Chưa đồng bộ"}
-            </span>
-          </div>
-          <div className="mt-3 flex items-end justify-between gap-2">
-            <span className="truncate text-2xl font-semibold tracking-tight text-white tabular-nums">
-              {totalDebt > 0
-                ? formatVnd(totalDebt)
-                : tuitionRecords.length > 0
-                ? "0 ₫"
-                : "—"}
-            </span>
-            <ChevronRight className="h-4 w-4 shrink-0 text-zinc-500 transition-transform group-hover:translate-x-0.5 group-hover:text-zinc-300" />
+          <span
+            aria-hidden="true"
+            className="kpi-spotlight-sheen pointer-events-none absolute inset-0 rounded-[inherit] opacity-0 transition-opacity duration-200 group-hover:opacity-100"
+          />
+          <span
+            aria-hidden="true"
+            className="kpi-spotlight-border pointer-events-none absolute inset-0 rounded-[inherit] opacity-0 transition-opacity duration-200 group-hover:opacity-100"
+          />
+          <div className="relative z-10">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-medium text-zinc-300">Học phí</span>
+              <span
+                className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium ${
+                  isPortalSyncing
+                    ? "border-[#2F6BFF]/30 bg-[#2F6BFF]/[0.14] text-[#6B9BFF]"
+                    : totalDebt > 0
+                    ? "border-red-500/30 bg-red-500/15 text-red-300"
+                    : "border-[#1D263B] bg-[#151C2C] text-zinc-300"
+                }`}
+              >
+                {isPortalSyncing && (
+                  <RefreshCw className="h-3 w-3 animate-spin text-[#6B9BFF]" aria-hidden="true" />
+                )}
+                <span>
+                  {isPortalSyncing
+                    ? "Đang đồng bộ"
+                    : totalDebt > 0
+                    ? "Còn nợ"
+                    : tuitionRecords.length > 0
+                    ? "Đã đóng đủ"
+                    : "Chưa đồng bộ"}
+                </span>
+              </span>
+            </div>
+            <div className="mt-3 flex items-end justify-between gap-2">
+              {isPortalSyncing ? (
+                <div className="relative h-7 w-28 overflow-hidden rounded-md bg-[#151C2C]">
+                  <span
+                    aria-hidden="true"
+                    className="uit-shimmer-loop absolute inset-y-0 left-0 w-1/2 bg-gradient-to-r from-transparent via-[#2F6BFF]/25 to-transparent"
+                  />
+                </div>
+              ) : (
+                <span className="truncate text-2xl font-semibold tracking-tight text-white tabular-nums">
+                  {totalDebt > 0
+                    ? formatVnd(totalDebt)
+                    : tuitionRecords.length > 0
+                    ? "0 ₫"
+                    : "—"}
+                </span>
+              )}
+              <ChevronRight className="h-4 w-4 shrink-0 text-zinc-500 transition-transform group-hover:translate-x-0.5 group-hover:text-zinc-300" />
+            </div>
           </div>
         </button>
       </div>
@@ -614,13 +790,13 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
       {/* Main Workspace Split */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
         {/* Left 7 cols: Unified Daily Schedule (UIT TKB + Google Calendar) */}
-        <section className="lg:col-span-7 rounded-xl border border-white/[0.07] bg-[#121213]">
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/[0.06] px-4 py-3.5">
-            <div className="border-l-2 border-emerald-400 pl-2.5">
+        <section className="lg:col-span-7 rounded-xl border border-[#1D263B] bg-[#0F1420]/90 backdrop-blur-[2px]">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#1D263B]/75 px-4 py-3.5">
+            <div className="border-l-2 border-[#2F6BFF] pl-2.5">
               <div className="flex items-center gap-2">
                 <h2 className="text-sm font-semibold text-white">{activeDateLabel}</h2>
                 {dayOverride === "auto" && autoRolledToTomorrow && (
-                  <span className="rounded-full border border-cyan-500/25 bg-cyan-500/10 px-2 py-0.5 text-[10px] text-cyan-300">
+                  <span className="rounded-full border border-[#1D263B] bg-[#151C2C] px-2 py-0.5 text-[10px] text-zinc-300">
                     Hết lịch hôm nay
                   </span>
                 )}
@@ -635,35 +811,46 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
                 <button
                   type="button"
                   onClick={scrollToCurrentMoment}
-                  className="rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2.5 py-1 font-mono text-[11px] tabular-nums text-emerald-300 transition-colors hover:bg-emerald-500/20 cursor-pointer"
+                  className="rounded-full border border-[#2F6BFF]/30 bg-[#2F6BFF]/[0.14] px-2.5 py-1 font-mono text-[11px] tabular-nums text-[#6B9BFF] transition-colors hover:bg-[#2F6BFF]/[0.24] cursor-pointer"
                 >
                   Hiện tại · {formatHmClock(nowMinutes)}
                 </button>
               )}
-              <div className="flex items-center rounded-full border border-white/[0.08] bg-[#09090b] p-0.5 text-xs">
+              <div className="relative flex items-center rounded-full border border-[#1D263B] bg-[#080B12] p-0.5 text-xs">
+                <span
+                  aria-hidden="true"
+                  className="pointer-events-none absolute top-0.5 bottom-0.5 left-0 rounded-full bg-white transition-[transform,width] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)]"
+                  style={{
+                    transform: `translateX(${togglePill.x}px)`,
+                    width: `${togglePill.w}px`,
+                    opacity: togglePill.ready ? 1 : 0,
+                  }}
+                />
                 <button
+                  ref={todayBtnRef}
                   type="button"
                   onClick={() => {
                     setHighlightedRowId(null);
                     setDayOverride("today");
                   }}
-                  className={`rounded-full px-3 py-1 transition-colors duration-150 cursor-pointer ${
+                  className={`relative z-10 rounded-full px-3 py-1 transition-colors duration-150 cursor-pointer ${
                     effectiveDay === "today"
-                      ? "bg-white font-semibold text-[#09090b]"
+                      ? `${!togglePill.ready ? "bg-white " : ""}font-semibold text-[#080B12]`
                       : "font-medium text-zinc-400 hover:text-zinc-200"
                   }`}
                 >
                   Hôm nay ({todayRows.length})
                 </button>
                 <button
+                  ref={tomorrowBtnRef}
                   type="button"
                   onClick={() => {
                     setHighlightedRowId(null);
                     setDayOverride("tomorrow");
                   }}
-                  className={`rounded-full px-3 py-1 transition-colors duration-150 cursor-pointer ${
+                  className={`relative z-10 rounded-full px-3 py-1 transition-colors duration-150 cursor-pointer ${
                     effectiveDay === "tomorrow"
-                      ? "bg-white font-semibold text-[#09090b]"
+                      ? `${!togglePill.ready ? "bg-white " : ""}font-semibold text-[#080B12]`
                       : "font-medium text-zinc-400 hover:text-zinc-200"
                   }`}
                 >
@@ -687,14 +874,14 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
                   type="button"
                   onClick={onSyncPortal}
                   disabled={isPortalSyncing}
-                  className="rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-semibold text-zinc-950 hover:bg-emerald-400 disabled:opacity-50 cursor-pointer"
+                  className="rounded-lg bg-[#2F6BFF] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#255CE6] disabled:opacity-50 cursor-pointer"
                 >
                   {isPortalSyncing ? "Đang đồng bộ Portal..." : "Đồng bộ Portal UIT"}
                 </button>
                 <button
                   type="button"
                   onClick={() => onNavigateTab("schedule")}
-                  className="rounded-lg border border-cyan-500/25 bg-cyan-500/10 px-3 py-1.5 text-xs text-cyan-200 hover:bg-cyan-500/20 cursor-pointer"
+                  className="rounded-lg border border-[#1D263B] bg-[#151C2C] px-3 py-1.5 text-xs text-zinc-200 hover:border-[#2F6BFF]/30 cursor-pointer"
                 >
                   Gắn Google Calendar
                 </button>
@@ -703,7 +890,7 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
           ) : (
             <div>
               {allDayRows.length > 0 && (
-                <div className="flex flex-wrap items-center gap-2 border-b border-white/[0.06] bg-white/[0.015] px-4 py-2">
+                <div className="flex flex-wrap items-center gap-2 border-b border-[#1D263B]/75 bg-[#080B12]/40 px-4 py-2">
                   <span className="font-mono text-[10px] uppercase tracking-wider text-zinc-500">
                     Cả ngày
                   </span>
@@ -713,10 +900,10 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
                       title={`${row.title}${row.roomOrLocation ? ` · ${row.roomOrLocation}` : ""}`}
                       className={`inline-flex items-center gap-1.5 rounded-md border-l-2 px-2 py-0.5 text-[11px] font-medium ${
                         row.source === "uit"
-                          ? "border-emerald-400 bg-emerald-500/10 text-emerald-200"
+                          ? "border-[#2F6BFF] bg-[#2F6BFF]/[0.14] text-[#8BB2FF]"
                           : row.source === "exam"
-                          ? "border-rose-400 bg-rose-500/10 text-rose-200"
-                          : "border-sky-400 bg-sky-500/10 text-sky-200"
+                          ? "border-red-400 bg-red-500/10 text-red-200"
+                          : "border-zinc-400 bg-[#151C2C] text-zinc-200"
                       }`}
                     >
                       <span className="max-w-[220px] truncate">{row.title}</span>
@@ -731,14 +918,14 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
               {timedRows.length > 0 && (
                 <>
                   {/* Horizontal Day Overview Strip */}
-                  <div className="border-b border-white/[0.06] bg-white/[0.015] px-4 py-3">
-                    <div className="relative h-7 rounded-lg border border-white/[0.06] bg-[#0c0d0f]">
+                  <div className="border-b border-[#1D263B]/75 bg-[#080B12]/35 px-4 py-3">
+                    <div className="relative h-7 rounded-lg border border-[#1D263B] bg-[#080B12]">
                       {stripTickHours.slice(1, -1).map((tickHour) => {
                         const pct = ((tickHour * 60 - stripStartMin) / (stripEndMin - stripStartMin)) * 100;
                         return (
                           <span
                             key={tickHour}
-                            className="pointer-events-none absolute inset-y-0 w-px bg-white/[0.04]"
+                            className="pointer-events-none absolute inset-y-0 w-px bg-[#1D263B]/60"
                             style={{ left: `${pct}%` }}
                             aria-hidden="true"
                           />
@@ -763,15 +950,15 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
                         const segColor =
                           row.source === "uit"
                             ? isCurrent || isHighlighted
-                              ? "bg-emerald-400/80 ring-1 ring-emerald-300"
-                              : "bg-emerald-500/45 hover:bg-emerald-400/70"
+                              ? "bg-[#2F6BFF] ring-1 ring-[#6B9BFF]"
+                              : "bg-[#2F6BFF]/55 hover:bg-[#2F6BFF]/85"
                             : row.source === "exam"
                             ? isCurrent || isHighlighted
-                              ? "bg-rose-400/85 ring-1 ring-rose-300"
-                              : "bg-rose-500/50 hover:bg-rose-400/75"
+                              ? "bg-red-400/85 ring-1 ring-red-300"
+                              : "bg-red-500/50 hover:bg-red-400/75"
                             : isCurrent || isHighlighted
-                            ? "bg-sky-400/80 ring-1 ring-sky-300"
-                            : "bg-sky-500/45 hover:bg-sky-400/70";
+                            ? "bg-zinc-300/75 ring-1 ring-zinc-200"
+                            : "bg-zinc-500/40 hover:bg-zinc-400/65";
 
                         return (
                           <button
@@ -796,13 +983,15 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
                         nowMinutes >= stripStartMin &&
                         nowMinutes <= stripEndMin && (
                           <div
-                            className="pointer-events-none absolute -top-1 -bottom-1 z-10 w-[2px] -translate-x-1/2 bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.75)]"
+                            className="pointer-events-none absolute -top-1 -bottom-1 z-10 w-[2px] -translate-x-1/2"
                             style={{
                               left: `${((nowMinutes - stripStartMin) / (stripEndMin - stripStartMin)) * 100}%`,
                             }}
                             aria-hidden="true"
                           >
-                            <span className="absolute -top-0.5 left-1/2 h-1.5 w-1.5 -translate-x-1/2 rounded-full bg-emerald-300" />
+                            <span className="uit-glow-breathe absolute -inset-x-1.5 inset-y-0 rounded-full bg-[#2F6BFF]/35 blur-[3px]" />
+                            <span className="relative block h-full w-full bg-[#2F6BFF] shadow-[0_0_10px_rgba(47,107,255,0.85)]" />
+                            <span className="absolute -top-0.5 left-1/2 h-1.5 w-1.5 -translate-x-1/2 rounded-full bg-[#6B9BFF]" />
                           </div>
                         )}
                     </div>
@@ -847,35 +1036,35 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
                       const cardTone =
                         row.source === "uit"
                           ? isCurrent
-                            ? "border-emerald-500/40 bg-emerald-500/[0.09] ring-1 ring-emerald-400/35"
+                            ? "border-[#2F6BFF]/45 bg-[#2F6BFF]/[0.11] ring-1 ring-[#2F6BFF]/35"
                             : isHighlighted
-                            ? "border-emerald-400/50 bg-emerald-500/[0.09] ring-1 ring-emerald-400/30"
-                            : "border-white/[0.07] bg-white/[0.02] hover:border-white/[0.14] hover:bg-white/[0.035]"
+                            ? "border-[#2F6BFF]/40 bg-[#151C2C] ring-1 ring-[#2F6BFF]/30"
+                            : "border-[#1D263B] bg-[#080B12]/40 hover:border-[#2F6BFF]/30 hover:bg-[#151C2C]"
                           : row.source === "exam"
                           ? isCurrent
-                            ? "border-rose-500/40 bg-rose-500/[0.09] ring-1 ring-rose-400/35"
+                            ? "border-red-500/40 bg-red-500/[0.09] ring-1 ring-red-400/35"
                             : isHighlighted
-                            ? "border-rose-400/50 bg-rose-500/[0.09] ring-1 ring-rose-400/30"
-                            : "border-white/[0.07] bg-white/[0.02] hover:border-white/[0.14] hover:bg-white/[0.035]"
+                            ? "border-red-400/50 bg-red-500/[0.09] ring-1 ring-red-400/30"
+                            : "border-[#1D263B] bg-[#080B12]/40 hover:border-red-400/35 hover:bg-[#151C2C]"
                           : isCurrent
-                          ? "border-sky-500/40 bg-sky-500/[0.09] ring-1 ring-sky-400/35"
+                          ? "border-[#2F6BFF]/35 bg-[#151C2C] ring-1 ring-[#2F6BFF]/25"
                           : isHighlighted
-                          ? "border-sky-400/50 bg-sky-500/[0.09] ring-1 ring-sky-400/30"
-                          : "border-white/[0.07] bg-white/[0.02] hover:border-white/[0.14] hover:bg-white/[0.035]";
+                          ? "border-[#2F6BFF]/30 bg-[#151C2C] ring-1 ring-[#2F6BFF]/20"
+                          : "border-[#1D263B] bg-[#080B12]/40 hover:border-[#1D263B] hover:bg-[#151C2C]";
 
                       const roomTone =
                         row.source === "uit"
-                          ? "border border-emerald-500/25 bg-emerald-500/15 text-emerald-200"
+                          ? "border border-[#2F6BFF]/30 bg-[#2F6BFF]/[0.14] text-[#6B9BFF]"
                           : row.source === "exam"
-                          ? "border border-rose-500/25 bg-rose-500/15 text-rose-200"
-                          : "border border-sky-500/25 bg-sky-500/10 text-sky-200";
+                          ? "border border-red-500/25 bg-red-500/15 text-red-200"
+                          : "border border-[#1D263B] bg-[#151C2C] text-zinc-300";
 
                       const sourceTagTone =
                         row.source === "uit"
-                          ? "text-emerald-300/90"
+                          ? "text-[#6B9BFF]"
                           : row.source === "exam"
-                          ? "text-rose-300/90"
-                          : "text-sky-300/90";
+                          ? "text-red-300/90"
+                          : "text-zinc-400";
 
                       const duration = Math.max(1, row.endMinutes - row.startMinutes);
                       const elapsed = Math.max(0, Math.min(duration, nowMinutes - row.startMinutes));
@@ -890,16 +1079,22 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
                               className="flex items-center gap-3 py-2"
                             >
                               <div className="w-12 shrink-0 text-right">
-                                <span className="inline-block rounded bg-emerald-500 px-1.5 py-0.5 font-mono text-[10px] font-semibold tabular-nums text-zinc-950">
+                                <span className="inline-block rounded bg-[#2F6BFF] px-1.5 py-0.5 font-mono text-[10px] font-semibold tabular-nums text-white shadow-[0_0_8px_rgba(47,107,255,0.5)]">
                                   {formatHmClock(nowMinutes)}
                                 </span>
                               </div>
                               <div className="relative flex w-4 shrink-0 justify-center">
-                                <span className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.75)]" />
+                                <span className="relative flex h-2.5 w-2.5 items-center justify-center">
+                                  <span
+                                    aria-hidden="true"
+                                    className="uit-radar-ring absolute inset-0 rounded-full bg-[#2F6BFF]"
+                                  />
+                                  <span className="relative h-2 w-2 rounded-full bg-[#2F6BFF] shadow-[0_0_10px_rgba(47,107,255,0.85)]" />
+                                </span>
                               </div>
                               <div className="flex flex-1 items-center gap-2">
-                                <div className="h-[1.5px] flex-1 bg-emerald-400/75" />
-                                <span className="text-[10px] font-medium text-emerald-300">
+                                <div className="h-[1.5px] flex-1 bg-[#2F6BFF]/80" />
+                                <span className="text-[10px] font-medium text-[#6B9BFF]">
                                   Hiện tại
                                 </span>
                               </div>
@@ -923,7 +1118,7 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
                               <div
                                 className={`text-[11px] leading-none ${
                                   isCurrent
-                                    ? "font-semibold text-emerald-300"
+                                    ? "font-semibold text-[#6B9BFF]"
                                     : isPast
                                     ? "text-zinc-500"
                                     : "text-zinc-200"
@@ -940,7 +1135,7 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
                             <div className="relative flex w-4 shrink-0 justify-center">
                               {!(isFirst && isLast) && (
                                 <span
-                                  className={`absolute w-px bg-white/[0.08] ${
+                                  className={`absolute w-px bg-[#1D263B] ${
                                     isFirst
                                       ? "top-3.5 bottom-0"
                                       : isLast
@@ -950,20 +1145,28 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
                                   aria-hidden="true"
                                 />
                               )}
-                              <span
-                                className={`relative z-10 mt-2.5 shrink-0 rounded-full ${
-                                  isCurrent
-                                    ? "h-2.5 w-2.5 bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.75)]"
-                                    : isPast
-                                    ? "h-2 w-2 bg-zinc-600"
-                                    : row.source === "uit"
-                                    ? "h-2 w-2 border-2 border-emerald-400 bg-[#121213]"
-                                    : row.source === "exam"
-                                    ? "h-2 w-2 border-2 border-rose-400 bg-[#121213]"
-                                    : "h-2 w-2 border-2 border-sky-400 bg-[#121213]"
-                                }`}
-                                aria-hidden="true"
-                              />
+                              {isCurrent ? (
+                                <span
+                                  className="relative z-10 mt-2.5 flex h-2.5 w-2.5 shrink-0 items-center justify-center"
+                                  aria-hidden="true"
+                                >
+                                  <span className="uit-radar-ring absolute inset-0 rounded-full bg-[#2F6BFF]" />
+                                  <span className="relative h-2.5 w-2.5 rounded-full bg-[#2F6BFF] shadow-[0_0_10px_rgba(47,107,255,0.85)]" />
+                                </span>
+                              ) : (
+                                <span
+                                  className={`relative z-10 mt-2.5 shrink-0 rounded-full ${
+                                    isPast
+                                      ? "h-2 w-2 bg-zinc-600"
+                                      : row.source === "uit"
+                                      ? "h-2 w-2 border-2 border-[#2F6BFF] bg-[#0F1420]"
+                                      : row.source === "exam"
+                                      ? "h-2 w-2 border-2 border-red-400 bg-[#0F1420]"
+                                      : "h-2 w-2 border-2 border-zinc-400 bg-[#0F1420]"
+                                  }`}
+                                  aria-hidden="true"
+                                />
+                              )}
                             </div>
 
                             {/* Compact content card */}
@@ -998,13 +1201,18 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
 
                               {isCurrent && (
                                 <div className="mt-2 space-y-1">
-                                  <div className="h-1 w-full overflow-hidden rounded-full bg-white/[0.08]">
+                                  <div className="h-1 w-full overflow-hidden rounded-full bg-[#1D263B]">
                                     <div
-                                      className="h-full rounded-full bg-emerald-400 transition-all duration-300"
+                                      className="relative h-full overflow-hidden rounded-full bg-gradient-to-r from-[#2F6BFF] to-[#6B9BFF] transition-all duration-300"
                                       style={{ width: `${progressPct}%` }}
-                                    />
+                                    >
+                                      <span
+                                        aria-hidden="true"
+                                        className="uit-shimmer-loop pointer-events-none absolute inset-y-0 left-0 w-1/3 bg-gradient-to-r from-transparent via-white/35 to-transparent"
+                                      />
+                                    </div>
                                   </div>
-                                  <div className="flex items-center justify-between font-mono text-[10px] tabular-nums text-emerald-300">
+                                  <div className="flex items-center justify-between font-mono text-[10px] tabular-nums text-[#6B9BFF]">
                                     <span>Đang diễn ra · {progressPct}%</span>
                                     <span>{formatRemainingVietnamese(minutesLeft)}</span>
                                   </div>
@@ -1022,16 +1230,22 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
                         className="flex items-center gap-3 pt-2"
                       >
                         <div className="w-12 shrink-0 text-right">
-                          <span className="inline-block rounded bg-emerald-500 px-1.5 py-0.5 font-mono text-[10px] font-semibold tabular-nums text-zinc-950">
+                          <span className="inline-block rounded bg-[#2F6BFF] px-1.5 py-0.5 font-mono text-[10px] font-semibold tabular-nums text-white shadow-[0_0_8px_rgba(47,107,255,0.5)]">
                             {formatHmClock(nowMinutes)}
                           </span>
                         </div>
                         <div className="relative flex w-4 shrink-0 justify-center">
-                          <span className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.75)]" />
+                          <span className="relative flex h-2.5 w-2.5 items-center justify-center">
+                            <span
+                              aria-hidden="true"
+                              className="uit-radar-ring absolute inset-0 rounded-full bg-[#2F6BFF]"
+                            />
+                            <span className="relative h-2 w-2 rounded-full bg-[#2F6BFF] shadow-[0_0_10px_rgba(47,107,255,0.85)]" />
+                          </span>
                         </div>
                         <div className="flex flex-1 items-center gap-2">
-                          <div className="h-[1.5px] flex-1 bg-emerald-400/75" />
-                          <span className="text-[10px] font-medium text-emerald-300">
+                          <div className="h-[1.5px] flex-1 bg-[#2F6BFF]/80" />
+                          <span className="text-[10px] font-medium text-[#6B9BFF]">
                             Hiện tại
                           </span>
                         </div>
@@ -1047,9 +1261,17 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
         {/* Right 5 cols: Exams + Moodle Deadlines + Notifications */}
         <aside className="lg:col-span-5 space-y-4">
           {/* Upcoming Exams */}
-          <section className="rounded-xl border border-white/[0.07] bg-[#121213]">
-            <div className="flex items-center justify-between border-b border-white/[0.06] px-4 py-3">
-              <h2 className="border-l-2 border-rose-400 pl-2 text-xs font-semibold text-white">Lịch thi sắp tới</h2>
+          <section className="rounded-xl border border-[#1D263B] bg-[#0F1420]/90 backdrop-blur-[2px]">
+            <div className="flex items-center justify-between border-b border-[#1D263B]/75 px-4 py-3">
+              <h2
+                className={`border-l-2 pl-2 text-xs font-semibold text-white ${
+                  upcomingExams.some((ex) => Math.ceil((ex.exam_timestamp - nowSec) / 86400) <= 3)
+                    ? "border-red-400"
+                    : "border-[#2F6BFF]"
+                }`}
+              >
+                Lịch thi sắp tới
+              </h2>
               <button
                 type="button"
                 onClick={() => onNavigateTab("academic")}
@@ -1058,7 +1280,7 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
                 Chi tiết
               </button>
             </div>
-            <div className="divide-y divide-white/[0.06]">
+            <div className="divide-y divide-[#1D263B]/75">
               {upcomingExams.length === 0 ? (
                 <div className="px-4 py-4 text-xs text-zinc-500">
                   Chưa có ca thi sắp tới.
@@ -1066,9 +1288,12 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
               ) : (
                 upcomingExams.map((ex) => {
                   const daysLeft = Math.ceil((ex.exam_timestamp - nowSec) / 86400);
+                  const studyUrl = ex.subject_code.toUpperCase().startsWith("NT")
+                    ? "https://svuit.org/mmtt/"
+                    : "https://www.bhtcnpm.com/";
                   return (
                     <div key={ex.id} className="flex items-center justify-between gap-3 px-4 py-2.5">
-                      <div className="min-w-0">
+                      <div className="min-w-0 flex-1">
                         <div className="truncate text-xs font-medium text-zinc-100">
                           {ex.subject_code} · {ex.subject_name}
                         </div>
@@ -1076,17 +1301,25 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
                           {ex.date_str} · {ex.start_time}–{ex.end_time} · Phòng {ex.room || "—"}
                         </div>
                       </div>
-                      <span
-                        className={`shrink-0 rounded-md px-1.5 py-0.5 font-mono text-[11px] tabular-nums ${
-                          daysLeft <= 3
-                            ? "border border-rose-500/30 bg-rose-500/15 text-rose-300"
-                            : daysLeft <= 7
-                            ? "border border-amber-500/30 bg-amber-500/15 text-amber-300"
-                            : "border border-sky-500/25 bg-sky-500/10 text-sky-300"
-                        }`}
-                      >
-                        {daysLeft <= 0 ? "Hôm nay" : `Còn ${daysLeft} ngày`}
-                      </span>
+                      <div className="flex shrink-0 items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => void openExternalUrl(studyUrl)}
+                          title={`Mở tài liệu ôn thi (${studyUrl})`}
+                          className="rounded-md border border-[#1D263B] bg-[#151C2C] px-1.5 py-0.5 text-[10px] font-medium text-zinc-300 transition-colors hover:border-[#2F6BFF]/30 hover:text-[#6B9BFF] cursor-pointer"
+                        >
+                          Tài liệu
+                        </button>
+                        <span
+                          className={`rounded-md px-1.5 py-0.5 font-mono text-[11px] tabular-nums ${
+                            daysLeft <= 3
+                              ? "border border-red-500/30 bg-red-500/15 text-red-300"
+                              : "border border-[#1D263B] bg-[#151C2C] text-zinc-300"
+                          }`}
+                        >
+                          {daysLeft <= 0 ? "Hôm nay" : `Còn ${daysLeft} ngày`}
+                        </span>
+                      </div>
                     </div>
                   );
                 })
@@ -1095,9 +1328,15 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
           </section>
 
           {/* Moodle Deadlines */}
-          <section className="rounded-xl border border-white/[0.07] bg-[#121213]">
-            <div className="flex items-center justify-between border-b border-white/[0.06] px-4 py-3">
-              <h2 className="border-l-2 border-amber-400 pl-2 text-xs font-semibold text-white">Deadline Moodle</h2>
+          <section className="rounded-xl border border-[#1D263B] bg-[#0F1420]/90 backdrop-blur-[2px]">
+            <div className="flex items-center justify-between border-b border-[#1D263B]/75 px-4 py-3">
+              <h2
+                className={`border-l-2 pl-2 text-xs font-semibold text-white ${
+                  criticalDeadlineCount > 0 ? "border-red-400" : "border-[#2F6BFF]"
+                }`}
+              >
+                Deadline Moodle
+              </h2>
               <button
                 type="button"
                 onClick={() => onNavigateTab("uit-courses")}
@@ -1106,7 +1345,7 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
                 Mở Courses
               </button>
             </div>
-            <div className="divide-y divide-white/[0.06]">
+            <div className="divide-y divide-[#1D263B]/75">
               {pendingDeadlines.length === 0 ? (
                 <div className="px-4 py-4 text-xs text-zinc-500">
                   Không có bài tập Moodle tồn đọng.
@@ -1121,15 +1360,15 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
                       onClick={() => {
                         if (t.task_url) void openExternalUrl(t.task_url);
                       }}
-                      className="flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left transition-colors duration-100 hover:bg-white/[0.025] cursor-pointer"
+                      className="group flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left transition-colors duration-100 hover:bg-[#151C2C] cursor-pointer"
                     >
                       <span
                         className={`h-2 w-2 shrink-0 rounded-full ${
                           badge.level === "critical"
-                            ? "bg-rose-400"
+                            ? "bg-red-400"
                             : badge.level === "soon"
-                            ? "bg-amber-400"
-                            : "bg-sky-400"
+                            ? "bg-[#2F6BFF]"
+                            : "bg-zinc-500"
                         }`}
                         aria-hidden="true"
                       />
@@ -1143,15 +1382,18 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
                         <span
                           className={`rounded-md px-1.5 py-0.5 font-mono text-[11px] tabular-nums ${
                             badge.level === "critical"
-                              ? "border border-rose-500/30 bg-rose-500/15 font-semibold text-rose-300"
+                              ? "border border-red-500/30 bg-red-500/15 font-semibold text-red-300"
                               : badge.level === "soon"
-                              ? "border border-amber-500/30 bg-amber-500/15 text-amber-300"
-                              : "border border-sky-500/20 bg-sky-500/10 text-sky-300"
+                              ? "border border-[#2F6BFF]/30 bg-[#2F6BFF]/[0.14] text-[#6B9BFF]"
+                              : "border border-[#1D263B] bg-[#151C2C] text-zinc-300"
                           }`}
                         >
                           {badge.text}
                         </span>
-                        <ExternalLink className="h-3 w-3 text-zinc-600" aria-hidden="true" />
+                        <ExternalLink
+                          className="h-3 w-3 text-zinc-600 transition-transform duration-150 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 group-hover:text-[#6B9BFF]"
+                          aria-hidden="true"
+                        />
                       </div>
                     </button>
                   );
@@ -1162,18 +1404,24 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
 
           {/* Moodle Notifications / Tuition Alert */}
           {(totalDebt > 0 || moodleNotifications.length > 0) && (
-            <section className="rounded-xl border border-white/[0.07] bg-[#121213]">
-              <div className="border-b border-white/[0.06] px-4 py-3">
-                <h2 className="border-l-2 border-cyan-400 pl-2 text-xs font-semibold text-white">Cảnh báo & Thông báo</h2>
+            <section className="rounded-xl border border-[#1D263B] bg-[#0F1420]/90 backdrop-blur-[2px]">
+              <div className="border-b border-[#1D263B]/75 px-4 py-3">
+                <h2
+                  className={`border-l-2 pl-2 text-xs font-semibold text-white ${
+                    totalDebt > 0 ? "border-red-400" : "border-zinc-500"
+                  }`}
+                >
+                  Cảnh báo &amp; Thông báo
+                </h2>
               </div>
-              <div className="divide-y divide-white/[0.06]">
+              <div className="divide-y divide-[#1D263B]/75">
                 {totalDebt > 0 && (
                   <button
                     type="button"
                     onClick={() => onNavigateTab("academic")}
-                    className="flex w-full items-center gap-2.5 border-l-2 border-amber-400 bg-amber-500/[0.06] px-4 py-2.5 text-left hover:bg-amber-500/[0.1] cursor-pointer"
+                    className="flex w-full items-center gap-2.5 border-l-2 border-red-400 bg-red-500/[0.06] px-4 py-2.5 text-left hover:bg-red-500/[0.1] cursor-pointer"
                   >
-                    <div className="min-w-0 flex-1 text-xs text-amber-200">
+                    <div className="min-w-0 flex-1 text-xs text-red-200">
                       Còn học phí chưa đóng:{" "}
                       <span className="font-mono font-semibold tabular-nums">
                         {formatVnd(totalDebt)}
