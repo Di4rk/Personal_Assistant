@@ -313,6 +313,119 @@ pub mod models {
             || norm.starts_with("mien ")
     }
 
+    pub fn resolve_sem_tuple_static(raw_sem: &str) -> (String, String, i64) {
+        if let Some(parsed) = crate::services::uit_portal::parse_semester_header(raw_sem) {
+            parsed
+        } else {
+            let s = if raw_sem.trim().is_empty() {
+                "2025-2026.1".to_string()
+            } else {
+                raw_sem.trim().replace(' ', "_")
+            };
+            (s, "2025-2026".to_string(), 1)
+        }
+    }
+
+    pub fn parse_sem_sort_key(acad_year: &str, term: i64) -> (i32, i64) {
+        let first_year = acad_year
+            .split('-')
+            .next()
+            .and_then(|p| p.trim().parse::<i32>().ok())
+            .unwrap_or(0);
+        (first_year, term)
+    }
+
+    pub fn next_regular_semester(acad_year: &str, term: i64) -> (String, i64) {
+        let start_year = acad_year
+            .split('-')
+            .next()
+            .and_then(|p| p.trim().parse::<i32>().ok())
+            .unwrap_or(2025);
+        if term <= 1 {
+            (format!("{start_year}-{}", start_year + 1), 2)
+        } else {
+            let next_y = start_year + 1;
+            (format!("{next_y}-{}", next_y + 1), 1)
+        }
+    }
+
+    pub fn infer_active_semester_from_clock(now_vn: chrono::DateTime<chrono_tz::Tz>) -> (String, i64) {
+        use chrono::Datelike;
+        let y = now_vn.year();
+        let m = now_vn.month();
+        match m {
+            9..=12 => (format!("{y}-{}", y + 1), 1),
+            1 => (format!("{}-{y}", y - 1), 1),
+            2..=6 => (format!("{}-{y}", y - 1), 2),
+            _ => (format!("{}-{y}", y - 1), 3),
+        }
+    }
+
+    pub fn infer_active_semester_label(
+        courses: &[AcademicCourseItem],
+        registered_sem: Option<(String, i64)>,
+    ) -> String {
+        let mut best_ongoing: Option<((i32, i64), String, i64)> = None;
+        let mut best_overall: Option<((i32, i64), String, i64)> = None;
+
+        for c in courses {
+            let (_, acad_year, term) = resolve_sem_tuple_static(&c.semester);
+            let key = parse_sem_sort_key(&acad_year, term);
+            if best_overall.as_ref().map(|b| key > b.0).unwrap_or(true) {
+                best_overall = Some((key, acad_year.clone(), term));
+            }
+            if c.score_10.is_none() && !c.is_exempt {
+                if best_ongoing.as_ref().map(|b| key > b.0).unwrap_or(true) {
+                    best_ongoing = Some((key, acad_year, term));
+                }
+            }
+        }
+
+        if let Some((_, yr, trm)) = best_ongoing {
+            return format!("Học kỳ {trm}/{yr}");
+        }
+
+        if let Some((reg_yr, reg_trm)) = registered_sem {
+            let reg_key = parse_sem_sort_key(&reg_yr, reg_trm);
+            let beats_existing = best_overall
+                .as_ref()
+                .map(|b| reg_key > b.0)
+                .unwrap_or(true);
+            if beats_existing {
+                return format!("Học kỳ {reg_trm}/{reg_yr}");
+            }
+        }
+
+        let now_vn = chrono::Utc::now().with_timezone(&chrono_tz::Asia::Ho_Chi_Minh);
+        let (clock_yr, clock_trm) = infer_active_semester_from_clock(now_vn);
+        let clock_key = parse_sem_sort_key(&clock_yr, clock_trm);
+
+        if let Some((max_key, max_yr, max_trm)) = best_overall {
+            if clock_key <= max_key {
+                let (next_yr, next_trm) = next_regular_semester(&max_yr, max_trm);
+                return format!("Học kỳ {next_trm}/{next_yr}");
+            }
+        }
+
+        format!("Học kỳ {clock_trm}/{clock_yr}")
+    }
+
+    pub fn classify_vietnamese_gpa(gpa: f64) -> &'static str {
+        if gpa >= 9.0 {
+            "Xuất sắc"
+        } else if gpa >= 8.0 {
+            "Giỏi"
+        } else if gpa >= 7.0 {
+            "Khá"
+        } else if gpa >= 5.0 {
+            "Trung bình"
+        } else if gpa > 0.0 {
+            "Yếu"
+        } else {
+            "Chưa xếp loại"
+        }
+    }
+
     pub fn convert_official_uit_payload(
         official: OfficialUitTranscriptPayload,
     ) -> (PortalProfilePayload, Vec<DrlItem>, Vec<AcademicCourseItem>, Option<PortalSummaryPayload>, Option<f64>) {
@@ -353,48 +466,66 @@ pub mod models {
         let cgpa_10 = official.bySemester.summary.as_ref().and_then(|s| s.gpa_accumulated).unwrap_or(0.0);
 
         let mut semester_summaries = Vec::new();
+        let mut used_group_indices = std::collections::HashSet::new();
         if let Some(ref terms) = official.termSummaries {
             for t in terms {
                 let term_sem_num = t.semester.as_deref().unwrap_or("").trim();
                 let year_opt = t.yearName.as_deref().map(str::trim).filter(|s| !s.is_empty());
-                let matched_group = official.bySemester.semester_groups.iter().find(|g| {
-                    let sem_matches = g.semester_key == format!("semester_{}", term_sem_num)
-                        || g.semester_label.starts_with(&format!("Học kỳ {}/", term_sem_num))
-                        || g.semester_label.starts_with(&format!("HK{}/", term_sem_num));
-                    let year_matches = match year_opt {
-                        Some(y) => g.year_name.starts_with(y) || g.semester_label.contains(y),
-                        None => true,
-                    };
-                    sem_matches && year_matches
-                });
 
-                let sem_str = if let Some(g) = matched_group {
-                    g.semester_label.clone()
-                } else {
-                    let expanded_year = match year_opt {
-                        Some(y) if y.len() == 4 => y
-                            .parse::<i32>()
+                let matched_idx = official
+                    .bySemester
+                    .semester_groups
+                    .iter()
+                    .enumerate()
+                    .find(|(idx, g)| {
+                        if used_group_indices.contains(idx) {
+                            return false;
+                        }
+                        let sem_matches = g.semester_key == format!("semester_{}", term_sem_num)
+                            || g.semester_label.starts_with(&format!("Học kỳ {}/", term_sem_num))
+                            || g.semester_label.starts_with(&format!("HK{}/", term_sem_num));
+                        let year_matches = match year_opt {
+                            Some(y) => g.year_name.starts_with(y) || g.semester_label.contains(y),
+                            None => true,
+                        };
+                        sem_matches && year_matches
+                    })
+                    .map(|(idx, _)| idx);
+
+                if let Some(idx) = matched_idx {
+                    used_group_indices.insert(idx);
+                    let g = &official.bySemester.semester_groups[idx];
+                    semester_summaries.push(SemesterSummaryItem {
+                        semester: Some(g.semester_label.clone()),
+                        gpa_semester: t.termGpa,
+                        cpa_cumulative: t.cumulativeGpa,
+                        ranking: t.classifyLabel.clone(),
+                        credits_semester: t.termCredit,
+                        credits_cumulative: t.accumulatedCredit,
+                    });
+                } else if let Some(y) = year_opt {
+                    let expanded_year = if y.len() == 4 {
+                        y.parse::<i32>()
                             .map(|yr| format!("{yr}-{}", yr + 1))
-                            .unwrap_or_else(|_| y.to_string()),
-                        Some(y) => y.to_string(),
-                        None => String::new(),
+                            .unwrap_or_else(|_| y.to_string())
+                    } else {
+                        y.to_string()
                     };
-                    format!("Học kỳ {}/{}", term_sem_num, expanded_year)
-                };
-
-                semester_summaries.push(SemesterSummaryItem {
-                    semester: Some(sem_str),
-                    gpa_semester: t.termGpa,
-                    cpa_cumulative: t.cumulativeGpa,
-                    ranking: t.classifyLabel.clone(),
-                    credits_semester: t.termCredit,
-                    credits_cumulative: t.accumulatedCredit,
-                });
+                    semester_summaries.push(SemesterSummaryItem {
+                        semester: Some(format!("Học kỳ {}/{}", term_sem_num, expanded_year)),
+                        gpa_semester: t.termGpa,
+                        cpa_cumulative: t.cumulativeGpa,
+                        ranking: t.classifyLabel.clone(),
+                        credits_semester: t.termCredit,
+                        credits_cumulative: t.accumulatedCredit,
+                    });
+                }
             }
         }
 
         let mut ctdt_curriculum_courses = Vec::new();
         let mut total_program_credits = None;
+        let mut in_progress_ctdt_items: Vec<(String, String, i64)> = Vec::new();
 
         if let Some(ref ctdt) = official.byCtdt {
             if let Some(ref stats) = ctdt.statistics {
@@ -419,13 +550,22 @@ pub mod models {
                             "Tự chọn".to_string()
                         };
 
-                        let c_status = match line.status.as_deref().unwrap_or("not_learned") {
+                        let raw_status = line.status.as_deref().unwrap_or("not_learned");
+                        let c_status = match raw_status {
                             "passed" => "Đã qua".to_string(),
                             "in_progress" => "Đang học".to_string(),
                             "retake" => "Học lại".to_string(),
                             "outside_program" => "Ngoài CTĐT".to_string(),
                             _ => "Chưa học".to_string(),
                         };
+
+                        if raw_status == "in_progress" {
+                            in_progress_ctdt_items.push((
+                                c_code.clone(),
+                                line.subject_name.trim().to_string(),
+                                line.credit,
+                            ));
+                        }
 
                         let final_score = parse_point_string(&line.course_point);
 
@@ -439,6 +579,35 @@ pub mod models {
                             final_score,
                         });
                     }
+                }
+            }
+        }
+
+        if !in_progress_ctdt_items.is_empty() {
+            let active_sem_label = infer_active_semester_label(&courses, None);
+            let (active_sem_id, _, _) = resolve_sem_tuple_static(&active_sem_label);
+            let mut existing_in_active: std::collections::HashSet<String> = courses
+                .iter()
+                .filter(|c| resolve_sem_tuple_static(&c.semester).0 == active_sem_id)
+                .map(|c| c.course_code.trim().to_uppercase())
+                .collect();
+
+            for (code, name, credit) in in_progress_ctdt_items {
+                let norm = code.trim().to_uppercase();
+                if existing_in_active.insert(norm) {
+                    courses.push(AcademicCourseItem {
+                        course_code: code,
+                        course_name: name,
+                        semester: active_sem_label.clone(),
+                        credits: credit,
+                        score_qt: None,
+                        score_th: None,
+                        score_gk: None,
+                        score_ck: None,
+                        score_10: None,
+                        is_passed: 0,
+                        is_exempt: false,
+                    });
                 }
             }
         }
@@ -811,22 +980,98 @@ impl PortalIngestionEngine {
         }
 
         // 6. Upsert danh sách khóa học vào academic_courses và tính trạng thái hoàn tất từng kỳ
+        let mut courses = courses;
+        let has_reg_table: bool = tx
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='portal_registered_classes'",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .map(|c| c > 0)
+            .unwrap_or(false);
+
+        if has_reg_table {
+            let mut reg_rows: Vec<(String, String, i64, i64, i64, String)> = Vec::new();
+            if let Ok(mut stmt) = tx.prepare(
+                "SELECT subject_code, subject_name, credit, hoc_ky, year_id, start_date FROM portal_registered_classes",
+            ) {
+                if let Ok(mapped) = stmt.query_map([], |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, i64>(2)?,
+                        r.get::<_, i64>(3)?,
+                        r.get::<_, i64>(4)?,
+                        r.get::<_, String>(5)?,
+                    ))
+                }) {
+                    for item in mapped.flatten() {
+                        reg_rows.push(item);
+                    }
+                }
+            }
+
+            if !reg_rows.is_empty() {
+                let first_reg = &reg_rows[0];
+                let reg_sem = if first_reg.3 > 0 {
+                    let yr_opt = first_reg
+                        .5
+                        .split('-')
+                        .next()
+                        .and_then(|s| s.parse::<i32>().ok())
+                        .map(|y| {
+                            if first_reg.3 == 1 && first_reg.5.contains("-01") {
+                                format!("{}-{y}", y - 1)
+                            } else if first_reg.3 >= 2 {
+                                format!("{}-{y}", y - 1)
+                            } else {
+                                format!("{y}-{}", y + 1)
+                            }
+                        });
+                    yr_opt.map(|yr| (yr, first_reg.3))
+                } else {
+                    None
+                };
+
+                let active_sem_label = infer_active_semester_label(&courses, reg_sem);
+                let (active_sem_id, _, _) = resolve_sem_tuple_static(&active_sem_label);
+                let mut existing_in_active: std::collections::HashSet<String> = courses
+                    .iter()
+                    .filter(|c| resolve_sem_tuple_static(&c.semester).0 == active_sem_id)
+                    .map(|c| c.course_code.trim().to_uppercase())
+                    .collect();
+
+                for (code, name, credit, _, _, _) in reg_rows {
+                    let norm = code.trim().to_uppercase();
+                    if !norm.is_empty() && existing_in_active.insert(norm) {
+                        courses.push(AcademicCourseItem {
+                            course_code: code,
+                            course_name: name,
+                            semester: active_sem_label.clone(),
+                            credits: credit,
+                            score_qt: None,
+                            score_th: None,
+                            score_gk: None,
+                            score_ck: None,
+                            score_10: None,
+                            is_passed: 0,
+                            is_exempt: false,
+                        });
+                    }
+                }
+            }
+        }
+
         let now = chrono::Utc::now().timestamp();
         let resolve_sem_tuple = |raw_sem: &str| -> (String, String, i64) {
-            if let Some(parsed) = crate::services::uit_portal::parse_semester_header(raw_sem) {
-                parsed
-            } else {
-                let s = if raw_sem.trim().is_empty() {
-                    "2025_2026_HK1".to_string()
-                } else {
-                    raw_sem.trim().replace(' ', "_")
-                };
-                (s, "2025-2026".to_string(), 1)
-            }
+            resolve_sem_tuple_static(raw_sem)
         };
 
         let mut sem_all_graded: HashMap<String, bool> = HashMap::new();
         let mut sem_credits_total: HashMap<String, i64> = HashMap::new();
+        let mut sem_passed_credits: HashMap<String, i64> = HashMap::new();
+        let mut sem_gpa_weighted: HashMap<String, f64> = HashMap::new();
+        let mut sem_gpa_credits: HashMap<String, i64> = HashMap::new();
         let mut sem_meta_map: HashMap<String, (String, i64)> = HashMap::new();
 
         for c in &courses {
@@ -840,6 +1085,18 @@ impl PortalIngestionEngine {
                 .and_modify(|all| *all = *all && is_done)
                 .or_insert(is_done);
             *sem_credits_total.entry(sem_id.clone()).or_insert(0) += c.credits;
+            if c.is_passed == 1 || c.is_exempt {
+                *sem_passed_credits.entry(sem_id.clone()).or_insert(0) += c.credits;
+            }
+            if !c.is_exempt
+                && c.credits > 0
+                && crate::services::uit_portal::is_course_gpa_calculated(&c.course_code)
+            {
+                if let Some(s10) = c.score_10 {
+                    *sem_gpa_weighted.entry(sem_id.clone()).or_insert(0.0) += s10 * (c.credits as f64);
+                    *sem_gpa_credits.entry(sem_id.clone()).or_insert(0) += c.credits;
+                }
+            }
             sem_meta_map.entry(sem_id).or_insert((acad_year, term));
         }
 
@@ -995,6 +1252,22 @@ impl PortalIngestionEngine {
                 params![sum.cgpa_10, latest_drl, sum.total_credits as i64, effective_total_credits],
             );
 
+            let mut ordered_sem_ids: Vec<(String, String, i64)> = sem_meta_map
+                .iter()
+                .map(|(id, (yr, trm))| (id.clone(), yr.clone(), *trm))
+                .collect();
+            ordered_sem_ids.sort_by_key(|(_, yr, trm)| parse_sem_sort_key(yr, *trm));
+
+            let compute_fallback_term_gpa = |sem_id: &str| -> f64 {
+                let w = *sem_gpa_weighted.get(sem_id).unwrap_or(&0.0);
+                let c = *sem_gpa_credits.get(sem_id).unwrap_or(&0);
+                if c > 0 {
+                    ((w / (c as f64)) * 100.0).round() / 100.0
+                } else {
+                    0.0
+                }
+            };
+
             let mut covered_sem_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
 
             for sem in &sum.semester_summaries {
@@ -1004,10 +1277,29 @@ impl PortalIngestionEngine {
 
                     let sem_drl = find_drl_for_semester(&sem_id, &acad_year, term_num);
                     let sem_label = format!("Học kỳ {}/{}", term_num, acad_year);
-                    let is_ongoing = sem.gpa_semester.is_none()
-                        && sem.cpa_cumulative.is_none()
-                        && !*sem_all_graded.get(&sem_id).unwrap_or(&true);
-                    let default_rank = if is_ongoing { "Đang học" } else { "Chưa xếp loại" };
+                    let all_graded = *sem_all_graded.get(&sem_id).unwrap_or(&false);
+                    let fallback_gpa = if all_graded { compute_fallback_term_gpa(&sem_id) } else { 0.0 };
+                    let term_gpa = sem
+                        .gpa_semester
+                        .filter(|&v| v > 0.0)
+                        .unwrap_or(fallback_gpa);
+                    let term_credits = sem
+                        .credits_semester
+                        .filter(|&v| v > 0)
+                        .unwrap_or_else(|| if all_graded { *sem_passed_credits.get(&sem_id).unwrap_or(&0) } else { *sem_credits_total.get(&sem_id).unwrap_or(&0) });
+                    let is_ongoing = !all_graded && sem.gpa_semester.is_none();
+                    let ranking = sem
+                        .ranking
+                        .as_deref()
+                        .filter(|r| !r.trim().is_empty())
+                        .map(str::to_string)
+                        .unwrap_or_else(|| {
+                            if is_ongoing {
+                                "Đang học".to_string()
+                            } else {
+                                classify_vietnamese_gpa(term_gpa).to_string()
+                            }
+                        });
 
                     let _ = tx.execute(
                         "INSERT INTO academic_macro_metrics (
@@ -1030,10 +1322,10 @@ impl PortalIngestionEngine {
                             sem_id,
                             sem_label,
                             acad_year,
-                            sem.gpa_semester.unwrap_or(0.0),
+                            term_gpa,
                             sem.cpa_cumulative.unwrap_or(0.0),
-                            sem.ranking.as_deref().unwrap_or(default_rank),
-                            sem.credits_semester.unwrap_or(0),
+                            ranking,
+                            term_credits,
                             sem.credits_cumulative.unwrap_or(0),
                             sem_drl,
                             sem_drl.unwrap_or(0),
@@ -1042,28 +1334,59 @@ impl PortalIngestionEngine {
                 }
             }
 
-            // Bảo đảm các học kỳ đang học (chưa có trong termSummaries) vẫn có bản ghi macro đúng, không bị gán nhầm kỳ trước
-            for (sem_id, (acad_year, term_num)) in &sem_meta_map {
+            // Bảo đảm các học kỳ có môn học nhưng chưa có trong termSummaries vẫn có bản ghi macro đúng
+            let mut running_weighted = 0.0_f64;
+            let mut running_gpa_credits = 0_i64;
+            let mut running_passed_credits = 0_i64;
+            for (sem_id, acad_year, term_num) in &ordered_sem_ids {
+                running_weighted += *sem_gpa_weighted.get(sem_id).unwrap_or(&0.0);
+                running_gpa_credits += *sem_gpa_credits.get(sem_id).unwrap_or(&0);
+                running_passed_credits += *sem_passed_credits.get(sem_id).unwrap_or(&0);
+
                 if covered_sem_ids.contains(sem_id) {
                     continue;
                 }
-                let term_cred = *sem_credits_total.get(sem_id).unwrap_or(&0);
+                let all_graded = *sem_all_graded.get(sem_id).unwrap_or(&false);
                 let sem_drl = find_drl_for_semester(sem_id, acad_year, *term_num);
                 let sem_label = format!("Học kỳ {}/{}", term_num, acad_year);
+                let (term_gpa, cum_gpa, rank_str, term_cred, cum_cred) = if all_graded && *sem_credits_total.get(sem_id).unwrap_or(&0) > 0 {
+                    let fg = compute_fallback_term_gpa(sem_id);
+                    let cg = if running_gpa_credits > 0 {
+                        ((running_weighted / (running_gpa_credits as f64)) * 100.0).round() / 100.0
+                    } else {
+                        0.0
+                    };
+                    (
+                        fg,
+                        cg,
+                        classify_vietnamese_gpa(fg),
+                        *sem_passed_credits.get(sem_id).unwrap_or(&0),
+                        running_passed_credits,
+                    )
+                } else {
+                    (
+                        0.0,
+                        0.0,
+                        "Đang học",
+                        *sem_credits_total.get(sem_id).unwrap_or(&0),
+                        0,
+                    )
+                };
+
                 let _ = tx.execute(
                     "INSERT INTO academic_macro_metrics (
                         semester_id, semester_label, year_name, term_gpa, cumulative_gpa, classification, rank_label,
                         term_credits, cumulative_credits, drl, drl_score, updated_at
-                    ) VALUES (?1, ?2, ?3, 0.0, 0.0, 'Đang học', 'Đang học', ?4, 0, ?5, ?6, strftime('%s', 'now'))
+                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6, ?7, ?8, ?9, ?10, strftime('%s', 'now'))
                     ON CONFLICT(semester_id) DO UPDATE SET
                         semester_label = excluded.semester_label,
                         year_name = excluded.year_name,
-                        term_gpa = 0.0,
-                        cumulative_gpa = 0.0,
-                        classification = 'Đang học',
-                        rank_label = 'Đang học',
+                        term_gpa = excluded.term_gpa,
+                        cumulative_gpa = excluded.cumulative_gpa,
+                        classification = excluded.classification,
+                        rank_label = excluded.rank_label,
                         term_credits = excluded.term_credits,
-                        cumulative_credits = 0,
+                        cumulative_credits = excluded.cumulative_credits,
                         drl = excluded.drl,
                         drl_score = excluded.drl_score,
                         updated_at = excluded.updated_at",
@@ -1071,7 +1394,11 @@ impl PortalIngestionEngine {
                         sem_id,
                         sem_label,
                         acad_year,
+                        term_gpa,
+                        cum_gpa,
+                        rank_str,
                         term_cred,
+                        cum_cred,
                         sem_drl,
                         sem_drl.unwrap_or(0),
                     ],
@@ -1834,5 +2161,227 @@ mod tests {
             .unwrap();
         assert!((gpa_25 - 8.2).abs() < 0.001);
         assert_eq!(drl_25, 95);
+    }
+
+    #[test]
+    fn test_completed_semester_preserves_gpa_when_term_summary_missing_year() {
+        let official = OfficialUitTranscriptPayload {
+            bySemester: OfficialUitBySemester {
+                summary: Some(OfficialUitBySemesterSummary {
+                    accumulated_credits: Some(18.0),
+                    gpa_accumulated: Some(8.2),
+                    ..Default::default()
+                }),
+                semester_groups: vec![
+                    OfficialUitSemesterGroup {
+                        semester_key: "semester_1".to_string(),
+                        semester_label: "Học kỳ 1/2025-2026".to_string(),
+                        year_name: "2025-2026".to_string(),
+                        subjects: vec![OfficialUitSubject {
+                            subject_code: "IT001".to_string(),
+                            subject_name: "Nhập môn lập trình".to_string(),
+                            number_of_credit: 4,
+                            course_point: Some("8.2".to_string()),
+                            ..Default::default()
+                        }],
+                        ..Default::default()
+                    },
+                ],
+            },
+            byCtdt: None,
+            termSummaries: Some(vec![
+                OfficialUitTermSummary {
+                    semester: Some("1".to_string()),
+                    yearName: None,
+                    termGpa: Some(8.2),
+                    cumulativeGpa: Some(8.2),
+                    termCredit: Some(4),
+                    accumulatedCredit: Some(4),
+                    classifyLabel: Some("Giỏi".to_string()),
+                },
+                OfficialUitTermSummary {
+                    semester: Some("1".to_string()),
+                    yearName: None,
+                    termGpa: None,
+                    cumulativeGpa: None,
+                    termCredit: None,
+                    accumulatedCredit: None,
+                    classifyLabel: None,
+                },
+            ]),
+            drl: None,
+            profile: None,
+            drl_records: None,
+            avg_drl: None,
+        };
+
+        let (profile, drl_records, courses, summary, avg_drl) =
+            convert_official_uit_payload(official);
+        let db = setup_test_db();
+        PortalIngestionEngine::commit_academic_records(
+            db.clone(),
+            profile,
+            drl_records,
+            courses,
+            summary,
+            avg_drl,
+            1,
+            1,
+        )
+        .unwrap();
+
+        let conn = db.lock().unwrap();
+        let (gpa, creds): (f64, i64) = conn
+            .query_row(
+                "SELECT term_gpa, term_credits FROM academic_macro_metrics WHERE semester_id = '2025-2026.1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert!((gpa - 8.2).abs() < 0.001);
+        assert_eq!(creds, 4);
+    }
+
+    #[test]
+    fn test_in_progress_ctdt_courses_merged_into_active_semester() {
+        let official = OfficialUitTranscriptPayload {
+            bySemester: OfficialUitBySemester {
+                summary: None,
+                semester_groups: vec![OfficialUitSemesterGroup {
+                    semester_key: "semester_1".to_string(),
+                    semester_label: "Học kỳ 1/2026-2027".to_string(),
+                    year_name: "2026-2027".to_string(),
+                    subjects: vec![OfficialUitSubject {
+                        subject_code: "IT004".to_string(),
+                        subject_name: "Cơ sở dữ liệu".to_string(),
+                        number_of_credit: 4,
+                        midterm_score: Some("8.0".to_string()),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                }],
+            },
+            byCtdt: Some(OfficialUitByCtdt {
+                statistics: None,
+                program_scores: Some(vec![OfficialUitCtdtProgramScore {
+                    semester: 3,
+                    semester_label: None,
+                    total_credit: Some(20),
+                    lines: vec![
+                        OfficialUitCtdtLine {
+                            subject_code: "IT004".to_string(),
+                            subject_name: "Cơ sở dữ liệu".to_string(),
+                            credit: 4,
+                            status: Some("in_progress".to_string()),
+                            ..Default::default()
+                        },
+                        OfficialUitCtdtLine {
+                            subject_code: "CS115".to_string(),
+                            subject_name: "Toán cho khoa học máy tính".to_string(),
+                            credit: 4,
+                            status: Some("in_progress".to_string()),
+                            ..Default::default()
+                        },
+                        OfficialUitCtdtLine {
+                            subject_code: "SS009".to_string(),
+                            subject_name: "Chủ nghĩa xã hội khoa học".to_string(),
+                            credit: 2,
+                            status: Some("in_progress".to_string()),
+                            ..Default::default()
+                        },
+                    ],
+                }]),
+                ..Default::default()
+            }),
+            termSummaries: None,
+            drl: None,
+            profile: None,
+            drl_records: None,
+            avg_drl: None,
+        };
+
+        let (profile, drl_records, courses, summary, avg_drl) =
+            convert_official_uit_payload(official);
+        assert_eq!(courses.len(), 3);
+
+        let db = setup_test_db();
+        PortalIngestionEngine::commit_academic_records(
+            db.clone(),
+            profile,
+            drl_records,
+            courses,
+            summary,
+            avg_drl,
+            1,
+            1,
+        )
+        .unwrap();
+
+        let conn = db.lock().unwrap();
+        let (cnt, creds): (i64, i64) = conn
+            .query_row(
+                "SELECT COUNT(*), SUM(credits) FROM academic_courses WHERE semester_id = '2026-2027.1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(cnt, 3);
+        assert_eq!(creds, 10);
+
+        let cs115_status: String = conn
+            .query_row(
+                "SELECT result_status FROM academic_courses WHERE semester_id = '2026-2027.1' AND course_code = 'CS115'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(cs115_status, "Đang học");
+    }
+
+    #[test]
+    fn test_in_progress_courses_create_next_semester_when_no_midterm_scores() {
+        let official = OfficialUitTranscriptPayload {
+            bySemester: OfficialUitBySemester {
+                summary: None,
+                semester_groups: vec![OfficialUitSemesterGroup {
+                    semester_key: "semester_2".to_string(),
+                    semester_label: "Học kỳ 2/2025-2026".to_string(),
+                    year_name: "2025-2026".to_string(),
+                    subjects: vec![OfficialUitSubject {
+                        subject_code: "IT003".to_string(),
+                        subject_name: "Cấu trúc dữ liệu và giải thuật".to_string(),
+                        number_of_credit: 4,
+                        course_point: Some("8.5".to_string()),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                }],
+            },
+            byCtdt: Some(OfficialUitByCtdt {
+                statistics: None,
+                program_scores: Some(vec![OfficialUitCtdtProgramScore {
+                    semester: 3,
+                    semester_label: None,
+                    total_credit: Some(8),
+                    lines: vec![OfficialUitCtdtLine {
+                        subject_code: "SS009".to_string(),
+                        subject_name: "Chủ nghĩa xã hội khoa học".to_string(),
+                        credit: 2,
+                        status: Some("in_progress".to_string()),
+                        ..Default::default()
+                    }],
+                }]),
+                ..Default::default()
+            }),
+            termSummaries: None,
+            drl: None,
+            profile: None,
+            drl_records: None,
+            avg_drl: None,
+        };
+
+        let (_, _, courses, _, _) = convert_official_uit_payload(official);
+        let ss009 = courses.iter().find(|c| c.course_code == "SS009").unwrap();
+        assert_eq!(ss009.semester, "Học kỳ 1/2026-2027");
     }
 }

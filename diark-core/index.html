@@ -1,14 +1,14 @@
 <!doctype html>
-<html lang="en" class="dark">
+<html lang="vi" class="dark">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" href="/favicon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>DIARK // OS</title>
+    <title>Diark</title>
     <script src="/fatal-error.js"></script>
     <style>
       html, body, #root {
-        background-color: #09090b;
+        background-color: #080808;
         color: #f4f4f5;
         margin: 0;
         padding: 0;
@@ -16,48 +16,33 @@
         width: 100%;
         overflow: hidden;
       }
-      /* Custom sleek dark scrollbar */
       ::-webkit-scrollbar {
-        width: 8px;
-        height: 8px;
+        width: 7px;
+        height: 7px;
       }
       ::-webkit-scrollbar-track {
-        background: #09090b;
+        background: #080808;
       }
       ::-webkit-scrollbar-thumb {
-        background: #27272a;
+        background: #242428;
         border-radius: 4px;
       }
       ::-webkit-scrollbar-thumb:hover {
-        background: #3f3f46;
+        background: #3a3a40;
       }
       @keyframes diark-spin {
         to { transform: rotate(360deg); }
       }
-      @keyframes diark-spin-reverse {
-        to { transform: rotate(-360deg); }
-      }
-      @keyframes diark-pulse {
-        0%, 100% { opacity: 0.6; }
-        50% { opacity: 1; }
-      }
     </style>
   </head>
 
-  <body class="bg-zinc-950 text-zinc-100">
+  <body class="bg-[#080808] text-zinc-100">
     <div id="root">
-      <div style="display: flex; height: 100vh; width: 100vw; align-items: center; justify-content: center; flex-direction: column; gap: 16px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; background-color: #09090b; user-select: none;">
-        <div style="position: relative; width: 48px; height: 48px; display: flex; align-items: center; justify-content: center;">
-          <div style="position: absolute; width: 44px; height: 44px; border: 2px solid #27272a; border-top-color: #10b981; border-radius: 50%; animation: diark-spin 0.9s cubic-bezier(0.5, 0, 0.5, 1) infinite;"></div>
-          <div style="position: absolute; width: 24px; height: 24px; border: 2px solid #27272a; border-bottom-color: #06b6d4; border-radius: 50%; animation: diark-spin-reverse 1.3s linear infinite;"></div>
-        </div>
-        <div style="display: flex; flex-direction: column; align-items: center; gap: 4px;">
-          <div style="font-weight: 700; font-size: 13px; letter-spacing: 0.15em; color: #f4f4f5;">DIARK <span style="color: #06b6d4;">// OS</span></div>
-          <div style="font-size: 11px; letter-spacing: 0.08em; color: #71717a; animation: diark-pulse 1.8s ease-in-out infinite;">Đang tải hệ thống...</div>
-        </div>
+      <div style="display: flex; height: 100vh; width: 100vw; align-items: center; justify-content: center; flex-direction: column; gap: 14px; font-family: ui-sans-serif, system-ui, sans-serif; background-color: #080808; user-select: none;">
+        <div style="width: 34px; height: 34px; border: 2px solid #222225; border-top-color: #f4f4f5; border-radius: 50%; animation: diark-spin 0.85s linear infinite;"></div>
+        <div style="font-weight: 600; font-size: 13px; letter-spacing: 0.06em; color: #e4e4e7;">Diark</div>
       </div>
     </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-

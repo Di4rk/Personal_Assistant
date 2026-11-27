@@ -1,4 +1,5 @@
-use tauri::{AppHandle, Emitter, State};
+use std::sync::{Arc, Mutex as StdMutex};
+use tauri::{AppHandle, Emitter, Manager, State, Url, WebviewUrl, WebviewWindowBuilder};
 use uuid::Uuid;
 
 use crate::db::exam::get_all_exam_schedules;
@@ -562,4 +563,275 @@ pub fn clear_sso_credentials(db: State<'_, SharedDb>) -> Result<(), String> {
     crate::db::set_setting(&conn, "sso_uit_auto_login", "false")
         .map_err(|e| format!("Lỗi tắt auto-login SSO: {e}"))?;
     Ok(())
+}
+
+fn is_allowed_sso_verify_url(url: &Url) -> bool {
+    if url.scheme() != "https" {
+        return false;
+    }
+    let Some(host) = url.host_str().map(|h| h.to_ascii_lowercase()) else {
+        return false;
+    };
+    host == "uit.edu.vn" || host.ends_with(".uit.edu.vn")
+}
+
+pub fn parse_verify_callback_url(url_str: &str) -> Option<Result<(), String>> {
+    if !url_str.starts_with("diark-sso://verify") {
+        return None;
+    }
+    let query = url_str.split('?').nth(1).unwrap_or("");
+    let mut status = "";
+    let mut msg = String::new();
+    for pair in query.split('&') {
+        let mut kv = pair.splitn(2, '=');
+        let k = kv.next().unwrap_or("");
+        let v = kv.next().unwrap_or("");
+        if k == "status" {
+            status = v;
+        } else if k == "msg" {
+            msg = urlencoding::decode(v)
+                .map(|c| c.into_owned())
+                .unwrap_or_else(|_| v.to_string());
+        }
+    }
+    if status == "ok" {
+        Some(Ok(()))
+    } else {
+        let final_msg = if msg.trim().is_empty() {
+            "Sai MSSV hoặc mật khẩu UIT SSO.".to_string()
+        } else {
+            msg
+        };
+        Some(Err(final_msg))
+    }
+}
+
+pub fn build_sso_verify_script(username: &str, password: &str) -> String {
+    let user_json = serde_json::to_string(username).unwrap_or_else(|_| "\"\"".to_string());
+    let pass_json = serde_json::to_string(password).unwrap_or_else(|_| "\"\"".to_string());
+
+    format!(
+        r#"(() => {{
+  if (window.__DIARK_SSO_VERIFY_ACTIVE__) return;
+  window.__DIARK_SSO_VERIFY_ACTIVE__ = true;
+
+  const VERIFY_USER = {user_json};
+  const VERIFY_PASS = {pass_json};
+
+  function sendVerify(status, msg) {{
+    if (window.__DIARK_VERIFY_REPORTED__) return;
+    window.__DIARK_VERIFY_REPORTED__ = true;
+    const encoded = msg ? "&msg=" + encodeURIComponent(msg) : "";
+    window.location.href = "diark-sso://verify?status=" + status + encoded;
+  }}
+
+  function normalizeSsoError(raw) {{
+    const txt = (raw || "").trim();
+    const low = txt.toLowerCase();
+    if (!txt || low.includes("invalid username") || low.includes("invalid password") || low.includes("sai") || low.includes("incorrect")) {{
+      return "Sai MSSV hoặc mật khẩu UIT SSO.";
+    }}
+    if (low.includes("disabled") || low.includes("locked")) {{
+      return "Tài khoản UIT SSO đang bị khóa hoặc tạm vô hiệu hóa.";
+    }}
+    return txt;
+  }}
+
+  function setInputValue(el, val) {{
+    try {{
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
+      if (setter) setter.call(el, val);
+      else el.value = val;
+      el.dispatchEvent(new Event("input", {{ bubbles: true }}));
+      el.dispatchEvent(new Event("change", {{ bubbles: true }}));
+    }} catch (_) {{
+      el.value = val;
+    }}
+  }}
+
+  function checkPageState() {{
+    const host = (window.location.hostname || "").toLowerCase();
+    const path = (window.location.pathname || "").toLowerCase();
+
+    if (host.includes("portal.uit.edu.vn")) {{
+      if (path.includes("/login") || path.includes("/user/login")) {{
+        const ssoBtn = document.querySelector('a[href*="auth.uit.edu.vn"], a[href*="/cas"], a[href*="sso"]');
+        if (ssoBtn) {{
+          ssoBtn.click();
+        }}
+        return;
+      }}
+      const passOnPortal = document.querySelector('input[type="password"]');
+      if (!passOnPortal) {{
+        setTimeout(() => {{
+          if (!(window.location.hostname || "").toLowerCase().includes("auth.uit.edu.vn")) {{
+            sendVerify("ok", "");
+          }}
+        }}, 250);
+      }}
+      return;
+    }}
+
+    if (!host.includes("auth.uit.edu.vn") && !host.includes("sso.uit.edu.vn")) {{
+      return;
+    }}
+
+    const captchaEl = document.querySelector('iframe[src*="recaptcha"], .g-recaptcha, iframe[src*="turnstile"], .cf-turnstile');
+    if (captchaEl) {{
+      sendVerify("error", "Cổng UIT yêu cầu xác minh CAPTCHA. Hãy dùng nút Đồng bộ Portal để đăng nhập trực tiếp.");
+      return;
+    }}
+
+    const errEl = document.querySelector('.alert-error, .alert-danger, #input-error, .kc-feedback-text, .pf-m-error, .feedback-error');
+    if (errEl && errEl.textContent && errEl.textContent.trim().length > 0) {{
+      sendVerify("error", normalizeSsoError(errEl.textContent));
+      return;
+    }}
+
+    const otpInput = document.querySelector('input#otp, input[name="otp"], input[name="totp"], input[name="code"]');
+    if (otpInput) {{
+      sendVerify("error", "Tài khoản bật xác thực 2 bước (OTP). Hãy dùng nút Đồng bộ Portal để nhập mã xác thực.");
+      return;
+    }}
+
+    if (sessionStorage.getItem("__diark_verify_submitted") === "1") {{
+      setTimeout(() => {{
+        const lateErr = document.querySelector('.alert-error, .alert-danger, #input-error, .kc-feedback-text, .pf-m-error');
+        const msg = lateErr && lateErr.textContent ? normalizeSsoError(lateErr.textContent) : "Sai MSSV hoặc mật khẩu UIT SSO.";
+        sendVerify("error", msg);
+      }}, 700);
+      return;
+    }}
+
+    const passInput = document.querySelector('input[type="password"]#password, input[type="password"][name="password"], form input[type="password"]');
+    const form = passInput ? passInput.closest("form") : null;
+    const userInput = (form && form.querySelector('input#username, input[name="username"], input[name="student_id"], input[type="text"]'))
+      || document.querySelector('input#username, input[name="username"]');
+
+    if (!passInput || !userInput) return;
+
+    setInputValue(userInput, VERIFY_USER);
+    setInputValue(passInput, VERIFY_PASS);
+    sessionStorage.setItem("__diark_verify_submitted", "1");
+
+    setTimeout(() => {{
+      const submitBtn = form?.querySelector('#kc-login, button[type="submit"], input[type="submit"]');
+      if (submitBtn) submitBtn.click();
+      else if (form) form.submit();
+    }}, 150);
+  }}
+
+  if (document.readyState === "loading") {{
+    document.addEventListener("DOMContentLoaded", checkPageState);
+  }} else {{
+    checkPageState();
+  }}
+  setTimeout(checkPageState, 400);
+}})();"#,
+    )
+}
+
+#[tauri::command]
+pub async fn verify_and_save_sso_credentials(
+    app: AppHandle,
+    db: State<'_, SharedDb>,
+    username: String,
+    password: Option<String>,
+    auto_login: bool,
+) -> Result<(), String> {
+    let clean_user = username.trim().to_string();
+    if clean_user.is_empty() {
+        return Err("Vui lòng nhập MSSV / tài khoản SSO.".to_string());
+    }
+
+    let effective_password = match password {
+        Some(pw) if !pw.is_empty() => pw,
+        _ => {
+            let (_, saved_pw, _) = read_sso_settings(&db);
+            if saved_pw.is_empty() {
+                return Err("Vui lòng nhập mật khẩu UIT SSO.".to_string());
+            }
+            saved_pw
+        }
+    };
+
+    let verify_label = "uit-sso-verify";
+    if let Some(existing) = app.get_webview_window(verify_label) {
+        let _ = existing.destroy();
+    }
+
+    let auth_url = WebviewUrl::External(
+        "https://portal.uit.edu.vn/sinh-vien/bang-diem"
+            .parse()
+            .map_err(|e| format!("URL xác thực không hợp lệ: {e}"))?,
+    );
+
+    let (tx, rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
+    let tx_holder = Arc::new(StdMutex::new(Some(tx)));
+    let tx_for_nav = Arc::clone(&tx_holder);
+    let app_for_nav = app.clone();
+    let verify_script = build_sso_verify_script(&clean_user, &effective_password);
+
+    let build_res = WebviewWindowBuilder::new(&app, verify_label, auth_url)
+        .title("Xác thực UIT SSO")
+        .inner_size(800.0, 600.0)
+        .visible(false)
+        .incognito(true)
+        .initialization_script(&verify_script)
+        .on_navigation(move |url| {
+            let url_str = url.as_str();
+            if let Some(result) = parse_verify_callback_url(url_str) {
+                if let Ok(mut guard) = tx_for_nav.lock() {
+                    if let Some(sender) = guard.take() {
+                        let _ = sender.send(result);
+                    }
+                }
+                if let Some(win) = app_for_nav.get_webview_window(verify_label) {
+                    let _ = win.destroy();
+                }
+                return false;
+            }
+            is_allowed_sso_verify_url(url)
+        })
+        .build();
+
+    if let Err(e) = build_res {
+        return Err(format!("Không thể khởi tạo phiên xác thực UIT SSO: {e}"));
+    }
+
+    let outcome = tokio::time::timeout(std::time::Duration::from_secs(25), rx).await;
+
+    if let Some(win) = app.get_webview_window(verify_label) {
+        let _ = win.destroy();
+    }
+
+    match outcome {
+        Ok(Ok(Ok(()))) => save_sso_credentials(db, clean_user, Some(effective_password), auto_login),
+        Ok(Ok(Err(err_msg))) => Err(err_msg),
+        Ok(Err(_)) => Err("Phiên xác thực UIT SSO đã bị hủy.".to_string()),
+        Err(_) => Err("Hết thời gian xác thực với UIT SSO (25 giây). Vui lòng kiểm tra mạng hoặc dùng Đồng bộ Portal.".to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_verify_callback_url() {
+        assert_eq!(parse_verify_callback_url("https://portal.uit.edu.vn/"), None);
+        assert_eq!(parse_verify_callback_url("diark-sso://verify?status=ok"), Some(Ok(())));
+        let err = parse_verify_callback_url(
+            "diark-sso://verify?status=error&msg=Sai%20MSSV%20ho%E1%BA%B7c%20m%E1%BA%ADt%20kh%E1%BA%A9u",
+        );
+        assert_eq!(err, Some(Err("Sai MSSV hoặc mật khẩu".to_string())));
+    }
+
+    #[test]
+    fn test_build_sso_verify_script_escapes_credentials() {
+        let script = build_sso_verify_script("25520458", "pass\"with\\quote");
+        assert!(script.contains("\"25520458\""));
+        assert!(script.contains("pass\\\"with\\\\quote"));
+        assert!(script.contains("diark-sso://verify?status="));
+    }
 }

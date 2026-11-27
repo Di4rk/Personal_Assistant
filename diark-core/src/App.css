@@ -1,1 +1,16 @@
 @import "tailwindcss";
+
+:root {
+  --surface-sidebar: #080808;
+  --surface-canvas: #0c0c0d;
+  --surface-card: #121213;
+  --surface-elevated: #19191b;
+  --border-hairline: rgba(255, 255, 255, 0.07);
+}
+
+html,
+body {
+  background-color: var(--surface-sidebar);
+  color: #f4f4f5;
+  -webkit-font-smoothing: antialiased;
+}

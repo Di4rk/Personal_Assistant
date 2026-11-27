@@ -26,24 +26,89 @@ export function maskClassName(className: string): string {
   return `${prefix.slice(0, Math.min(4, prefix.length))}****`;
 }
 
+const COMMON_VN_SURNAMES: ReadonlySet<string> = new Set([
+  "nguyen",
+  "tran",
+  "le",
+  "pham",
+  "hoang",
+  "huynh",
+  "phan",
+  "vu",
+  "vo",
+  "dang",
+  "bui",
+  "do",
+  "ho",
+  "ngo",
+  "duong",
+  "ly",
+  "dinh",
+  "truong",
+  "doan",
+  "lam",
+  "mai",
+  "to",
+  "ta",
+  "trinh",
+  "cao",
+  "chau",
+  "luu",
+  "thai",
+  "tang",
+  "luong",
+  "phung",
+  "quach",
+  "hua",
+  "nghiem",
+  "ha",
+  "tu",
+  "kieu",
+  "bach",
+  "la",
+  "vuong",
+  "dao",
+  "chu",
+  "chung",
+  "mac",
+  "ton",
+  "diep",
+  "khuu",
+  "nghia",
+  "quynh",
+]);
+
+function stripVnDiacritics(input: string): string {
+  return input
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[đĐ]/g, "d")
+    .toLowerCase();
+}
+
 /**
  * Chuẩn hóa thứ tự họ tên tiếng Việt (Họ -> Tên đệm -> Tên).
  * Khắc phục lỗi đảo ngữ do một số nguồn OAuth/SSO xuất ra dạng Western first_name + last_name.
  */
 export function formatVietnameseName(name: string): string {
-  if (!name) return '';
+  if (!name) return "";
   const trimmed = name.trim();
-  
-  // Khắc phục cụ thể ca "Gia Phạm Hoàng" -> "Phạm Hoàng Gia"
-  if (trimmed.toLowerCase() === 'gia phạm hoàng') {
-    return 'Phạm Hoàng Gia';
-  }
-
-  // Khắc phục dạng "Tên Họ Đệm" (ví dụ: "Gia Pham Hoang")
   const parts = trimmed.split(/\s+/);
-  if (parts.length === 3 && parts[0].toLowerCase() === 'gia' && parts[1].toLowerCase() === 'phạm' && parts[2].toLowerCase() === 'hoàng') {
-    return 'Phạm Hoàng Gia';
+
+  if (
+    parts.length >= 2 &&
+    !COMMON_VN_SURNAMES.has(stripVnDiacritics(parts[0])) &&
+    COMMON_VN_SURNAMES.has(stripVnDiacritics(parts[1]))
+  ) {
+    return [...parts.slice(1), parts[0]].join(" ");
   }
 
   return trimmed;
+}
+
+export function extractVietnameseGivenName(rawFullName: string): string {
+  const normalized = formatVietnameseName(rawFullName).trim();
+  if (!normalized) return "";
+  const parts = normalized.split(/\s+/);
+  return parts[parts.length - 1] ?? "";
 }

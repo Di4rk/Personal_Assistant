@@ -97,6 +97,7 @@ macro_rules! registered_commands {
             commands::portal_extra::push_uit_schedule_to_google,
             commands::portal_extra::get_sso_credentials_status,
             commands::portal_extra::save_sso_credentials,
+            commands::portal_extra::verify_and_save_sso_credentials,
             commands::portal_extra::clear_sso_credentials,
             commands::portal_extra::get_local_sync_token,
             // Portal In-App SSO

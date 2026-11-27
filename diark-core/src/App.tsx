@@ -23,7 +23,7 @@ import { ScheduleDashboard } from "./features/schedule";
 import { VaultDashboard } from "./features/vault";
 import { PortalQuickActionsPopover } from "./components/PortalQuickActionsPopover";
 import { CommandPaletteModal } from "./features/command-palette";
-import { GenesisModal } from "./features/onboarding";
+import { GenesisModal, SsoLoginScreen } from "./features/onboarding";
 import { DevControlDock } from "./components/DevControlDock";
 import { PluginMarketplaceModal } from "./components/PluginMarketplaceModal";
 import { PluginViewportRouter } from "./features/plugins/PluginViewportRouter";
@@ -39,12 +39,30 @@ import { useWecodeStore } from "./stores/useWecodeStore";
 import { usePrivacyStore } from "./stores/usePrivacyStore";
 import { listInstalledPlugins } from "./lib/plugin-sdk";
 import type { PluginMetaDto } from "./types/plugin";
-import { Code2, GraduationCap, FolderGit2, Blocks, Settings, BookOpen, Terminal, Home, CalendarDays, Search } from "lucide-react";
+import {
+  Code2,
+  GraduationCap,
+  FolderGit2,
+  Blocks,
+  Settings,
+  BookOpen,
+  Terminal,
+  Home,
+  CalendarDays,
+  Search,
+  PanelLeftClose,
+  PanelLeftOpen,
+  LogIn,
+  RefreshCw,
+  ShieldCheck,
+} from "lucide-react";
+import uitLogoMono from "./assets/uit-logo-mono.png";
 import { APP_VERSION } from "./constants/app";
 import {
   getSsoCredentialsStatus,
   getUserProfile,
   saveUserProfile,
+  type SsoCredentialsStatus,
   type UserProfileDto,
 } from "./lib/tauri-client";
 import { notifyUiReady } from "./services/systemService";
@@ -60,6 +78,46 @@ export default function App() {
   const [plugins, setPlugins] = useState<PluginMetaDto[]>([]);
   const [isPluginModalOpen, setIsPluginModalOpen] = useState(false);
   const [isPortalSyncModalOpen, setIsPortalSyncModalOpen] = useState(false);
+  const [isSsoLoginOpen, setIsSsoLoginOpen] = useState(false);
+  const [ssoStatus, setSsoStatus] = useState<SsoCredentialsStatus | null>(null);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
+    try {
+      return window.localStorage.getItem("diark_sidebar_collapsed") === "true";
+    } catch {
+      return false;
+    }
+  });
+  const isPortalSyncing = useSyncOrchestratorStore((s) => s.serviceState.portal.isSyncing);
+
+  const toggleSidebar = useCallback(() => {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem("diark_sidebar_collapsed", next ? "true" : "false");
+      } catch {
+        // ignore storage restrictions
+      }
+      return next;
+    });
+  }, []);
+
+  const refreshSsoStatus = useCallback(async () => {
+    try {
+      const status = await getSsoCredentialsStatus();
+      setSsoStatus(status);
+    } catch {
+      setSsoStatus(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshSsoStatus();
+    const onSsoUpdated = () => {
+      void refreshSsoStatus();
+    };
+    window.addEventListener("sso-credentials-updated", onSsoUpdated);
+    return () => window.removeEventListener("sso-credentials-updated", onSsoUpdated);
+  }, [refreshSsoStatus]);
 
   // Auto-Update Engine (Tauri v2 official updater plugin)
   const {
@@ -335,19 +393,12 @@ export default function App() {
 
   if (profileState.status === "loading") {
     return (
-      <div className="flex h-screen w-screen items-center justify-center bg-zinc-950 font-mono select-none">
-        <div className="flex flex-col items-center gap-4">
-          <div className="relative flex h-12 w-12 items-center justify-center">
-            <div className="absolute h-11 w-11 animate-[spin_0.9s_cubic-bezier(0.5,0,0.5,1)_infinite] rounded-full border-2 border-zinc-800 border-t-emerald-400" />
-            <div className="absolute h-6 w-6 animate-[spin_1.3s_linear_infinite_reverse] rounded-full border-2 border-zinc-800 border-b-cyan-400" />
-          </div>
-          <div className="flex flex-col items-center gap-1">
-            <span className="text-xs font-bold tracking-[0.15em] text-zinc-100">
-              DIARK <span className="text-cyan-400">// OS</span>
-            </span>
-            <span className="text-[11px] tracking-wider text-zinc-500 animate-pulse">
-              Đang khởi tạo nhân hệ thống...
-            </span>
+      <div className="flex h-screen w-screen items-center justify-center bg-[#080808] select-none">
+        <div className="flex flex-col items-center gap-3.5">
+          <div className="h-9 w-9 animate-spin rounded-full border-2 border-[#222225] border-t-zinc-100" />
+          <div className="flex items-center gap-2">
+            <img src={uitLogoMono} alt="UIT" className="h-4 w-4 opacity-80" />
+            <span className="text-xs font-semibold tracking-wider text-zinc-200">Diark</span>
           </div>
         </div>
       </div>
@@ -360,146 +411,346 @@ export default function App() {
 
   const { profile } = profileState;
 
+  const pageTitle =
+    activeTab === "home"
+      ? "Hôm nay"
+      : activeTab === "schedule"
+      ? "Lịch học & Cá nhân"
+      : activeTab === "academic"
+      ? "Sức khỏe học vụ"
+      : activeTab === "vault"
+      ? "Ghi chú"
+      : activeTab === "uit-courses"
+      ? "Moodle Courses"
+      : activeTab === "uit-wecode"
+      ? "Wecode"
+      : activeTab === "cp" || activeTab === "cp-codeforces"
+      ? "Codeforces"
+      : plugins.find((p) => p.pluginId === activeTab)?.name || "Tổng quan";
+
+  const enabledPlugins = plugins.filter((p) => p.isEnabled);
+
   return (
-    <div className="h-full overflow-y-auto overflow-x-hidden bg-zinc-950 text-zinc-100">
-      {/* Header phẳng, mật độ cao theo chuẩn Linear/Vercel */}
-      <header className="sticky top-0 z-40 flex h-12 items-center justify-between border-b border-zinc-800/80 bg-zinc-950 px-5">
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2">
-            <span className="h-2 w-2 rounded-full bg-emerald-400" aria-hidden="true" />
-            <span className="text-xs font-semibold tracking-tight text-zinc-100">
-              {profile.nickname}
-            </span>
-            <span className="font-mono text-[11px] text-zinc-600">{APP_VERSION}</span>
+    <div className="flex h-screen w-screen overflow-hidden bg-[#080808] text-zinc-100">
+      {/* Collapsible Monochrome Left Sidebar */}
+      <aside
+        className={`flex shrink-0 flex-col border-r border-white/[0.06] bg-[#080808] transition-[width] duration-200 ease-out ${
+          sidebarCollapsed ? "w-[68px]" : "w-[236px]"
+        }`}
+      >
+        {/* Brand Row */}
+        <div className="flex h-12 shrink-0 items-center justify-between px-3.5">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <img
+              src={uitLogoMono}
+              alt="UIT Logo"
+              className="h-6 w-6 shrink-0 object-contain opacity-90"
+            />
+            {!sidebarCollapsed && (
+              <div className="flex items-baseline gap-1.5 min-w-0">
+                <span className="truncate text-sm font-semibold tracking-tight text-white">
+                  Diark
+                </span>
+                <span className="font-mono text-[10px] text-zinc-500">{APP_VERSION}</span>
+              </div>
+            )}
           </div>
 
-          <nav className="flex items-center gap-1 text-xs" aria-label="Main navigation">
+          <button
+            type="button"
+            onClick={toggleSidebar}
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-200 cursor-pointer"
+            title={sidebarCollapsed ? "Mở rộng thanh bên" : "Thu gọn thanh bên"}
+            aria-label={sidebarCollapsed ? "Mở rộng thanh bên" : "Thu gọn thanh bên"}
+          >
+            {sidebarCollapsed ? (
+              <PanelLeftOpen className="h-4 w-4" aria-hidden="true" />
+            ) : (
+              <PanelLeftClose className="h-4 w-4" aria-hidden="true" />
+            )}
+          </button>
+        </div>
+
+        {/* Search Trigger Pill */}
+        <div className="px-3 pb-3">
+          <button
+            type="button"
+            onClick={() => {
+              window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }));
+            }}
+            className={`flex h-8 w-full items-center rounded-lg border border-white/[0.07] bg-[#121213] text-xs text-zinc-400 transition-colors hover:border-white/[0.14] hover:text-zinc-200 cursor-pointer ${
+              sidebarCollapsed ? "justify-center px-0" : "justify-between px-2.5"
+            }`}
+            title="Tìm kiếm nhanh (Ctrl+K)"
+          >
+            <span className="flex items-center gap-2">
+              <Search className="h-3.5 w-3.5 shrink-0 text-zinc-500" aria-hidden="true" />
+              {!sidebarCollapsed && <span>Tìm kiếm...</span>}
+            </span>
+            {!sidebarCollapsed && (
+              <kbd className="rounded bg-[#1b1b1e] px-1.5 py-0.5 font-mono text-[10px] text-zinc-400 border border-white/[0.05]">
+                Ctrl K
+              </kbd>
+            )}
+          </button>
+        </div>
+
+        {/* Navigation Links */}
+        <nav className="flex-1 overflow-y-auto px-2.5 space-y-5" aria-label="Main navigation">
+          <div className="space-y-0.5">
+            {!sidebarCollapsed && (
+              <div className="px-2.5 pb-1 text-[11px] font-medium text-zinc-500">
+                Học tập
+              </div>
+            )}
+
             <button
               type="button"
               onClick={() => setActiveTab("home")}
               aria-current={activeTab === "home" ? "page" : undefined}
-              className={`flex h-8 items-center gap-1.5 rounded-md px-2.5 font-medium transition-colors duration-150 ease-out cursor-pointer ${
+              title="Hôm nay"
+              className={`flex h-8 w-full items-center rounded-lg text-xs font-medium transition-colors duration-150 cursor-pointer ${
+                sidebarCollapsed ? "justify-center px-0" : "gap-2.5 px-2.5"
+              } ${
                 activeTab === "home"
-                  ? "bg-zinc-800 text-zinc-100"
-                  : "text-zinc-500 hover:bg-zinc-900 hover:text-zinc-200"
+                  ? "border border-white/[0.07] bg-[#18181b] text-white"
+                  : "border border-transparent text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200"
               }`}
             >
-              <Home className="h-3.5 w-3.5" aria-hidden="true" />
-              <span>Hôm nay</span>
+              <Home className="h-4 w-4 shrink-0" aria-hidden="true" />
+              {!sidebarCollapsed && <span>Hôm nay</span>}
             </button>
 
             <button
               type="button"
               onClick={() => setActiveTab("schedule")}
               aria-current={activeTab === "schedule" ? "page" : undefined}
-              className={`flex h-8 items-center gap-1.5 rounded-md px-2.5 font-medium transition-colors duration-150 ease-out cursor-pointer ${
+              title="Lịch"
+              className={`flex h-8 w-full items-center rounded-lg text-xs font-medium transition-colors duration-150 cursor-pointer ${
+                sidebarCollapsed ? "justify-center px-0" : "gap-2.5 px-2.5"
+              } ${
                 activeTab === "schedule"
-                  ? "bg-zinc-800 text-zinc-100"
-                  : "text-zinc-500 hover:bg-zinc-900 hover:text-zinc-200"
+                  ? "border border-white/[0.07] bg-[#18181b] text-white"
+                  : "border border-transparent text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200"
               }`}
             >
-              <CalendarDays className="h-3.5 w-3.5" aria-hidden="true" />
-              <span>Lịch</span>
+              <CalendarDays className="h-4 w-4 shrink-0" aria-hidden="true" />
+              {!sidebarCollapsed && <span>Lịch</span>}
             </button>
 
             <button
               type="button"
               onClick={() => setActiveTab("academic")}
               aria-current={activeTab === "academic" ? "page" : undefined}
-              className={`flex h-8 items-center gap-1.5 rounded-md px-2.5 font-medium transition-colors duration-150 ease-out cursor-pointer ${
+              title="Học vụ"
+              className={`flex h-8 w-full items-center rounded-lg text-xs font-medium transition-colors duration-150 cursor-pointer ${
+                sidebarCollapsed ? "justify-center px-0" : "gap-2.5 px-2.5"
+              } ${
                 activeTab === "academic"
-                  ? "bg-zinc-800 text-zinc-100"
-                  : "text-zinc-500 hover:bg-zinc-900 hover:text-zinc-200"
+                  ? "border border-white/[0.07] bg-[#18181b] text-white"
+                  : "border border-transparent text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200"
               }`}
             >
-              <GraduationCap className="h-3.5 w-3.5" aria-hidden="true" />
-              <span>Học vụ</span>
+              <GraduationCap className="h-4 w-4 shrink-0" aria-hidden="true" />
+              {!sidebarCollapsed && <span>Học vụ</span>}
             </button>
 
-            {plugins
-              .filter((p) => p.isEnabled)
-              .map((p) => {
-                const isSelected = activeTab === p.pluginId;
-                const iconEl =
-                  p.pluginId === "cp-codeforces" ? (
-                    <Code2 className="h-3.5 w-3.5" aria-hidden="true" />
-                  ) : p.pluginId === "uit-courses" ? (
-                    <BookOpen className="h-3.5 w-3.5" aria-hidden="true" />
-                  ) : p.pluginId === "uit-wecode" ? (
-                    <Terminal className="h-3.5 w-3.5" aria-hidden="true" />
-                  ) : (
-                    <Blocks className="h-3.5 w-3.5" aria-hidden="true" />
-                  );
-                const shortName =
-                  p.pluginId === "uit-courses"
-                    ? "Moodle"
-                    : p.pluginId === "uit-wecode"
-                    ? "Wecode"
-                    : p.pluginId === "cp-codeforces"
-                    ? "Codeforces"
-                    : p.name;
-                return (
-                  <button
-                    key={p.pluginId}
-                    type="button"
-                    onClick={() => setActiveTab(p.pluginId)}
-                    aria-current={isSelected ? "page" : undefined}
-                    className={`flex h-8 items-center gap-1.5 rounded-md px-2.5 font-medium transition-colors duration-150 ease-out cursor-pointer ${
-                      isSelected
-                        ? "bg-zinc-800 text-zinc-100"
-                        : "text-zinc-500 hover:bg-zinc-900 hover:text-zinc-200"
-                    }`}
-                  >
-                    {iconEl}
-                    <span>{shortName}</span>
-                  </button>
+            {enabledPlugins.map((p) => {
+              const isSelected = activeTab === p.pluginId;
+              const iconEl =
+                p.pluginId === "cp-codeforces" ? (
+                  <Code2 className="h-4 w-4 shrink-0" aria-hidden="true" />
+                ) : p.pluginId === "uit-courses" ? (
+                  <BookOpen className="h-4 w-4 shrink-0" aria-hidden="true" />
+                ) : p.pluginId === "uit-wecode" ? (
+                  <Terminal className="h-4 w-4 shrink-0" aria-hidden="true" />
+                ) : (
+                  <Blocks className="h-4 w-4 shrink-0" aria-hidden="true" />
                 );
-              })}
+              const shortName =
+                p.pluginId === "uit-courses"
+                  ? "Moodle"
+                  : p.pluginId === "uit-wecode"
+                  ? "Wecode"
+                  : p.pluginId === "cp-codeforces"
+                  ? "Codeforces"
+                  : p.name;
+              return (
+                <button
+                  key={p.pluginId}
+                  type="button"
+                  onClick={() => setActiveTab(p.pluginId)}
+                  aria-current={isSelected ? "page" : undefined}
+                  title={shortName}
+                  className={`flex h-8 w-full items-center rounded-lg text-xs font-medium transition-colors duration-150 cursor-pointer ${
+                    sidebarCollapsed ? "justify-center px-0" : "gap-2.5 px-2.5"
+                  } ${
+                    isSelected
+                      ? "border border-white/[0.07] bg-[#18181b] text-white"
+                      : "border border-transparent text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200"
+                  }`}
+                >
+                  {iconEl}
+                  {!sidebarCollapsed && <span className="truncate">{shortName}</span>}
+                </button>
+              );
+            })}
 
             <button
               type="button"
               onClick={() => setActiveTab("vault")}
               aria-current={activeTab === "vault" ? "page" : undefined}
-              className={`flex h-8 items-center gap-1.5 rounded-md px-2.5 font-medium transition-colors duration-150 ease-out cursor-pointer ${
+              title="Ghi chú"
+              className={`flex h-8 w-full items-center rounded-lg text-xs font-medium transition-colors duration-150 cursor-pointer ${
+                sidebarCollapsed ? "justify-center px-0" : "gap-2.5 px-2.5"
+              } ${
                 activeTab === "vault"
-                  ? "bg-zinc-800 text-zinc-100"
-                  : "text-zinc-500 hover:bg-zinc-900 hover:text-zinc-200"
+                  ? "border border-white/[0.07] bg-[#18181b] text-white"
+                  : "border border-transparent text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200"
               }`}
             >
-              <FolderGit2 className="h-3.5 w-3.5" aria-hidden="true" />
-              <span>Ghi chú</span>
+              <FolderGit2 className="h-4 w-4 shrink-0" aria-hidden="true" />
+              {!sidebarCollapsed && <span>Ghi chú</span>}
             </button>
-          </nav>
-        </div>
+          </div>
 
-        <div className="flex items-center gap-2">
-          <PortalQuickActionsPopover />
+          <div className="space-y-0.5">
+            {!sidebarCollapsed && (
+              <div className="px-2.5 pb-1 text-[11px] font-medium text-zinc-500">
+                Hệ thống
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={() => setIsSsoLoginOpen(true)}
+              title="Tài khoản UIT SSO"
+              className={`flex h-8 w-full items-center rounded-lg border border-transparent text-xs font-medium text-zinc-400 transition-colors duration-150 hover:bg-white/[0.04] hover:text-zinc-200 cursor-pointer ${
+                sidebarCollapsed ? "justify-center px-0" : "justify-between px-2.5"
+              }`}
+            >
+              <span className="flex items-center gap-2.5 min-w-0">
+                <ShieldCheck className="h-4 w-4 shrink-0" aria-hidden="true" />
+                {!sidebarCollapsed && <span className="truncate">Tài khoản SSO</span>}
+              </span>
+              {!sidebarCollapsed && (
+                <span
+                  className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                    ssoStatus?.has_password ? "bg-emerald-400" : "bg-zinc-600"
+                  }`}
+                />
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => useSettingsStore.getState().openSettings()}
+              title="Cài đặt hệ thống"
+              className={`flex h-8 w-full items-center rounded-lg border border-transparent text-xs font-medium text-zinc-400 transition-colors duration-150 hover:bg-white/[0.04] hover:text-zinc-200 cursor-pointer ${
+                sidebarCollapsed ? "justify-center px-0" : "gap-2.5 px-2.5"
+              }`}
+            >
+              <Settings className="h-4 w-4 shrink-0" aria-hidden="true" />
+              {!sidebarCollapsed && <span>Cài đặt</span>}
+            </button>
+          </div>
+        </nav>
+
+        {/* Bottom SSO Status Card + User Profile Footer */}
+        <div className="shrink-0 p-2.5 space-y-2 border-t border-white/[0.06]">
+          {!sidebarCollapsed && (
+            <div className="rounded-xl border border-white/[0.07] bg-[#111112] p-3 space-y-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] font-medium text-zinc-300">
+                  {ssoStatus?.has_password ? "UIT SSO đã lưu" : "Chưa lưu SSO"}
+                </span>
+                <span
+                  className={`h-1.5 w-1.5 rounded-full ${
+                    ssoStatus?.has_password ? "bg-emerald-400" : "bg-amber-400"
+                  }`}
+                />
+              </div>
+              <p className="truncate font-mono text-[11px] text-zinc-500">
+                {ssoStatus?.username ? `MSSV: ${ssoStatus.username}` : "Đăng nhập một lần để đồng bộ tự động."}
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  if (ssoStatus?.has_password) {
+                    void handleQuickPortalSync();
+                  } else {
+                    setIsSsoLoginOpen(true);
+                  }
+                }}
+                disabled={isPortalSyncing}
+                className="flex h-7 w-full items-center justify-center gap-1.5 rounded-lg border border-white/[0.08] bg-[#1a1a1d] text-[11px] font-medium text-zinc-100 transition-colors hover:bg-[#232327] disabled:opacity-50 cursor-pointer"
+              >
+                {ssoStatus?.has_password ? (
+                  <>
+                    <RefreshCw className={`h-3 w-3 ${isPortalSyncing ? "animate-spin" : ""}`} />
+                    <span>{isPortalSyncing ? "Đang đồng bộ..." : "Đồng bộ Portal"}</span>
+                  </>
+                ) : (
+                  <>
+                    <LogIn className="h-3 w-3" />
+                    <span>Đăng nhập SSO</span>
+                  </>
+                )}
+              </button>
+            </div>
+          )}
 
           <button
             type="button"
-            onClick={() => {
-              window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }));
-            }}
-            className="flex h-8 items-center gap-1.5 rounded-md border border-zinc-800 bg-zinc-900 px-2.5 text-xs text-zinc-400 transition-colors duration-150 hover:border-zinc-700 hover:bg-zinc-800 hover:text-zinc-200 cursor-pointer"
-            title="Mở bảng lệnh (Ctrl+K)"
+            onClick={() => setIsSsoLoginOpen(true)}
+            title="Mở cửa sổ đăng nhập UIT SSO"
+            className={`flex h-9 w-full items-center rounded-lg border border-white/[0.06] bg-[#101012] text-left transition-colors hover:border-white/[0.12] hover:bg-[#151518] cursor-pointer ${
+              sidebarCollapsed ? "justify-center px-0" : "justify-between px-2.5"
+            }`}
           >
-            <Search className="h-3.5 w-3.5" aria-hidden="true" />
-            <kbd className="font-mono text-[10px] text-zinc-500">Ctrl K</kbd>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => useSettingsStore.getState().openSettings()}
-            className="flex h-8 w-8 items-center justify-center rounded-md border border-zinc-800 bg-zinc-900 text-zinc-400 transition-colors duration-150 hover:border-zinc-700 hover:bg-zinc-800 hover:text-zinc-100 cursor-pointer"
-            title="Cài đặt hệ thống"
-            aria-label="Mở Settings"
-          >
-            <Settings className="h-3.5 w-3.5" aria-hidden="true" />
+            <span className="flex items-center gap-2 min-w-0">
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-white/[0.08] text-[11px] font-semibold text-zinc-100">
+                {(ssoStatus?.username || profile.nickname || "U").slice(0, 2).toUpperCase()}
+              </span>
+              {!sidebarCollapsed && (
+                <span className="min-w-0">
+                  <span className="block truncate text-xs font-medium text-zinc-100">
+                    {profile.nickname}
+                  </span>
+                  <span className="block truncate font-mono text-[10px] text-zinc-500">
+                    {ssoStatus?.username || "UIT Student"}
+                  </span>
+                </span>
+              )}
+            </span>
+            {!sidebarCollapsed && <LogIn className="h-3.5 w-3.5 shrink-0 text-zinc-500" />}
           </button>
         </div>
-      </header>
+      </aside>
 
-      <main className="p-5">
+      {/* Main Content Workspace */}
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-[#0c0c0d]">
+        <header className="flex h-12 shrink-0 items-center justify-between border-b border-white/[0.06] bg-[#0c0c0d]/95 px-6">
+          <h1 className="text-sm font-semibold tracking-tight text-zinc-100">{pageTitle}</h1>
+
+          <div className="flex items-center gap-2">
+            <PortalQuickActionsPopover />
+
+            <button
+              type="button"
+              onClick={() => setIsSsoLoginOpen(true)}
+              className="flex h-8 items-center gap-1.5 rounded-lg border border-white/[0.08] bg-[#121213] px-2.5 text-xs font-medium text-zinc-300 transition-colors hover:border-white/[0.15] hover:bg-[#19191b] hover:text-white cursor-pointer"
+              title="Đăng nhập hoặc đổi tài khoản SSO UIT"
+            >
+              <LogIn className="h-3.5 w-3.5 text-zinc-400" aria-hidden="true" />
+              <span className="hidden sm:inline">
+                {ssoStatus?.has_password ? "Đổi SSO" : "Đăng nhập SSO"}
+              </span>
+            </button>
+          </div>
+        </header>
+
+        <main className="flex-1 overflow-y-auto overflow-x-hidden px-6 py-5">
         {activeTab === "home" ? (
           <HomeDashboard
             onNavigateTab={(tab) => setActiveTab(tab)}
@@ -551,7 +802,8 @@ export default function App() {
             );
           })()
         )}
-      </main>
+        </main>
+      </div>
 
       <PluginMarketplaceModal
         isOpen={isPluginModalOpen}
@@ -594,6 +846,15 @@ export default function App() {
       <SyncPortalModal
         isOpen={isPortalSyncModalOpen}
         onClose={() => setIsPortalSyncModalOpen(false)}
+      />
+
+      <SsoLoginScreen
+        mode="modal"
+        isOpen={isSsoLoginOpen}
+        onClose={() => setIsSsoLoginOpen(false)}
+        onComplete={() => {
+          void refreshSsoStatus();
+        }}
       />
 
       <AutoUpdateModal

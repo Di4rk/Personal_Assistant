@@ -307,10 +307,10 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
   return (
     <div className={`mx-auto max-w-7xl space-y-4 ${className}`}>
       {/* Compact Header & Action Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-zinc-800/80 bg-zinc-900/50 px-4 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/[0.07] bg-[#121213] px-4 py-3.5">
         <div>
-          <h2 className="text-sm font-semibold text-zinc-100">Sức khỏe học vụ UIT</h2>
-          <div className="mt-1 flex flex-wrap items-center gap-4 divide-x divide-zinc-800 text-xs">
+          <h2 className="text-sm font-semibold text-white">Sức khỏe học vụ UIT</h2>
+          <div className="mt-1 flex flex-wrap items-center gap-4 divide-x divide-white/[0.08] text-xs">
             <span className="text-zinc-400">
               GPA tích lũy{" "}
               <strong className="font-mono tabular-nums text-zinc-100">
@@ -371,7 +371,7 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
             type="button"
             onClick={() => void handleRefreshClick()}
             disabled={isPortalSyncing || isRefreshing}
-            className="flex h-8 items-center gap-1.5 rounded-md border border-zinc-800 bg-zinc-900 px-3 text-xs font-medium text-zinc-300 transition-colors duration-150 hover:border-zinc-700 hover:bg-zinc-800 hover:text-zinc-100 disabled:opacity-50 cursor-pointer"
+            className="flex h-8 items-center gap-1.5 rounded-lg border border-white/[0.08] bg-[#18181b] px-3 text-xs font-medium text-zinc-300 transition-colors duration-150 hover:border-white/[0.15] hover:bg-[#222226] hover:text-white disabled:opacity-50 cursor-pointer"
           >
             <RefreshCw
               className={`h-3.5 w-3.5 ${isPortalSyncing || isRefreshing ? "animate-spin text-emerald-400" : ""}`}
@@ -383,7 +383,7 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
           <button
             type="button"
             onClick={() => setIsSyncPortalModalOpen(true)}
-            className="flex h-8 items-center gap-1.5 rounded-md bg-zinc-100 px-3 text-xs font-medium text-zinc-950 transition-colors duration-150 hover:bg-zinc-200 active:scale-[0.98] cursor-pointer"
+            className="flex h-8 items-center gap-1.5 rounded-lg bg-white px-3 text-xs font-semibold text-[#09090b] transition-colors duration-150 hover:bg-zinc-200 active:scale-[0.98] cursor-pointer"
           >
             <Download className="h-3.5 w-3.5" aria-hidden="true" />
             <span>Đồng bộ Portal</span>
@@ -397,7 +397,7 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
       <div
         role="tablist"
         aria-label="Phân mục Học vụ"
-        className="flex flex-wrap items-center gap-1 border-b border-zinc-800 pb-2"
+        className="flex flex-wrap items-center gap-1 border-b border-white/[0.07] pb-2"
       >
         {SUB_TABS.map((tab) => {
           const isActive = activeSubTab === tab.id;
@@ -408,10 +408,10 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
               role="tab"
               aria-selected={isActive}
               onClick={() => setActiveSubTab(tab.id)}
-              className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors duration-150 cursor-pointer ${
+              className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors duration-150 cursor-pointer ${
                 isActive
-                  ? "bg-zinc-800 text-zinc-100"
-                  : "text-zinc-500 hover:bg-zinc-900 hover:text-zinc-300"
+                  ? "border border-white/[0.08] bg-[#1d1d20] text-white"
+                  : "border border-transparent text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-200"
               }`}
             >
               {tab.label}

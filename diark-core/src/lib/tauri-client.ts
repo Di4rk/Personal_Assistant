@@ -1017,6 +1017,18 @@ export async function saveSsoCredentials(
   });
 }
 
+export async function verifyAndSaveSsoCredentials(
+  username: string,
+  password: string | null,
+  autoLogin: boolean
+): Promise<void> {
+  return invoke<void>("verify_and_save_sso_credentials", {
+    username,
+    password,
+    autoLogin,
+  });
+}
+
 export async function clearSsoCredentials(): Promise<void> {
   return invoke<void>("clear_sso_credentials");
 }

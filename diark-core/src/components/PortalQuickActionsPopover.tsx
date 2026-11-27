@@ -57,7 +57,7 @@ export const PortalQuickActionsPopover: React.FC = () => {
         onClick={() => setIsOpen((prev) => !prev)}
         aria-expanded={isOpen}
         aria-haspopup="menu"
-        className="flex h-8 items-center gap-1.5 rounded-md border border-zinc-800 bg-zinc-900 px-2.5 text-xs font-medium text-zinc-300 transition-colors duration-150 ease-out hover:border-zinc-700 hover:bg-zinc-800/80 hover:text-zinc-100 active:scale-[0.98] cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-zinc-600"
+        className="flex h-8 items-center gap-1.5 rounded-lg border border-white/[0.08] bg-[#121213] px-2.5 text-xs font-medium text-zinc-300 transition-colors duration-150 ease-out hover:border-white/[0.15] hover:bg-[#19191b] hover:text-white active:scale-[0.98] cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-zinc-600"
       >
         <span>Thủ tục Portal</span>
         <ChevronDown
@@ -71,7 +71,7 @@ export const PortalQuickActionsPopover: React.FC = () => {
       {isOpen && (
         <div
           role="menu"
-          className="absolute right-0 top-10 z-50 w-80 origin-top-right rounded-lg border border-zinc-800 bg-zinc-900 shadow-2xl"
+          className="absolute right-0 top-10 z-50 w-80 origin-top-right rounded-xl border border-white/[0.08] bg-[#121213] shadow-2xl"
         >
           <div className="flex items-center gap-2 border-b border-zinc-800 px-3 py-2">
             <Search className="h-3.5 w-3.5 shrink-0 text-zinc-500" aria-hidden="true" />
