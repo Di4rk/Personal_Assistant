@@ -790,6 +790,28 @@ pub fn ensure_curriculum_schema(conn: &Connection) -> SqlResult<()> {
             ON curriculum_rules(slug);
         CREATE INDEX IF NOT EXISTS idx_curr_index_lookup
             ON curriculum_index(cohort_year, major_name);
+
+        CREATE TABLE IF NOT EXISTS uit_course_catalog (
+            course_code       TEXT PRIMARY KEY,
+            name_vi           TEXT NOT NULL,
+            name_en           TEXT NOT NULL DEFAULT '',
+            is_open           INTEGER NOT NULL DEFAULT 1,
+            department_code   TEXT NOT NULL DEFAULT '',
+            department_name   TEXT NOT NULL DEFAULT '',
+            course_type       TEXT NOT NULL DEFAULT '',
+            old_code          TEXT NOT NULL DEFAULT '',
+            equivalent_codes  TEXT NOT NULL DEFAULT '',
+            replacement_codes TEXT NOT NULL DEFAULT '',
+            prerequisite_codes TEXT NOT NULL DEFAULT '',
+            prior_codes       TEXT NOT NULL DEFAULT '',
+            theory_credits    INTEGER NOT NULL DEFAULT 0,
+            practice_credits  INTEGER NOT NULL DEFAULT 0,
+            total_credits     INTEGER NOT NULL DEFAULT 0,
+            updated_at        INTEGER NOT NULL DEFAULT 0
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_uit_course_catalog_open
+            ON uit_course_catalog(is_open, department_code);
         "#,
     )?;
 

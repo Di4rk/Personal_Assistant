@@ -53,6 +53,21 @@ pub struct NonCreditPrerequisites {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+pub struct RecommendedCourseItem {
+    pub course_code: String,
+    pub course_name: String,
+    pub credits: f64,
+    pub knowledge_block: String,
+    pub recommended_semester: Option<i32>,
+    pub is_compulsory: bool,
+    pub is_open: bool,
+    pub prerequisites_met: bool,
+    pub missing_prerequisites: Vec<String>,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct DegreeAuditReport {
     pub slug: String,
     pub major_name: String,
@@ -65,6 +80,8 @@ pub struct DegreeAuditReport {
     pub block_audits: Vec<BlockAuditResult>,
     pub non_credit_prerequisites: NonCreditPrerequisites,
     pub unmatched_passed_courses: Vec<AuditCourseItem>,
+    #[serde(default)]
+    pub recommended_next_courses: Vec<RecommendedCourseItem>,
 }
 
 #[derive(Debug, Clone)]
@@ -472,6 +489,45 @@ pub fn run_degree_audit(conn: &Connection, preferred_slug: Option<&str>) -> AppR
         }
     }
 
+    // BƯỚC 3.3: Nạp dữ liệu từ uit_course_catalog (trạng thái mở lớp, tiên quyết, số TC chuẩn)
+    #[derive(Debug, Clone)]
+    struct CatalogCourseInfo {
+        total_credits: f64,
+        is_open: bool,
+        prerequisite_codes: String,
+        prior_codes: String,
+    }
+    let mut catalog_map: HashMap<String, CatalogCourseInfo> = HashMap::new();
+    {
+        let cat_exists: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='uit_course_catalog'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(false);
+        if cat_exists {
+            let mut stmt = conn.prepare(
+                "SELECT course_code, total_credits, is_open, prerequisite_codes, prior_codes FROM uit_course_catalog",
+            )?;
+            let rows = stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?.trim().to_uppercase(),
+                    CatalogCourseInfo {
+                        total_credits: row.get::<_, i64>(1)? as f64,
+                        is_open: row.get::<_, i64>(2)? != 0,
+                        prerequisite_codes: row.get::<_, String>(3)?,
+                        prior_codes: row.get::<_, String>(4)?,
+                    },
+                ))
+            })?;
+            for r in rows {
+                let (code, info) = r?;
+                catalog_map.insert(code, info);
+            }
+        }
+    }
+
     let mut curr_courses_by_block: HashMap<String, Vec<crate::services::curriculum_harvester::CurriculumCourse>> = HashMap::new();
     let mut course_to_curr: HashMap<String, crate::services::curriculum_harvester::CurriculumCourse> = HashMap::new();
 
@@ -483,8 +539,15 @@ pub fn run_degree_audit(conn: &Connection, preferred_slug: Option<&str>) -> AppR
             continue;
         }
         if !is_non_credit && c.credits <= 0.0 {
-            if let Some(&cred) = acad_credits_map.get(&code_upper) {
-                c.credits = cred;
+            if let Some(cat) = catalog_map.get(&code_upper) {
+                if cat.total_credits > 0.0 {
+                    c.credits = cat.total_credits;
+                }
+            }
+            if c.credits <= 0.0 {
+                if let Some(&cred) = acad_credits_map.get(&code_upper) {
+                    c.credits = cred;
+                }
             }
         }
         if rules_was_empty {
@@ -549,6 +612,10 @@ pub fn run_degree_audit(conn: &Connection, preferred_slug: Option<&str>) -> AppR
     }
 
     let mut remaining_passed_courses = deduplicated_passed_courses.clone();
+    let in_progress_codes: HashSet<String> = all_taken_codes
+        .difference(&deduplicated_passed_courses.keys().cloned().collect())
+        .cloned()
+        .collect();
 
     // BƯỚC 6.1: Khớp các môn Bắt buộc (Compulsory) trước
     for (block_key, block_result) in block_map.iter_mut() {
@@ -694,6 +761,116 @@ pub fn run_degree_audit(conn: &Connection, preferred_slug: Option<&str>) -> AppR
         && non_credit_prerequisites.has_english
         && non_credit_prerequisites.has_drl_65;
 
+    // BƯỚC 6.6: Đề xuất học phần cho kỳ tới dựa trên CTĐT + trạng thái mở lớp + điều kiện tiên quyết
+    let re_prereq_code = Regex::new(r"\b([A-Z]{2,6}\d{2,4})\b")
+        .map_err(|e| AppError::CurriculumParse(e.to_string()))?;
+
+    let mut rec_candidates: Vec<(u8, bool, i32, f64, RecommendedCourseItem)> = Vec::new();
+    let mut rec_seen: HashSet<String> = HashSet::new();
+
+    for block in &block_audits {
+        let Some(courses_in_block) = curr_courses_by_block.get(&block.knowledge_block) else {
+            continue;
+        };
+        for c in courses_in_block {
+            let code = c.course_code.trim().to_uppercase();
+            if code.is_empty()
+                || code == "ME001"
+                || code.starts_with("PE")
+                || deduplicated_passed_courses.contains_key(&code)
+                || in_progress_codes.contains(&code)
+                || !rec_seen.insert(code.clone())
+            {
+                continue;
+            }
+            if block.is_fulfilled && !c.is_compulsory {
+                continue;
+            }
+
+            let cat_info = catalog_map.get(&code);
+            let is_open = cat_info.map(|i| i.is_open).unwrap_or(true);
+
+            let mut missing_prerequisites = Vec::new();
+            let mut prereq_seen = HashSet::new();
+            if let Some(info) = cat_info {
+                for src in [&info.prerequisite_codes, &info.prior_codes] {
+                    for caps in re_prereq_code.captures_iter(&src.to_uppercase()) {
+                        if let Some(m) = caps.get(1) {
+                            let req_code = m.as_str().to_string();
+                            if req_code != code
+                                && !deduplicated_passed_courses.contains_key(&req_code)
+                                && prereq_seen.insert(req_code.clone())
+                            {
+                                missing_prerequisites.push(req_code);
+                            }
+                        }
+                    }
+                }
+            }
+
+            let prerequisites_met = missing_prerequisites.is_empty();
+            let tier = if is_open && prerequisites_met {
+                0
+            } else if prerequisites_met {
+                1
+            } else {
+                2
+            };
+
+            let term_sort = c.recommended_semester.unwrap_or(99);
+            let remaining_tc = (block.required_credits - block.completed_credits).max(0.0);
+            let reason = if c.is_compulsory {
+                match c.recommended_semester {
+                    Some(hk) => format!("Bắt buộc · Gợi ý HK{hk}"),
+                    None => format!("Bắt buộc · {}", block.block_name_display),
+                }
+            } else if remaining_tc > 0.0 {
+                format!("Tự chọn {} · Còn thiếu {} TC", block.block_name_display, remaining_tc.round())
+            } else {
+                format!("Tự chọn {}", block.block_name_display)
+            };
+
+            let credits = if c.credits > 0.0 {
+                c.credits
+            } else {
+                cat_info.map(|i| i.total_credits).unwrap_or(0.0)
+            };
+
+            rec_candidates.push((
+                tier,
+                !c.is_compulsory,
+                term_sort,
+                -credits,
+                RecommendedCourseItem {
+                    course_code: code,
+                    course_name: c.course_name.clone(),
+                    credits,
+                    knowledge_block: block.block_name_display.clone(),
+                    recommended_semester: c.recommended_semester,
+                    is_compulsory: c.is_compulsory,
+                    is_open,
+                    prerequisites_met,
+                    missing_prerequisites,
+                    reason,
+                },
+            ));
+        }
+    }
+
+    rec_candidates.sort_by(|a, b| {
+        a.0.cmp(&b.0)
+            .then(a.1.cmp(&b.1))
+            .then(a.2.cmp(&b.2))
+            .then(a.3.partial_cmp(&b.3).unwrap_or(std::cmp::Ordering::Equal))
+            .then(a.4.course_code.cmp(&b.4.course_code))
+    });
+
+    let recommended_next_courses: Vec<RecommendedCourseItem> = rec_candidates
+        .into_iter()
+        .take(8)
+        .map(|item| item.4)
+        .collect();
+
     Ok(DegreeAuditReport {
         slug,
         major_name,
@@ -706,6 +883,7 @@ pub fn run_degree_audit(conn: &Connection, preferred_slug: Option<&str>) -> AppR
         block_audits,
         non_credit_prerequisites,
         unmatched_passed_courses: final_unmatched,
+        recommended_next_courses,
     })
 }
 
@@ -1415,5 +1593,61 @@ mod tests {
         assert_eq!(find_blk("Chuyên ngành").required_credits, 16.0);
         assert_eq!(find_blk("Tự chọn tự do").required_credits, 10.0);
         assert_eq!(find_blk("Tốt nghiệp").required_credits, 10.0);
+    }
+
+    #[test]
+    fn test_recommended_next_courses_checks_prerequisites_and_open_status() {
+        let conn = setup_test_curriculum_and_db();
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS uit_course_catalog (
+                course_code TEXT PRIMARY KEY,
+                name_vi TEXT NOT NULL,
+                name_en TEXT NOT NULL DEFAULT '',
+                is_open INTEGER NOT NULL DEFAULT 1,
+                department_code TEXT NOT NULL DEFAULT '',
+                department_name TEXT NOT NULL DEFAULT '',
+                course_type TEXT NOT NULL DEFAULT '',
+                old_code TEXT NOT NULL DEFAULT '',
+                equivalent_codes TEXT NOT NULL DEFAULT '',
+                replacement_codes TEXT NOT NULL DEFAULT '',
+                prerequisite_codes TEXT NOT NULL DEFAULT '',
+                prior_codes TEXT NOT NULL DEFAULT '',
+                theory_credits INTEGER NOT NULL DEFAULT 0,
+                practice_credits INTEGER NOT NULL DEFAULT 0,
+                total_credits INTEGER NOT NULL DEFAULT 0,
+                updated_at INTEGER NOT NULL DEFAULT 0
+            );",
+        )
+        .unwrap();
+
+        // Đã qua IT001, chưa qua IT002 (tiên quyết của IT003)
+        conn.execute(
+            "INSERT INTO academic_courses (id, semester_id, course_code, course_name, credits, summary_score_10, is_passed)
+             VALUES ('c1', 'sem1', 'IT001', 'Nhập môn lập trình', 4.0, 9.0, 1)",
+            [],
+        )
+        .unwrap();
+
+        conn.execute(
+            "INSERT INTO uit_course_catalog (course_code, name_vi, is_open, prerequisite_codes, prior_codes, total_credits)
+             VALUES ('IT002', 'Lập trình OOP', 1, 'IT001', '', 4),
+                    ('IT003', 'CTDL & GT', 1, 'IT002', '', 4)",
+            [],
+        )
+        .unwrap();
+
+        let report = run_degree_audit(&conn, Some("cu-nhan-nganh-khoa-hoc-may-tinh-khoa-20-2025")).unwrap();
+        assert!(!report.recommended_next_courses.is_empty());
+
+        let it002_pos = report.recommended_next_courses.iter().position(|r| r.course_code == "IT002");
+        let it003 = report.recommended_next_courses.iter().find(|r| r.course_code == "IT003");
+        if let (Some(pos2), Some(rec3)) = (it002_pos, it003) {
+            assert!(report.recommended_next_courses[pos2].prerequisites_met);
+            assert!(!rec3.prerequisites_met);
+            assert!(rec3.missing_prerequisites.contains(&"IT002".to_string()));
+        } else {
+            // Check IT002 is ranked in top 8 open & prerequisites_met courses
+            assert!(it002_pos.is_some(), "IT002 (đủ tiên quyết IT001, đang mở lớp) phải được đề xuất trong top 8");
+        }
     }
 }

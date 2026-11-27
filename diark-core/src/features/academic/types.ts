@@ -315,6 +315,19 @@ export interface NonCreditPrerequisites {
   details: string[];
 }
 
+export interface RecommendedCourseItem {
+  courseCode: string;
+  courseName: string;
+  credits: number;
+  knowledgeBlock: string;
+  recommendedSemester: number | null;
+  isCompulsory: boolean;
+  isOpen: boolean;
+  prerequisitesMet: boolean;
+  missingPrerequisites: string[];
+  reason: string;
+}
+
 export interface DegreeAuditReport {
   slug: string;
   majorName: string;
@@ -327,6 +340,7 @@ export interface DegreeAuditReport {
   blockAudits: BlockAuditResult[];
   nonCreditPrerequisites: NonCreditPrerequisites;
   unmatchedPassedCourses: AuditCourseItem[];
+  recommendedNextCourses?: RecommendedCourseItem[];
 }
 
 export interface CurriculumIndexDto {

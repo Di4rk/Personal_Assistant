@@ -303,17 +303,19 @@ export const GraduationAuditCard: React.FC<GraduationAuditCardProps> = ({
                         type="text"
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
+                        aria-label="Tìm kiếm chương trình đào tạo"
                         placeholder="Tìm kiếm CTĐT (VD: Máy tính, Phần mềm...)"
-                        className="w-full rounded-lg border border-[#1D263B] bg-[#0F1420] py-1.5 pl-8 pr-7 text-xs text-zinc-200 placeholder:text-zinc-500 focus:border-[#2F6BFF]/60 focus:outline-none"
+                        className="w-full rounded-lg border border-line bg-surface py-1.5 pl-8 pr-7 text-xs text-zinc-200 placeholder:text-zinc-500 focus:border-uit/60 focus:outline-none"
                         autoFocus
                       />
                       {searchQuery && (
                         <button
                           type="button"
                           onClick={() => setSearchQuery("")}
-                          className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-200"
+                          aria-label="Xóa từ khóa tìm kiếm"
+                          className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-200 cursor-pointer"
                         >
-                          <X className="h-3 w-3" />
+                          <X className="h-3 w-3" aria-hidden="true" />
                         </button>
                       )}
                     </div>
@@ -755,6 +757,69 @@ export const GraduationAuditCard: React.FC<GraduationAuditCardProps> = ({
             );
           })}
         </div>
+
+        {/* Đề xuất học phần kỳ tới theo CTĐT & tiên quyết */}
+        {report.recommendedNextCourses && report.recommendedNextCourses.length > 0 && (
+          <div className="space-y-2 rounded-lg border border-[#1D263B] bg-[#080B12] p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-zinc-200">
+                <BookOpen className="h-3.5 w-3.5 text-[#6B9BFF]" />
+                <span>Đề xuất học phần kỳ tới</span>
+              </div>
+              <span className="text-[11px] text-zinc-500">
+                Theo đúng CTĐT &amp; điều kiện tiên quyết ({report.recommendedNextCourses.length} môn ưu tiên)
+              </span>
+            </div>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {report.recommendedNextCourses.map((rec) => (
+                <div
+                  key={rec.courseCode}
+                  className="flex items-start justify-between gap-2 rounded-lg border border-[#1D263B] bg-[#0F1420] p-2.5 text-xs transition-colors hover:bg-[#151C2C]"
+                >
+                  <div className="min-w-0 space-y-1">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="rounded border border-[#2F6BFF]/35 bg-[#2F6BFF]/[0.14] px-1.5 py-0.5 font-mono text-[11px] font-semibold text-[#6B9BFF]">
+                        {rec.courseCode}
+                      </span>
+                      <span
+                        className="truncate font-medium text-zinc-100"
+                        title={rec.courseName}
+                      >
+                        {rec.courseName}
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-zinc-400">
+                      <span className="font-mono text-zinc-300">{rec.credits} TC</span>
+                      <span>·</span>
+                      <span>{rec.reason}</span>
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 flex-col items-end gap-1 text-[10px]">
+                    <span
+                      className={`rounded border px-1.5 py-0.5 font-medium ${
+                        rec.isOpen
+                          ? "border-[#1D263B] bg-[#080B12] text-zinc-300"
+                          : "border-[#1D263B] bg-[#080B12] text-zinc-500"
+                      }`}
+                    >
+                      {rec.isOpen ? "Đang mở lớp" : "Chưa mở"}
+                    </span>
+                    {rec.prerequisitesMet ? (
+                      <span className="text-emerald-400/80 font-medium">Đủ tiên quyết</span>
+                    ) : (
+                      <span
+                        className="text-amber-400/90 font-medium"
+                        title={`Cần học trước: ${rec.missingPrerequisites.join(", ")}`}
+                      >
+                        Cần: {rec.missingPrerequisites.join(", ")}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Môn tự do ngoài CTĐT nếu có */}
         {report.unmatchedPassedCourses && report.unmatchedPassedCourses.length > 0 && (

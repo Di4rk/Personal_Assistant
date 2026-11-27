@@ -1186,9 +1186,33 @@ pub async fn fetch_and_cache_curriculum(
         .map_err(|e| e.to_string())
 }
 
+static CATALOG_BG_SYNC_ACTIVE: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Đồng bộ toàn bộ danh mục CTĐT + danh mục môn học UIT từ portal.uit.edu.vn.
+#[tauri::command]
+pub async fn sync_uit_training_catalog(
+    app: tauri::AppHandle,
+    db: tauri::State<'_, SharedDb>,
+    force: Option<bool>,
+) -> Result<crate::services::uit_catalog_harvester::UitCatalogSyncSummary, String> {
+    let summary = crate::services::uit_catalog_harvester::sync_uit_training_catalog(
+        &db,
+        force.unwrap_or(false),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    if summary.curricula_synced > 0 || summary.courses_synced > 0 {
+        let _ = app.emit("academic-data-synced", ());
+    }
+    Ok(summary)
+}
+
 /// Tính toán và trả về Báo cáo Kiểm toán Tốt nghiệp (Degree Audit Report)
 #[tauri::command]
 pub async fn get_degree_audit_report(
+    app: tauri::AppHandle,
     db: tauri::State<'_, SharedDb>,
     preferred_slug: Option<String>,
 ) -> Result<crate::modules::academic::degree_audit::DegreeAuditReport, String> {
@@ -1201,17 +1225,53 @@ pub async fn get_degree_audit_report(
         .map_err(|e| e.to_string())?
     };
 
-    let needs_fetch = {
+    let (needs_fetch, needs_catalog_sync) = {
         let conn = db.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
-        let count: i64 = conn
+        let rules_count: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM curriculum_rules WHERE slug = ?1",
                 params![target_slug],
                 |r| r.get(0),
             )
             .unwrap_or(0);
-        count == 0
+        let catalog_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM uit_course_catalog", [], |r| r.get(0))
+            .unwrap_or(0);
+        let catalog_stale = crate::services::uit_catalog_harvester::should_refresh_catalog(
+            &conn,
+            "uit_course_catalog_synced_at",
+            7 * 24 * 60 * 60,
+            false,
+        );
+        (rules_count == 0, catalog_count == 0 || catalog_stale)
     };
+
+    if needs_catalog_sync
+        && CATALOG_BG_SYNC_ACTIVE
+            .compare_exchange(
+                false,
+                true,
+                std::sync::atomic::Ordering::SeqCst,
+                std::sync::atomic::Ordering::SeqCst,
+            )
+            .is_ok()
+    {
+        let db_bg = db.inner().clone();
+        let app_bg = app.clone();
+        tokio::spawn(async move {
+            let res = crate::services::uit_catalog_harvester::sync_uit_training_catalog(
+                &db_bg,
+                false,
+            )
+            .await;
+            CATALOG_BG_SYNC_ACTIVE.store(false, std::sync::atomic::Ordering::SeqCst);
+            if let Ok(summary) = res {
+                if summary.curricula_synced > 0 || summary.courses_synced > 0 {
+                    let _ = app_bg.emit("academic-data-synced", ());
+                }
+            }
+        });
+    }
 
     if needs_fetch {
         // Tự động fetch từ Portal UIT nếu chưa có trong DB

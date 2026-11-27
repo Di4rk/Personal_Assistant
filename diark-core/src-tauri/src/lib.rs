@@ -74,6 +74,7 @@ macro_rules! registered_commands {
             commands::academic::get_student_profile,
             commands::academic::ingest_portal_sync_payload_json,
             commands::academic::sync_drl_from_uit,
+            commands::academic::sync_uit_training_catalog,
             // Portal Extra & Google Calendar ICS
             commands::portal_extra::get_portal_registered_classes,
             commands::portal_extra::get_portal_timetable,

@@ -1087,3 +1087,17 @@ export async function syncDrlFromUit(): Promise<DrlSemesterScore[]> {
   return invoke<DrlSemesterScore[]>("sync_drl_from_uit");
 }
 
+export interface UitCatalogSyncSummary {
+  curriculaSynced: number;
+  coursesSynced: number;
+  skippedByTtl: boolean;
+}
+
+export async function syncUitTrainingCatalog(
+  force?: boolean
+): Promise<UitCatalogSyncSummary> {
+  return invoke<UitCatalogSyncSummary>("sync_uit_training_catalog", {
+    force: force ?? false,
+  });
+}
+

@@ -149,10 +149,12 @@ static H1_SEL: LazyLock<Result<Selector, String>> =
     LazyLock::new(|| Selector::parse("h1").map_err(|e| format!("Invalid selector 'h1': {e:?}")));
 static H3_SEL: LazyLock<Result<Selector, String>> =
     LazyLock::new(|| Selector::parse("h3").map_err(|e| format!("Invalid selector 'h3': {e:?}")));
+#[allow(dead_code)]
 static H4_SEL: LazyLock<Result<Selector, String>> =
     LazyLock::new(|| Selector::parse("h4").map_err(|e| format!("Invalid selector 'h4': {e:?}")));
 static TR_SEL: LazyLock<Result<Selector, String>> =
     LazyLock::new(|| Selector::parse("tr").map_err(|e| format!("Invalid selector 'tr': {e:?}")));
+#[allow(dead_code)]
 static TH_SEL: LazyLock<Result<Selector, String>> =
     LazyLock::new(|| Selector::parse("th").map_err(|e| format!("Invalid selector 'th': {e:?}")));
 static TD_SEL: LazyLock<Result<Selector, String>> =
@@ -161,6 +163,14 @@ static B_SEL: LazyLock<Result<Selector, String>> =
     LazyLock::new(|| Selector::parse("b").map_err(|e| format!("Invalid selector 'b': {e:?}")));
 static P_SEL: LazyLock<Result<Selector, String>> =
     LazyLock::new(|| Selector::parse("p").map_err(|e| format!("Invalid selector 'p': {e:?}")));
+
+static HEADING_OR_TABLE_SEL: LazyLock<Result<Selector, String>> = LazyLock::new(|| {
+    Selector::parse("h2, h3, h4, h5, table")
+        .map_err(|e| format!("Invalid selector 'h2, h3, h4, h5, table': {e:?}"))
+});
+static CELL_SEL: LazyLock<Result<Selector, String>> = LazyLock::new(|| {
+    Selector::parse("th, td").map_err(|e| format!("Invalid selector 'th, td': {e:?}"))
+});
 
 static RE_YEAR: LazyLock<Result<Regex, String>> =
     LazyLock::new(|| Regex::new(r"20\d{2}").map_err(|e| format!("Invalid regex 'RE_YEAR': {e:?}")));
@@ -172,6 +182,10 @@ static RE_SEM: LazyLock<Result<Regex, String>> =
     LazyLock::new(|| Regex::new(r"Học kỳ\s+(\d+)").map_err(|e| format!("Invalid regex 'RE_SEM': {e:?}")));
 static RE_MAJOR: LazyLock<Result<Regex, String>> =
     LazyLock::new(|| Regex::new(r"(?i)ngành\s+([^(]+)").map_err(|e| format!("Invalid regex 'RE_MAJOR': {e:?}")));
+static RE_COURSE_CODE: LazyLock<Result<Regex, String>> =
+    LazyLock::new(|| Regex::new(r"\b([A-Z]{2,6}\d{2,4})\b").map_err(|e| format!("Invalid regex 'RE_COURSE_CODE': {e:?}")));
+static RE_CREDIT_NUM: LazyLock<Result<Regex, String>> =
+    LazyLock::new(|| Regex::new(r"([0-9]+(?:\.[0-9]+)?)").map_err(|e| format!("Invalid regex 'RE_CREDIT_NUM': {e:?}")));
 
 static RE_RSC_H1: LazyLock<Result<Regex, String>> = LazyLock::new(|| {
     Regex::new(r#"\["\$","h1",null,\{[^}]*?"children":"([^"]+)""#)
@@ -182,15 +196,134 @@ static RE_RSC_TITLE: LazyLock<Result<Regex, String>> = LazyLock::new(|| {
         .map_err(|e| format!("Invalid regex 'RE_RSC_TITLE': {e:?}"))
 });
 
+fn clean_cell_text(raw: &str) -> String {
+    raw.replace('\u{00a0}', " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Trải bảng HTML có `rowspan` / `colspan` thành ma trận 2D phẳng, bỏ qua bảng lồng bên trong ô.
+fn expand_table_grid(table_elem: ElementRef<'_>, cell_sel: &Selector) -> Vec<Vec<String>> {
+    let mut raw_rows: Vec<ElementRef<'_>> = Vec::new();
+    for child in table_elem.children() {
+        let Some(el) = ElementRef::wrap(child) else {
+            continue;
+        };
+        let name = el.value().name();
+        if name == "tr" {
+            raw_rows.push(el);
+        } else if matches!(name, "thead" | "tbody" | "tfoot") {
+            for sub in el.children() {
+                if let Some(sub_el) = ElementRef::wrap(sub) {
+                    if sub_el.value().name() == "tr" {
+                        raw_rows.push(sub_el);
+                    }
+                }
+            }
+        }
+    }
+
+    let mut occupied: HashMap<(usize, usize), String> = HashMap::new();
+    let mut grid: Vec<Vec<String>> = Vec::new();
+
+    for (r_idx, tr) in raw_rows.into_iter().enumerate() {
+        let mut row_cells: Vec<String> = Vec::new();
+        let mut c_idx = 0usize;
+
+        for cell in tr.select(cell_sel) {
+            while let Some(spanned_val) = occupied.remove(&(r_idx, c_idx)) {
+                row_cells.push(spanned_val);
+                c_idx += 1;
+            }
+
+            let text = clean_cell_text(&cell.text().collect::<String>());
+            let rowspan = cell
+                .value()
+                .attr("rowspan")
+                .and_then(|v| v.trim().parse::<usize>().ok())
+                .unwrap_or(1)
+                .clamp(1, 50);
+            let colspan = cell
+                .value()
+                .attr("colspan")
+                .and_then(|v| v.trim().parse::<usize>().ok())
+                .unwrap_or(1)
+                .clamp(1, 20);
+
+            for dc in 0..colspan {
+                row_cells.push(text.clone());
+                for dr in 1..rowspan {
+                    occupied.insert((r_idx + dr, c_idx + dc), text.clone());
+                }
+            }
+            c_idx += colspan;
+        }
+
+        while let Some(spanned_val) = occupied.remove(&(r_idx, c_idx)) {
+            row_cells.push(spanned_val);
+            c_idx += 1;
+        }
+
+        if !row_cells.is_empty() {
+            grid.push(row_cells);
+        }
+    }
+
+    grid
+}
+
+fn parse_numeric_credits(raw: &str, re_credit: &Regex) -> Option<f64> {
+    let cleaned = raw
+        .replace('\u{00a0}', " ")
+        .replace(['≥', '>', '=', '+'], " ");
+    re_credit
+        .captures(&cleaned)
+        .and_then(|c| c.get(1))
+        .and_then(|m| m.as_str().parse::<f64>().ok())
+}
+
+fn extract_semantic_block_from_heading(heading_text: &str) -> Option<String> {
+    let trimmed = clean_cell_text(heading_text);
+    let norm = normalize_major_name(&trimmed);
+    if norm.contains("nhom") && norm.contains("co so nganh") {
+        return Some(trimmed);
+    }
+    if norm.contains("dai cuong") {
+        return Some("ĐC".to_string());
+    }
+    if norm.contains("co so nganh") {
+        return Some("CSN".to_string());
+    }
+    if norm.contains("chuyen nganh") {
+        return Some("CN".to_string());
+    }
+    if norm.contains("tu chon tu do") || norm.contains("nhom mon hoc khac") {
+        return Some("Tự chọn tự do".to_string());
+    }
+    if norm.contains("do an tot nghiep tai doanh nghiep") {
+        return Some("Đồ án tốt nghiệp tại doanh nghiệp".to_string());
+    }
+    if norm.contains("khoa luan tot nghiep") || norm.contains("tot nghiep") {
+        return Some("KLTN".to_string());
+    }
+    if norm == "dc" || norm == "csn" || norm == "cn" || norm == "kltn" {
+        return Some(canonicalize_block_name(&trimmed));
+    }
+    None
+}
+
 /// Phân giải Next.js RSC payload của Cổng thông tin UIT thành cấu trúc dữ liệu CTĐT.
-/// Áp dụng thuật toán Heading-to-Sibling Traversal để tìm table.table-bordered kế tiếp.
+/// Áp dụng thuật toán Heading-to-Grid Traversal tổng quát cho mọi khóa (K19/K20/K21/Từ xa).
 pub fn parse_curriculum_stream(rsc_content: &str, slug: &str) -> AppResult<ParsedCurriculum> {
     let h1_sel = H1_SEL.as_ref().map_err(|e| AppError::CurriculumParse(e.clone()))?;
     let h3_sel = H3_SEL.as_ref().map_err(|e| AppError::CurriculumParse(e.clone()))?;
-    let h4_sel = H4_SEL.as_ref().map_err(|e| AppError::CurriculumParse(e.clone()))?;
+    let heading_or_table_sel = HEADING_OR_TABLE_SEL
+        .as_ref()
+        .map_err(|e| AppError::CurriculumParse(e.clone()))?;
     let tr_sel = TR_SEL.as_ref().map_err(|e| AppError::CurriculumParse(e.clone()))?;
-    let th_sel = TH_SEL.as_ref().map_err(|e| AppError::CurriculumParse(e.clone()))?;
     let td_sel = TD_SEL.as_ref().map_err(|e| AppError::CurriculumParse(e.clone()))?;
+    let cell_sel = CELL_SEL.as_ref().map_err(|e| AppError::CurriculumParse(e.clone()))?;
     let b_sel = B_SEL.as_ref().map_err(|e| AppError::CurriculumParse(e.clone()))?;
     let p_sel = P_SEL.as_ref().map_err(|e| AppError::CurriculumParse(e.clone()))?;
 
@@ -201,6 +334,8 @@ pub fn parse_curriculum_stream(rsc_content: &str, slug: &str) -> AppResult<Parse
     let re_major = RE_MAJOR.as_ref().map_err(|e| AppError::CurriculumParse(e.clone()))?;
     let re_rsc_h1 = RE_RSC_H1.as_ref().map_err(|e| AppError::CurriculumParse(e.clone()))?;
     let re_rsc_title = RE_RSC_TITLE.as_ref().map_err(|e| AppError::CurriculumParse(e.clone()))?;
+    let re_course_code = RE_COURSE_CODE.as_ref().map_err(|e| AppError::CurriculumParse(e.clone()))?;
+    let re_credit_num = RE_CREDIT_NUM.as_ref().map_err(|e| AppError::CurriculumParse(e.clone()))?;
 
     let document = Html::parse_document(rsc_content);
 
@@ -209,19 +344,19 @@ pub fn parse_curriculum_stream(rsc_content: &str, slug: &str) -> AppResult<Parse
 
     let mut page_title = String::new();
     if let Some(h1) = document.select(h1_sel).next() {
-        page_title = h1.text().collect::<String>().trim().to_string();
+        page_title = clean_cell_text(&h1.text().collect::<String>());
     }
     if page_title.is_empty() {
         if let Some(caps) = re_rsc_h1.captures(rsc_content) {
             if let Some(m) = caps.get(1) {
-                page_title = m.as_str().trim().to_string();
+                page_title = clean_cell_text(m.as_str());
             }
         }
     }
     if page_title.is_empty() {
         if let Some(caps) = re_rsc_title.captures(rsc_content) {
             if let Some(m) = caps.get(1) {
-                page_title = m.as_str().trim().to_string();
+                page_title = clean_cell_text(m.as_str());
             }
         }
     }
@@ -247,7 +382,7 @@ pub fn parse_curriculum_stream(rsc_content: &str, slug: &str) -> AppResult<Parse
             .and_then(|m| m.as_str().parse::<i32>().ok())
     };
 
-    // 2. Phân giải tổng tín chỉ từ Mục 1.4 nếu có
+    // 2. Phân giải tổng tín chỉ từ phần Giới thiệu / Hình thức đào tạo nếu có
     let mut total_credits_opt = None;
     if let Some(caps) = re_credits.captures(rsc_content) {
         if let Some(m) = caps.get(1) {
@@ -255,52 +390,175 @@ pub fn parse_curriculum_stream(rsc_content: &str, slug: &str) -> AppResult<Parse
         }
     }
 
-    // 3. Phân giải Bảng 3.1 / 5.1: Chỉ tiêu các khối kiến thức qua Heading-to-Sibling Traversal
+    // 3. Phân giải bảng "Tỷ lệ các khối kiến thức" (không phụ thuộc số mục 3.1 / 5.1 / 6.1)
     let mut rules: Vec<CurriculumRule> = Vec::new();
-    for h3 in document.select(h3_sel) {
-        let h3_text = h3.text().collect::<String>();
-        if h3_text.contains("3.1") || h3_text.contains("5.1") {
-            // Traversal tìm table kế tiếp
-            for sibling in h3.next_siblings() {
-                if let Some(sibling_elem) = ElementRef::wrap(sibling) {
-                    let tag = sibling_elem.value().name();
-                    if tag == "table" {
-                        for tr in sibling_elem.select(tr_sel) {
-                            let tds: Vec<_> = tr.select(td_sel).collect();
-                            if tds.len() >= 2 {
-                                let block_raw = tds[0].text().collect::<String>().trim().to_string();
-                                let credits_str = tds[1]
-                                    .text()
-                                    .collect::<String>()
-                                    .replace(['≥', '>', '=', '+'], "")
-                                    .trim()
-                                    .to_string();
-                                let percent = if tds.len() >= 3 {
-                                    tds[2].text().collect::<String>().trim().parse::<f64>().ok()
-                                } else {
-                                    None
-                                };
-                                if let Ok(credits) = credits_str.parse::<f64>() {
-                                    rules.push(CurriculumRule {
-                                        knowledge_block: block_raw,
-                                        required_credits: credits,
-                                        percent,
-                                    });
-                                }
-                            }
+    for h in document.select(heading_or_table_sel) {
+        let tag = h.value().name();
+        if tag != "h2" && tag != "h3" && tag != "h4" {
+            continue;
+        }
+        let heading_txt = clean_cell_text(&h.text().collect::<String>());
+        let heading_norm = normalize_major_name(&heading_txt);
+        if !heading_norm.contains("ty le cac khoi kien thuc") && !heading_txt.contains("3.1") {
+            continue;
+        }
+
+        for sibling in h.next_siblings() {
+            let Some(sibling_elem) = ElementRef::wrap(sibling) else {
+                continue;
+            };
+            let s_tag = sibling_elem.value().name();
+            if s_tag == "table" {
+                let grid = expand_table_grid(sibling_elem, cell_sel);
+                let mut header_rows = 0usize;
+                let mut credits_col: Option<usize> = None;
+                let mut percent_col: Option<usize> = None;
+
+                for (r_idx, row) in grid.iter().take(2).enumerate() {
+                    let mut matched_row = false;
+                    for (c_idx, cell) in row.iter().enumerate() {
+                        let cn = normalize_major_name(cell);
+                        if cn.contains("tong so tin chi") || cn == "tong tc" || cn == "so tin chi" {
+                            credits_col = Some(c_idx);
+                            matched_row = true;
+                        } else if cn == "%" || cn.contains("ty le") {
+                            percent_col = Some(c_idx);
+                            matched_row = true;
+                        } else if cn == "khoi kien thuc" || cn == "khoi luong" {
+                            matched_row = true;
                         }
-                        break;
                     }
-                    if tag == "h3" || tag == "h2" || tag == "h1" {
-                        break;
+                    if matched_row {
+                        header_rows = r_idx + 1;
                     }
                 }
+
+                let c_col = credits_col.unwrap_or(1);
+                let mut rule_acc: HashMap<String, (f64, Option<f64>)> = HashMap::new();
+                let mut rule_order: Vec<String> = Vec::new();
+
+                for row in grid.iter().skip(header_rows) {
+                    if row.len() <= c_col {
+                        continue;
+                    }
+                    let mut labels: Vec<&str> = Vec::new();
+                    for cell in row.iter().take(c_col) {
+                        let t = cell.trim();
+                        if !t.is_empty() && labels.last().copied() != Some(t) {
+                            labels.push(t);
+                        }
+                    }
+                    if labels.is_empty() {
+                        continue;
+                    }
+
+                    let joined_norm = normalize_major_name(&labels.join(" "));
+                    let Some(credits) = parse_numeric_credits(&row[c_col], re_credit_num) else {
+                        continue;
+                    };
+
+                    if joined_norm.contains("tong so tin chi tich luy")
+                        || joined_norm.contains("tich luy toi thieu toan khoa")
+                        || joined_norm == "tong"
+                        || joined_norm == "tong cong"
+                    {
+                        if total_credits_opt.is_none() {
+                            total_credits_opt = Some(credits);
+                        }
+                        continue;
+                    }
+
+                    let outer_norm = normalize_major_name(labels[0]);
+                    let inner_raw = *labels.last().unwrap_or(&labels[0]);
+                    let inner_norm = normalize_major_name(inner_raw);
+
+                    let block_key = if labels.len() >= 2 && outer_norm.contains("dai cuong") {
+                        "ĐC".to_string()
+                    } else if inner_norm.contains("nhom") && inner_norm.contains("co so nganh") {
+                        inner_raw.to_string()
+                    } else if inner_norm.contains("do an tot nghiep tai doanh nghiep") {
+                        "Đồ án tốt nghiệp tại doanh nghiệp".to_string()
+                    } else if inner_norm.contains("co so nganh") || inner_norm == "csn" {
+                        "CSN".to_string()
+                    } else if inner_norm.contains("chuyen nganh") || inner_norm == "cn" {
+                        "CN".to_string()
+                    } else if inner_norm.contains("tu do") || inner_norm.contains("tu chon tu do") {
+                        "Tự chọn tự do".to_string()
+                    } else if inner_norm.contains("khoa luan") || inner_norm.contains("tot nghiep") || inner_norm == "kltn" {
+                        "KLTN".to_string()
+                    } else if outer_norm.contains("dai cuong") || inner_norm == "dc" {
+                        "ĐC".to_string()
+                    } else {
+                        inner_raw.to_string()
+                    };
+
+                    let pct = percent_col.and_then(|pc| {
+                        row.get(pc).and_then(|s| parse_numeric_credits(s, re_credit_num))
+                    });
+
+                    if !rule_acc.contains_key(&block_key) {
+                        rule_order.push(block_key.clone());
+                        rule_acc.insert(block_key, (credits, pct));
+                    } else if let Some(entry) = rule_acc.get_mut(&block_key) {
+                        entry.0 += credits;
+                        if let (Some(prev), Some(curr)) = (entry.1, pct) {
+                            entry.1 = Some(prev + curr);
+                        }
+                    }
+                }
+
+                for k in rule_order {
+                    if let Some((req, pct)) = rule_acc.remove(&k) {
+                        rules.push(CurriculumRule {
+                            knowledge_block: k,
+                            required_credits: req,
+                            percent: pct,
+                        });
+                    }
+                }
+                break;
             }
+            if s_tag == "h3" || s_tag == "h2" || s_tag == "h1" {
+                break;
+            }
+        }
+
+        if !rules.is_empty() {
             break;
         }
     }
 
-    // 4. Phân giải Kế hoạch giảng dạy mẫu (Mục 4.2) để mapping recommended_semester cho từng môn học
+    // Fallback giữ tương thích hoàn toàn nếu bảng dùng <th> cũ không khớp 3.1 text
+    if rules.is_empty() {
+        for h3 in document.select(h3_sel) {
+            if h3.text().collect::<String>().contains("3.1") {
+                for sibling in h3.next_siblings() {
+                    if let Some(sibling_elem) = ElementRef::wrap(sibling) {
+                        if sibling_elem.value().name() == "table" {
+                            for tr in sibling_elem.select(tr_sel) {
+                                let tds: Vec<_> = tr.select(td_sel).collect();
+                                if tds.len() >= 2 {
+                                    let block_raw = clean_cell_text(&tds[0].text().collect::<String>());
+                                    if let Some(credits) = parse_numeric_credits(&tds[1].text().collect::<String>(), re_credit_num) {
+                                        let pct = tds.get(2).and_then(|t| parse_numeric_credits(&t.text().collect::<String>(), re_credit_num));
+                                        rules.push(CurriculumRule {
+                                            knowledge_block: block_raw,
+                                            required_credits: credits,
+                                            percent: pct,
+                                        });
+                                    }
+                                }
+                            }
+                            break;
+                        }
+                    }
+                }
+                break;
+            }
+        }
+    }
+
+    // 4. Phân giải Kế hoạch giảng dạy mẫu để mapping recommended_semester cho từng môn học
     let mut course_to_semester: HashMap<String, i32> = HashMap::new();
     for p in document.select(p_sel) {
         if let Some(b) = p.select(b_sel).next() {
@@ -315,7 +573,7 @@ pub fn parse_curriculum_stream(rsc_content: &str, slug: &str) -> AppResult<Parse
                                     for tr in sibling_elem.select(tr_sel) {
                                         let tds: Vec<_> = tr.select(td_sel).collect();
                                         if !tds.is_empty() {
-                                            let code = tds[0].text().collect::<String>().trim().to_uppercase();
+                                            let code = clean_cell_text(&tds[0].text().collect::<String>()).to_uppercase();
                                             if !code.is_empty() && !code.starts_with("MÃ") {
                                                 course_to_semester.entry(code).or_insert(sem_val);
                                             }
@@ -334,145 +592,210 @@ pub fn parse_curriculum_stream(rsc_content: &str, slug: &str) -> AppResult<Parse
         }
     }
 
-    // 5. Phân giải Mục 3.3-3.4: Danh sách học phần theo khối (h4 headings)
+    // 5. Phân giải Danh sách học phần theo khối qua traversal tuần tự h2/h3/h4/h5/table
     let mut courses: Vec<CurriculumCourse> = Vec::new();
     let mut seen_course_keys: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
 
-    for h4 in document.select(h4_sel) {
-        let block_name = h4.text().collect::<String>().trim().to_string();
-        if block_name.is_empty() {
+    let mut current_block: Option<String> = None;
+    let mut in_skip_section = false;
+
+    for elem in document.select(heading_or_table_sel) {
+        let tag = elem.value().name();
+        if tag != "table" {
+            let h_txt = clean_cell_text(&elem.text().collect::<String>());
+            if h_txt.is_empty() {
+                continue;
+            }
+            let norm = normalize_major_name(&h_txt);
+
+            if tag == "h2" || tag == "h3" {
+                if norm.contains("gioi thieu")
+                    || norm.contains("muc tieu")
+                    || norm.contains("chuan dau ra")
+                    || norm.contains("vi tri")
+                    || norm.contains("quan diem")
+                    || norm.contains("hinh thuc")
+                    || norm.contains("ke hoach giang day")
+                    || norm.contains("tuong duong")
+                    || norm.contains("quy doi")
+                    || norm.contains("ty le cac khoi kien thuc")
+                    || norm.contains("phan bo cac khoi kien thuc")
+                {
+                    in_skip_section = true;
+                    continue;
+                }
+                if norm.contains("chuong trinh dao tao") || norm.contains("danh sach hoc phan") || norm.contains("chuyen nghiep") {
+                    in_skip_section = false;
+                }
+                if let Some(blk) = extract_semantic_block_from_heading(&h_txt) {
+                    in_skip_section = false;
+                    current_block = Some(blk);
+                }
+            } else if tag == "h4" {
+                if norm.contains("tuong duong") || norm.contains("quy doi") {
+                    in_skip_section = true;
+                    continue;
+                }
+                in_skip_section = false;
+                if let Some(blk) = extract_semantic_block_from_heading(&h_txt) {
+                    current_block = Some(blk);
+                } else {
+                    current_block = Some(h_txt);
+                }
+            } else if tag == "h5" {
+                // Giữ block hiện tại (ví dụ các hướng chuyên ngành 5.3.2.1 thuộc CN)
+                if let Some(blk) = extract_semantic_block_from_heading(&h_txt) {
+                    if blk != "CN" || current_block.as_deref() != Some("CN") {
+                        current_block = Some(blk);
+                    }
+                }
+            }
             continue;
         }
 
-        // Tìm table.table-bordered ngay sau h4
-        for sibling in h4.next_siblings() {
-            if let Some(sibling_elem) = ElementRef::wrap(sibling) {
-                let tag = sibling_elem.value().name();
-                if tag == "table" {
-                    // Xác định cột động theo header th
-                    let mut code_col = None;
-                    let mut name_col = None;
-                    let mut tc_col = None;
-                    let mut lt_col = None;
-                    let mut th_col = None;
-                    let mut type_col = None;
+        if in_skip_section {
+            continue;
+        }
+        let Some(ref active_block) = current_block else {
+            continue;
+        };
 
-                    if let Some(header_tr) = sibling_elem.select(tr_sel).next() {
-                        for (idx, th) in header_tr.select(th_sel).enumerate() {
-                            let txt = th.text().collect::<String>().trim().to_lowercase();
-                            if txt.contains("mã mh") || txt.contains("mã môn") {
-                                code_col = Some(idx);
-                            } else if txt.contains("tên môn") || txt.contains("tên mh") {
-                                name_col = Some(idx);
-                            } else if txt == "tc" || txt.contains("tín chỉ") {
-                                tc_col = Some(idx);
-                            } else if txt == "lt" || txt.contains("lý thuyết") {
-                                lt_col = Some(idx);
-                            } else if txt == "th" || txt.contains("thực hành") {
-                                th_col = Some(idx);
-                            } else if txt == "loại" {
-                                type_col = Some(idx);
-                            }
-                        }
-                    }
+        let grid = expand_table_grid(elem, cell_sel);
+        if grid.len() < 2 {
+            continue;
+        }
 
-                    // Duyệt các dòng dữ liệu
-                    for tr in sibling_elem.select(tr_sel) {
-                        let tds: Vec<_> = tr.select(td_sel).collect();
-                        if tds.is_empty() {
-                            continue;
-                        }
+        let header = &grid[0];
+        let mut code_col: Option<usize> = None;
+        let mut name_col: Option<usize> = None;
+        let mut tc_col: Option<usize> = None;
+        let mut lt_col: Option<usize> = None;
+        let mut th_col: Option<usize> = None;
+        let mut type_col: Option<usize> = None;
 
-                        let code_idx = match code_col {
-                            Some(idx) if idx < tds.len() => idx,
-                            _ => {
-                                if tds.len() >= 2 && tds[1].text().collect::<String>().trim().len() <= 10 {
-                                    1
-                                } else {
-                                    0
-                                }
-                            }
-                        };
+        for (idx, col_name) in header.iter().enumerate() {
+            let txt = normalize_major_name(col_name);
+            if txt.contains("ma mh") || txt.contains("ma mon") {
+                code_col = Some(idx);
+            } else if txt.contains("ten mon") || txt.contains("ten mh") {
+                name_col = Some(idx);
+            } else if txt == "tc" || txt == "so tc" || txt.contains("tin chi") {
+                tc_col = Some(idx);
+            } else if txt == "lt" || txt.contains("ly thuyet") {
+                lt_col = Some(idx);
+            } else if txt == "th" || txt.contains("thuc hanh") {
+                th_col = Some(idx);
+            } else if txt == "loai" || txt.contains("bat buoc") || txt.contains("chon") {
+                type_col = Some(idx);
+            }
+        }
 
-                        let course_code = tds[code_idx].text().collect::<String>().trim().to_uppercase();
-                        if course_code.is_empty() || course_code.starts_with("MÃ") || course_code.contains("STT") {
-                            continue;
-                        }
+        // Bỏ qua bảng layout tổng quan (ví dụ 6.2 không có cột Mã môn & TC)
+        let (Some(c_idx), Some(t_idx)) = (code_col, tc_col) else {
+            continue;
+        };
 
-                        let course_name = match name_col {
-                            Some(idx) if idx < tds.len() => tds[idx].text().collect::<String>().trim().to_string(),
-                            _ => {
-                                if code_idx == 1 && tds.len() > 2 {
-                                    tds[2].text().collect::<String>().trim().to_string()
-                                } else if tds.len() > 1 {
-                                    tds[1].text().collect::<String>().trim().to_string()
-                                } else {
-                                    "".to_string()
-                                }
-                            }
-                        };
+        let mut section_row_compulsory: Option<bool> = None;
 
-                        let credits = match tc_col {
-                            Some(idx) if idx < tds.len() => {
-                                tds[idx].text().collect::<String>().trim().parse::<f64>().unwrap_or(0.0)
-                            }
-                            _ => {
-                                if tds.len() > 3 {
-                                    tds[3].text().collect::<String>().trim().parse::<f64>().unwrap_or(0.0)
-                                } else {
-                                    0.0
-                                }
-                            }
-                        };
+        for row in grid.iter().skip(1) {
+            if row.is_empty() {
+                continue;
+            }
+            let row_joined_norm = normalize_major_name(&row.join(" "));
+            if row_joined_norm.contains("tong so tin chi") || row_joined_norm.contains("cac mon hoc khac theo de nghi") {
+                continue;
+            }
 
-                        let theory_credits = lt_col.and_then(|idx| {
-                            if idx < tds.len() {
-                                tds[idx].text().collect::<String>().trim().parse::<f64>().ok()
-                            } else {
-                                None
-                            }
-                        });
-
-                        let practical_credits = th_col.and_then(|idx| {
-                            if idx < tds.len() {
-                                tds[idx].text().collect::<String>().trim().parse::<f64>().ok()
-                            } else {
-                                None
-                            }
-                        });
-
-                        let is_compulsory = match type_col {
-                            Some(idx) if idx < tds.len() => {
-                                let t = tds[idx].text().collect::<String>().trim().to_lowercase();
-                                t == "bb" || t == "b" || t.contains("bắt buộc")
-                            }
-                            _ => {
-                                let norm_block = normalize_major_name(&block_name);
-                                norm_block == "dc" || norm_block == "csn"
-                            }
-                        };
-
-                        let key = (course_code.clone(), block_name.clone());
-                        if !seen_course_keys.contains(&key) {
-                            seen_course_keys.insert(key);
-                            let recommended_sem = course_to_semester.get(&course_code).copied();
-                            courses.push(CurriculumCourse {
-                                course_code,
-                                course_name,
-                                credits,
-                                theory_credits,
-                                practical_credits,
-                                knowledge_block: block_name.clone(),
-                                is_compulsory,
-                                recommended_semester: recommended_sem,
-                            });
-                        }
-                    }
-                    break;
+            // Nhận diện dòng sub-header nội bộ (VD: "Bắt buộc:", "Tự chọn: sinh viên tích lũy...")
+            let first_cell_norm = normalize_major_name(&row[0]);
+            if row.len() > c_idx && row[c_idx] == row[0] && row.len() >= 3 && row[2] == row[0] {
+                if first_cell_norm.starts_with("bat buoc") {
+                    section_row_compulsory = Some(true);
+                } else if first_cell_norm.starts_with("tu chon") || first_cell_norm.starts_with("hoac") {
+                    section_row_compulsory = Some(false);
                 }
-                if tag == "h4" || tag == "h3" || tag == "h2" {
-                    break;
+                continue;
+            }
+            if first_cell_norm.starts_with("bat buoc:") {
+                section_row_compulsory = Some(true);
+                continue;
+            }
+            if first_cell_norm.starts_with("tu chon:") {
+                section_row_compulsory = Some(false);
+                continue;
+            }
+
+            if c_idx >= row.len() {
+                continue;
+            }
+            let raw_code_cell = row[c_idx].replace('*', " ").trim().to_uppercase();
+            if raw_code_cell.is_empty() || raw_code_cell.starts_with("MÃ") || raw_code_cell.contains("STT") {
+                continue;
+            }
+            let Some(caps) = re_course_code.captures(&raw_code_cell) else {
+                continue;
+            };
+            let course_code = caps.get(1).map(|m| m.as_str().to_string()).unwrap_or_default();
+            if course_code.is_empty() {
+                continue;
+            }
+
+            let course_name = name_col
+                .and_then(|idx| row.get(idx))
+                .cloned()
+                .unwrap_or_default();
+
+            let is_non_credit = course_code == "ME001" || course_code.starts_with("PE");
+            let credits = if is_non_credit {
+                0.0
+            } else {
+                row.get(t_idx)
+                    .and_then(|s| parse_numeric_credits(s, re_credit_num))
+                    .unwrap_or(0.0)
+            };
+
+            let theory_credits = if is_non_credit {
+                Some(0.0)
+            } else {
+                lt_col.and_then(|idx| row.get(idx).and_then(|s| parse_numeric_credits(s, re_credit_num)))
+            };
+            let practical_credits = if is_non_credit {
+                Some(0.0)
+            } else {
+                th_col.and_then(|idx| row.get(idx).and_then(|s| parse_numeric_credits(s, re_credit_num)))
+            };
+
+            let block_norm = normalize_major_name(active_block);
+            let default_compulsory = section_row_compulsory
+                .unwrap_or_else(|| block_norm == "dc" || block_norm == "csn");
+
+            let is_compulsory = match type_col.and_then(|idx| row.get(idx)) {
+                Some(raw_type) => {
+                    let tn = normalize_major_name(raw_type);
+                    if tn == "bb" || tn == "b" || tn.contains("bat buoc") {
+                        true
+                    } else if tn == "tc" || tn.contains("tu chon") || tn.contains("chon") {
+                        false
+                    } else {
+                        default_compulsory
+                    }
                 }
+                None => default_compulsory,
+            };
+
+            let key = (course_code.clone(), active_block.clone());
+            if seen_course_keys.insert(key) {
+                let recommended_sem = course_to_semester.get(&course_code).copied();
+                courses.push(CurriculumCourse {
+                    course_code,
+                    course_name,
+                    credits,
+                    theory_credits,
+                    practical_credits,
+                    knowledge_block: active_block.clone(),
+                    is_compulsory,
+                    recommended_semester: recommended_sem,
+                });
             }
         }
     }
@@ -482,7 +805,12 @@ pub fn parse_curriculum_stream(rsc_content: &str, slug: &str) -> AppResult<Parse
             .iter()
             .filter(|r| {
                 let norm = normalize_major_name(&r.knowledge_block);
-                norm == "dc" || norm == "csn" || norm == "cn" || norm.contains("tu do") || norm.contains("kltn")
+                norm == "dc"
+                    || norm == "csn"
+                    || norm == "cn"
+                    || norm.contains("tu do")
+                    || norm.contains("kltn")
+                    || norm.contains("tot nghiep")
             })
             .map(|r| r.required_credits)
             .sum()
@@ -842,5 +1170,79 @@ mod tests {
         assert!(RE_MAJOR.is_ok(), "RE_MAJOR must compile successfully");
         assert!(RE_RSC_H1.is_ok(), "RE_RSC_H1 must compile successfully");
         assert!(RE_RSC_TITLE.is_ok(), "RE_RSC_TITLE must compile successfully");
+    }
+
+    #[test]
+    fn test_parse_universal_k20_k21_k19_curriculum_variants() {
+        let html_k20_nfd = r#"
+            <h1>Cử nhân ngành Khoa học Máy tính (Khoá 20 - 2025)</h1>
+            <h3>5.1 Tỷ lệ các khối kiến thức</h3>
+            <table>
+              <tbody>
+                <tr><td colspan="2"><strong>Khối kiến thức</strong></td><td><strong>Tổng số tín chỉ</strong></td></tr>
+                <tr><td rowspan="2">Khối kiến thức giáo dục đại cương</td><td>Lý luận chính trị</td><td>13</td></tr>
+                <tr><td>Toán - Tin - Ngoại ngữ - Kỹ năng</td><td>32</td></tr>
+                <tr><td rowspan="4">Khối kiến thức giáo dục chuyên nghiệp</td><td>Cơ sở ngành</td><td>&ge; 45</td></tr>
+                <tr><td>Chuyên ngành</td><td>&ge; 16</td></tr>
+                <tr><td>Tự chọn tự do</td><td>&ge; 10</td></tr>
+                <tr><td>Tốt nghiệp</td><td>&ge; 10</td></tr>
+                <tr><td colspan="2"><strong>Tổng số tín chỉ tích lũy tối thiểu toàn khóa</strong></td><td>&ge; 126</td></tr>
+              </tbody>
+            </table>
+            <h3>5.2 Giáo dục đại cương</h3>
+            <table>
+              <tbody>
+                <tr><td><strong>STT</strong></td><td><strong>Mã môn học</strong></td><td><strong>Tên môn học</strong></td><td><strong>Bắt buộc/Chọn</strong></td><td><strong>TC</strong></td><td><strong>LT</strong></td><td><strong>TH</strong></td></tr>
+                <tr><td>1</td><td>IT001</td><td>Nhập môn lập trình</td><td>BB</td><td>4</td><td>3</td><td>1</td></tr>
+                <tr><td>2</td><td>PE231</td><td>Giáo dục thể chất 1</td><td>BB</td></tr>
+              </tbody>
+            </table>
+            <h4>5.3.1 Các môn học cơ sở ngành Khoa học Máy tính</h4>
+            <table>
+              <tbody>
+                <tr><td><strong>STT</strong></td><td><strong>Mã môn học</strong></td><td><strong>Tên môn học</strong></td><td><strong>Bắt buộc/Chọn</strong></td><td><strong>TC</strong></td><td><strong>LT</strong></td><td><strong>TH</strong></td></tr>
+                <tr><td>1</td><td>CS115</td><td>Toán cho KHMT</td><td>BB</td><td>4</td><td>4</td><td>0</td></tr>
+                <tr><td>2</td><td>SE104</td><td>Nhập môn CNPM</td><td rowspan="2">Chọn 1/2</td><td>4</td><td>3</td><td>1</td></tr>
+                <tr><td>3</td><td>CS111</td><td>Nguyên lý LT</td><td>4</td><td>3</td><td>1</td></tr>
+              </tbody>
+            </table>
+        "#;
+
+        let parsed = parse_curriculum_stream(html_k20_nfd, "cu-nhan-nganh-khoa-hoc-may-tinh-khoa-20-2025").unwrap();
+        assert_eq!(parsed.total_credits, 126.0);
+        assert_eq!(parsed.rules.iter().find(|r| r.knowledge_block == "ĐC").unwrap().required_credits, 45.0);
+        assert_eq!(parsed.rules.iter().find(|r| r.knowledge_block == "CSN").unwrap().required_credits, 45.0);
+        assert_eq!(parsed.rules.iter().find(|r| r.knowledge_block == "CN").unwrap().required_credits, 16.0);
+
+        let cs115 = parsed.courses.iter().find(|c| c.course_code == "CS115").unwrap();
+        assert_eq!(cs115.knowledge_block, "CSN");
+        assert!(cs115.is_compulsory);
+        assert_eq!(cs115.credits, 4.0);
+
+        let se104 = parsed.courses.iter().find(|c| c.course_code == "SE104").unwrap();
+        assert!(!se104.is_compulsory);
+        let cs111 = parsed.courses.iter().find(|c| c.course_code == "CS111").unwrap();
+        assert!(!cs111.is_compulsory);
+
+        let pe231 = parsed.courses.iter().find(|c| c.course_code == "PE231").unwrap();
+        assert_eq!(pe231.credits, 0.0);
+
+        // K19/K21: nested layout table + empty <ol><li> STT + Tính riêng
+        let html_k19_k21 = r#"
+            <h1>Cử nhân ngành Kỹ thuật Phần mềm (Khoá 19 - 2024)</h1>
+            <h3>6.2 Phân bố các khối kiến thức</h3>
+            <table><tbody><tr><td><table><tbody><tr><td>1. Lập trình hướng đối tượng: 4,3,1</td></tr></tbody></table></td></tr></tbody></table>
+            <h3>3.3 Giáo dục đại cương</h3>
+            <table>
+              <tbody>
+                <tr><th><strong>STT</strong></th><th><strong>Mã môn</strong></th><th><strong>Tên môn</strong></th><th><strong>TC</strong></th><th><strong>LT</strong></th><th><strong>TH</strong></th></tr>
+                <tr><td><ol><li></li></ol></td><td>ME001</td><td>Giáo dục Quốc phòng</td><td colspan="3">Tính riêng</td></tr>
+                <tr><td><ol><li></li></ol></td><td>SS006</td><td>Pháp luật đại cương</td><td>2</td><td>2</td><td>0</td></tr>
+              </tbody>
+            </table>
+        "#;
+        let parsed2 = parse_curriculum_stream(html_k19_k21, "cu-nhan-nganh-ky-thuat-phan-mem-khoa-19-2024").unwrap();
+        assert!(parsed2.courses.iter().any(|c| c.course_code == "ME001" && c.credits == 0.0));
+        assert!(parsed2.courses.iter().any(|c| c.course_code == "SS006" && c.credits == 2.0));
     }
 }
