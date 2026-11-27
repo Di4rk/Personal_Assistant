@@ -170,7 +170,6 @@ export const LifeMatrixHeatmap: React.FC<LifeMatrixHeatmapProps> = ({ entries })
           transform: `translate3d(${hovered ? hovered.x + 12 : 0}px, ${hovered ? hovered.y + 12 : 0}px, 0)`,
           top: 0,
           left: 0,
-          willChange: 'transform',
           visibility: hovered ? 'visible' : 'hidden',
         }}
       >

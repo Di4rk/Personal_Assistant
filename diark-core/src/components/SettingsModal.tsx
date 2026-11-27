@@ -562,11 +562,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   };
 
   const primaryBtnCls =
-    'flex items-center justify-center gap-1.5 rounded-lg bg-[#2F6BFF] px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-[#255CE6] disabled:opacity-50 cursor-pointer';
+    'flex items-center justify-center gap-1.5 rounded-lg bg-uit px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-[#255CE6] disabled:opacity-50 cursor-pointer';
   const secondaryBtnCls =
-    'flex items-center gap-1.5 rounded-lg border border-[#1D263B] bg-[#151C2C] px-3.5 py-2 text-xs font-medium text-zinc-200 transition-colors hover:border-[#2F6BFF]/50 hover:text-white disabled:opacity-50 cursor-pointer';
+    'flex items-center gap-1.5 rounded-lg border border-line bg-surface-hover px-3.5 py-2 text-xs font-medium text-zinc-200 transition-colors hover:border-uit/50 hover:text-white disabled:opacity-50 cursor-pointer';
   const inputCls =
-    'w-full rounded-lg border border-[#1D263B] bg-[#080B12] px-3 py-2 font-mono text-xs text-zinc-100 placeholder-zinc-500 outline-none transition-colors focus:border-[#2F6BFF]/60';
+    'w-full rounded-lg border border-line bg-canvas px-3 py-2 font-mono text-xs text-zinc-100 placeholder-zinc-500 outline-none transition-colors focus:border-uit/60';
 
   return (
     <div
@@ -691,11 +691,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             {activeTab === 'profile' && (
               <div className="space-y-6">
                 <form onSubmit={handleSaveNickname} className="space-y-2.5">
-                  <label className="block font-mono text-xs uppercase tracking-wider text-zinc-300">
+                  <label htmlFor="settings-nickname-input" className="block font-mono text-xs uppercase tracking-wider text-zinc-300">
                     Signature Handle / Nickname
                   </label>
                   <div className="flex gap-2">
                     <input
+                      id="settings-nickname-input"
                       type="text"
                       value={nickname}
                       onChange={(e) => setNickname(e.target.value)}
@@ -709,9 +710,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       className={primaryBtnCls}
                     >
                       {isSavingNick ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
                       ) : (
-                        <Check className="h-3.5 w-3.5" />
+                        <Check className="h-3.5 w-3.5" aria-hidden="true" />
                       )}
                       <span>Lưu</span>
                     </button>
@@ -724,11 +725,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </form>
 
                 <form onSubmit={handleSaveCfHandle} className="space-y-2.5">
-                  <label className="block font-mono text-xs uppercase tracking-wider text-zinc-300">
+                  <label htmlFor="settings-cf-handle-input" className="block font-mono text-xs uppercase tracking-wider text-zinc-300">
                     Codeforces Handle
                   </label>
                   <div className="flex gap-2">
                     <input
+                      id="settings-cf-handle-input"
                       type="text"
                       value={cfHandle}
                       onChange={(e) => setCfHandleState(e.target.value)}
@@ -918,6 +920,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                 type="text"
                                 value={oauthClientId}
                                 onChange={(e) => setOauthClientId(e.target.value)}
+                                aria-label="Google OAuth Client ID"
                                 placeholder="Google OAuth Client ID"
                                 className={inputCls}
                               />
@@ -925,6 +928,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                 type="password"
                                 value={oauthClientSecret}
                                 onChange={(e) => setOauthClientSecret(e.target.value)}
+                                aria-label="Google OAuth Client Secret"
                                 placeholder="Client Secret (tùy chọn)"
                                 className={inputCls}
                               />
@@ -1036,6 +1040,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                               type="text"
                               value={newIcsName}
                               onChange={(e) => setNewIcsName(e.target.value)}
+                              aria-label="Tên lịch ICS"
                               placeholder="Tên lịch (vd: Cá nhân, CLB)"
                               className={inputCls}
                             />
@@ -1043,6 +1048,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                               type="url"
                               value={newIcsUrl}
                               onChange={(e) => setNewIcsUrl(e.target.value)}
+                              aria-label="Đường dẫn lịch ICS"
                               placeholder="https://calendar.google.com/calendar/ical/..."
                               className={inputCls}
                             />
@@ -1185,10 +1191,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
                 <form onSubmit={handleSaveAiConfig} className="space-y-3.5">
                   <div className="space-y-1.5">
-                    <label className="block font-mono text-xs uppercase tracking-wider text-zinc-400">
+                    <label htmlFor="settings-ai-base-url" className="block font-mono text-xs uppercase tracking-wider text-zinc-400">
                       API Base URL (Endpoint)
                     </label>
                     <input
+                      id="settings-ai-base-url"
                       type="text"
                       value={aiBaseUrl}
                       onChange={(e) => setAiBaseUrl(e.target.value)}
@@ -1199,23 +1206,24 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
                   <div className="space-y-1.5">
                     <div className="flex items-center justify-between">
-                      <label className="font-mono text-xs uppercase tracking-wider text-zinc-400">
+                      <label htmlFor="settings-ai-api-key" className="font-mono text-xs uppercase tracking-wider text-zinc-400">
                         API Key {isLocalBaseUrl(aiBaseUrl) ? '(tùy chọn với Local)' : ''}
                       </label>
                       {aiBaseUrl.trim() === '' && (
                         <button
                           type="button"
                           onClick={() => openExternalUrl('https://aistudio.google.com/app/apikey')}
-                          className="flex items-center gap-1 text-[11px] text-[#6B9BFF] transition-colors hover:text-[#8BB2FF] cursor-pointer"
+                          className="flex items-center gap-1 text-[11px] text-uit-accent transition-colors hover:text-[#8BB2FF] cursor-pointer"
                         >
                           <span>Lấy key miễn phí tại AI Studio</span>
-                          <ExternalLink className="h-3 w-3" />
+                          <ExternalLink className="h-3 w-3" aria-hidden="true" />
                         </button>
                       )}
                     </div>
 
                     <div className="relative">
                       <input
+                        id="settings-ai-api-key"
                         type={showApiKey ? 'text' : 'password'}
                         value={aiApiKey}
                         onChange={(e) => setAiApiKey(e.target.value)}
@@ -1229,18 +1237,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       <button
                         type="button"
                         onClick={() => setShowApiKey((v) => !v)}
+                        aria-label={showApiKey ? 'Ẩn API key' : 'Hiện API key'}
                         className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 cursor-pointer"
                       >
-                        {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                        {showApiKey ? <EyeOff className="h-4 w-4" aria-hidden="true" /> : <Eye className="h-4 w-4" aria-hidden="true" />}
                       </button>
                     </div>
                   </div>
 
                   <div className="space-y-1.5">
-                    <label className="block font-mono text-xs uppercase tracking-wider text-zinc-400">
+                    <label htmlFor="settings-ai-model-id" className="block font-mono text-xs uppercase tracking-wider text-zinc-400">
                       Model ID
                     </label>
                     <input
+                      id="settings-ai-model-id"
                       type="text"
                       value={aiModel}
                       onChange={(e) => setAiModel(e.target.value)}

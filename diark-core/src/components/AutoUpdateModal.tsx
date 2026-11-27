@@ -114,7 +114,7 @@ export const AutoUpdateModal: React.FC<AutoUpdateModalProps> = ({
               </div>
               <div className="h-2 w-full overflow-hidden rounded-full bg-zinc-900 border border-zinc-800">
                 <div
-                  className="h-full bg-violet-600 transition-all duration-200"
+                  className="h-full bg-violet-600 transition-[width] duration-200"
                   style={{ width: `${downloadProgress}%` }}
                 />
               </div>

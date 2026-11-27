@@ -70,7 +70,7 @@ export default function LevelProgressBar({ info }: LevelProgressBarProps) {
 
       <div className="h-3 w-full bg-slate-950 border border-slate-800 rounded-full overflow-hidden">
         <div
-          className="bg-gradient-to-r from-cyan-500 to-emerald-400 h-2.5 rounded-full transition-all duration-500 shadow-[0_0_12px_rgba(6,182,212,0.7)]"
+          className="bg-gradient-to-r from-cyan-500 to-emerald-400 h-2.5 rounded-full transition-[width] duration-500 shadow-[0_0_12px_rgba(6,182,212,0.7)]"
           style={{ width: `${info.progress_percent}%` }}
         />
       </div>

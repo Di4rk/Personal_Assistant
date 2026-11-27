@@ -143,8 +143,10 @@ export const ScheduleEventModal: React.FC<ScheduleEventModalProps> = ({
 
   const startTimeRef = useRef(startTime);
   const endTimeRef = useRef(endTime);
-  startTimeRef.current = startTime;
-  endTimeRef.current = endTime;
+  useEffect(() => {
+    startTimeRef.current = startTime;
+    endTimeRef.current = endTime;
+  }, [startTime, endTime]);
 
   useEffect(() => {
     if (mode === "create") {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   BookOpen,
   User,
@@ -90,24 +90,28 @@ export const CoursesDashboard: React.FC = () => {
     }
   }, []);
 
+  const selectedCourseIdRef = useRef<number | null>(selectedCourseId);
+  useEffect(() => {
+    selectedCourseIdRef.current = selectedCourseId;
+  }, [selectedCourseId]);
+
   const loadData = useCallback(async (showLoadingSpinner: boolean = true) => {
     if (showLoadingSpinner) setLoading(true);
     try {
       const courseList = await getMoodleCourses();
       setCourses(courseList);
       if (courseList.length > 0) {
-        setSelectedCourseId((prev) => {
-          const targetId = (prev && courseList.some((c) => c.course_id === prev))
-            ? prev
-            : courseList[0].course_id;
-          refreshCourseDetails(targetId);
-          return targetId;
-        });
+        const prev = selectedCourseIdRef.current;
+        const targetId = (prev && courseList.some((c) => c.course_id === prev))
+          ? prev
+          : courseList[0].course_id;
+        setSelectedCourseId(targetId);
+        await refreshCourseDetails(targetId);
       }
     } catch (err) {
       console.error('[CoursesDashboard] Lỗi tải môn học Moodle:', err);
     } finally {
-      if (showLoadingSpinner) setLoading(false);
+      setLoading(false);
     }
   }, [refreshCourseDetails]);
 
@@ -930,75 +934,86 @@ const EditInstructorModal: React.FC<EditInstructorModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-      <div className="w-full max-w-md rounded-xl border border-zinc-800 bg-zinc-950 p-6 shadow-2xl space-y-5">
-        <div className="flex items-center justify-between border-b border-zinc-800 pb-3.5">
+      <div className="uit-modal-in w-full max-w-md rounded-xl border border-line bg-surface p-6 shadow-2xl space-y-5">
+        <div className="flex items-center justify-between border-b border-line pb-3.5">
           <div className="flex items-center gap-2.5">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-sky-500/10 text-sky-400 border border-sky-500/20">
-              <User className="h-5 w-5" />
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-uit/15 text-uit-accent border border-uit/30">
+              <User className="h-5 w-5" aria-hidden="true" />
             </div>
             <div>
               <h3 className="text-sm font-bold text-white">Tùy chỉnh thông tin giảng viên</h3>
-              <p className="text-[11px] font-mono text-zinc-400">
+              <p className="text-xs font-mono text-zinc-400">
                 {course.course_code} - {course.fullname}
               </p>
             </div>
           </div>
           <button
+            type="button"
             onClick={onClose}
-            className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-white transition-colors"
+            aria-label="Đóng hộp thoại"
+            className="rounded-lg p-1.5 text-zinc-400 hover:bg-surface-hover hover:text-white transition-colors cursor-pointer"
           >
-            <X className="h-4 w-4" />
+            <X className="h-4 w-4" aria-hidden="true" />
           </button>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4 text-xs">
           <div className="space-y-1.5">
-            <label className="text-zinc-400 font-medium">Họ và tên giảng viên</label>
+            <label htmlFor="lecturer-name-input" className="block text-zinc-400 font-medium">
+              Họ và tên giảng viên
+            </label>
             <div className="relative">
-              <User className="absolute left-3 top-2.5 h-3.5 w-3.5 text-zinc-500" />
+              <User className="pointer-events-none absolute left-3 top-2.5 h-3.5 w-3.5 text-zinc-500" aria-hidden="true" />
               <input
+                id="lecturer-name-input"
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="VD: TS. Nguyễn Văn A"
-                className="w-full rounded-lg border border-zinc-800 bg-zinc-900 py-2 pl-9 pr-3 text-xs text-zinc-200 placeholder-zinc-600 focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500"
+                className="w-full rounded-lg border border-line bg-canvas py-2 pl-9 pr-3 text-xs text-zinc-200 placeholder-zinc-600 focus:border-uit focus:outline-none focus:ring-1 focus:ring-uit"
               />
             </div>
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-zinc-400 font-medium">Email liên hệ</label>
+            <label htmlFor="lecturer-email-input" className="block text-zinc-400 font-medium">
+              Email liên hệ
+            </label>
             <div className="relative">
-              <Mail className="absolute left-3 top-2.5 h-3.5 w-3.5 text-zinc-500" />
+              <Mail className="pointer-events-none absolute left-3 top-2.5 h-3.5 w-3.5 text-zinc-500" aria-hidden="true" />
               <input
+                id="lecturer-email-input"
                 type="text"
                 value={mail}
                 onChange={(e) => setMail(e.target.value)}
                 placeholder="VD: anguyen@uit.edu.vn"
-                className="w-full rounded-lg border border-zinc-800 bg-zinc-900 py-2 pl-9 pr-3 text-xs text-zinc-200 placeholder-zinc-600 focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500"
+                className="w-full rounded-lg border border-line bg-canvas py-2 pl-9 pr-3 text-xs text-zinc-200 placeholder-zinc-600 focus:border-uit focus:outline-none focus:ring-1 focus:ring-uit"
               />
             </div>
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-zinc-400 font-medium">Số điện thoại / Zalo</label>
+            <label htmlFor="lecturer-phone-input" className="block text-zinc-400 font-medium">
+              Số điện thoại / Zalo
+            </label>
             <div className="relative">
-              <Phone className="absolute left-3 top-2.5 h-3.5 w-3.5 text-zinc-500" />
+              <Phone className="pointer-events-none absolute left-3 top-2.5 h-3.5 w-3.5 text-zinc-500" aria-hidden="true" />
               <input
+                id="lecturer-phone-input"
                 type="text"
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
                 placeholder="VD: 0909 123 456"
-                className="w-full rounded-lg border border-zinc-800 bg-zinc-900 py-2 pl-9 pr-3 text-xs text-zinc-200 placeholder-zinc-600 focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500"
+                className="w-full rounded-lg border border-line bg-canvas py-2 pl-9 pr-3 text-xs text-zinc-200 placeholder-zinc-600 focus:border-uit focus:outline-none focus:ring-1 focus:ring-uit"
               />
             </div>
           </div>
 
-          <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-zinc-800/60">
+          <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-line">
             <button
               type="button"
               onClick={onClose}
-              className="px-3 py-1.5 rounded-lg border border-zinc-800 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 font-medium transition-colors"
+              className="px-3 py-1.5 rounded-lg border border-line bg-canvas hover:bg-surface-hover text-zinc-300 font-medium transition-colors cursor-pointer"
             >
               Hủy
             </button>

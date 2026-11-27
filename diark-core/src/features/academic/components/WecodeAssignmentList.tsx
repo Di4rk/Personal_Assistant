@@ -54,23 +54,24 @@ export const WecodeAssignmentList: React.FC<WecodeAssignmentListProps> = ({
             : 0;
 
         return (
-          <div
+          <button
             key={assign.id}
+            type="button"
             onClick={() => onSelectAssignment(assign.id)}
-            className="group relative rounded-xl border border-zinc-800 bg-zinc-900/70 hover:bg-zinc-900 hover:border-emerald-700/60 p-4 transition-all duration-200 cursor-pointer shadow-sm hover:shadow-md flex flex-col justify-between"
+            className="group relative w-full text-left rounded-xl border border-line bg-surface hover:bg-surface-hover hover:border-emerald-700/60 p-4 transition-colors duration-150 cursor-pointer shadow-sm hover:shadow-md flex flex-col justify-between focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-uit"
           >
             {/* Top row: Title & Assignment ID & Deadline Badge */}
-            <div className="space-y-2.5">
+            <div className="space-y-2.5 w-full">
               <div className="flex items-start justify-between gap-2">
                 <div className="flex items-start gap-2.5 min-w-0">
                   <div
                     className={`p-2 rounded-lg shrink-0 ${
                       isCompleted
                         ? "bg-emerald-950/80 text-emerald-400 border border-emerald-800/60"
-                        : "bg-zinc-800/80 text-zinc-400 border border-zinc-700/80"
+                        : "bg-surface-hover text-zinc-400 border border-line"
                     }`}
                   >
-                    <FolderCode className="w-4 h-4" />
+                    <FolderCode className="w-4 h-4" aria-hidden="true" />
                   </div>
                   <div className="min-w-0">
                     <h4 className="text-sm font-bold text-zinc-100 group-hover:text-emerald-300 transition-colors line-clamp-2">
@@ -82,7 +83,7 @@ export const WecodeAssignmentList: React.FC<WecodeAssignmentListProps> = ({
                       </span>
                       {/* Deadline Status Badge */}
                       <span
-                        className={`px-2 py-0.2 rounded text-[10px] font-semibold border ${assign.deadlineBadgeColor}`}
+                        className={`px-2 py-0.5 rounded text-[10px] font-semibold border ${assign.deadlineBadgeColor}`}
                         title={assign.finish_time ? `Hạn nộp: ${assign.finish_time}` : undefined}
                       >
                         {assign.deadlineLabel}
@@ -91,8 +92,8 @@ export const WecodeAssignmentList: React.FC<WecodeAssignmentListProps> = ({
                   </div>
                 </div>
 
-                <div className="p-1 rounded text-zinc-500 group-hover:text-emerald-400 group-hover:translate-x-0.5 transition-all shrink-0">
-                  <ChevronRight className="w-4 h-4" />
+                <div className="p-1 rounded text-zinc-500 group-hover:text-emerald-400 group-hover:translate-x-0.5 transition-transform duration-150 shrink-0">
+                  <ChevronRight className="w-4 h-4" aria-hidden="true" />
                 </div>
               </div>
 
@@ -147,9 +148,9 @@ export const WecodeAssignmentList: React.FC<WecodeAssignmentListProps> = ({
               </div>
 
               {/* Mini Progress Bar */}
-              <div className="w-full bg-zinc-800/80 h-1.5 rounded-full overflow-hidden">
+              <div className="w-full bg-canvas h-1.5 rounded-full overflow-hidden">
                 <div
-                  className={`h-full rounded-full transition-all duration-300 ${
+                  className={`h-full rounded-full transition-[width] duration-300 ${
                     isCompleted
                       ? "bg-emerald-400"
                       : acPercent > 0
@@ -163,12 +164,12 @@ export const WecodeAssignmentList: React.FC<WecodeAssignmentListProps> = ({
               {/* Sub-label for deadline datetime if present */}
               {assign.finish_time && assign.deadlineStatus !== "unlimited" && (
                 <div className="flex items-center gap-1 text-[10px] text-zinc-500 pt-0.5">
-                  <Clock className="w-3 h-3 text-zinc-600" />
+                  <Clock className="w-3 h-3 text-zinc-600" aria-hidden="true" />
                   <span className="truncate">Hạn: {assign.finish_time}</span>
                 </div>
               )}
             </div>
-          </div>
+          </button>
         );
       })}
     </div>

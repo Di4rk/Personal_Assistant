@@ -21,10 +21,11 @@ export function useSyncLifecycle(options?: UseSyncLifecycleOptions) {
   } = useSyncOrchestratorStore();
 
   const onDataRefreshRef = useRef(onDataRefresh);
-  onDataRefreshRef.current = onDataRefresh;
-
   const assignmentsRef = useRef(assignments);
-  assignmentsRef.current = assignments;
+  useEffect(() => {
+    onDataRefreshRef.current = onDataRefresh;
+    assignmentsRef.current = assignments;
+  }, [onDataRefresh, assignments]);
 
   // 1. Initial boot: fetch DB timestamps and run initial TTL-checked sync
   useEffect(() => {

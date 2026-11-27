@@ -102,7 +102,7 @@ export const ExamRadarCard: React.FC<ExamRadarCardProps> = ({
   const isWindowVisible = useWindowVisibility();
   const [exams, setExams] = useState<AcademicExamRecord[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
-  const [nowTs, setNowTs] = useState<number>(Math.floor(Date.now() / 1000));
+  const [nowTs, setNowTs] = useState<number>(() => Math.floor(Date.now() / 1000));
   const [expandedExamId, setExpandedExamId] = useState<number | null>(null);
   const [showManualTools, setShowManualTools] = useState<boolean>(false);
 
@@ -132,6 +132,8 @@ export const ExamRadarCard: React.FC<ExamRadarCardProps> = ({
     loadExams();
   }, [loadExams]);
 
+  const firstExamExpired = nowTs >= (exams[0]?.exam_timestamp ?? 0);
+
   // 1. Phân loại ca thi sắp tới và đã qua (không chạy lại mỗi giây, giảm tải CPU)
   const { upcomingExams, pastExams } = useMemo(() => {
     const currentEpoch = Math.floor(Date.now() / 1000);
@@ -145,7 +147,7 @@ export const ExamRadarCard: React.FC<ExamRadarCardProps> = ({
       }
     }
     return { upcomingExams: upcoming, pastExams: past };
-  }, [exams, nowTs >= (exams[0]?.exam_timestamp ?? 0)]);
+  }, [exams, firstExamExpired]);
 
   const nextExam = upcomingExams[0] || null;
 
@@ -690,7 +692,7 @@ export const ExamRadarCard: React.FC<ExamRadarCardProps> = ({
                 return (
                   <div className="w-full bg-zinc-800 rounded-full h-1.5 mb-3 overflow-hidden">
                     <div
-                      className="bg-emerald-500 h-1.5 rounded-full transition-all duration-300"
+                      className="bg-emerald-500 h-1.5 rounded-full transition-colors duration-300"
                       style={{ width: `${pct}%` }}
                     />
                   </div>

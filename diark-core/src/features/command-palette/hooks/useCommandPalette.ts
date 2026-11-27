@@ -7,29 +7,25 @@ export function useCommandPalette() {
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    if (!isOpen) return;
+    const rafId = requestAnimationFrame(() => {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    });
+    return () => cancelAnimationFrame(rafId);
+  }, [isOpen]);
+
+  useEffect(() => {
     let isMounted = true;
     const unlistenPromise = listen("hud-shown", () => {
       if (!isMounted) return;
       setIsOpen(true);
-      requestAnimationFrame(() => {
-        inputRef.current?.focus();
-        inputRef.current?.select();
-      });
     });
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
-        setIsOpen((prev) => {
-          const next = !prev;
-          if (next) {
-            requestAnimationFrame(() => {
-              inputRef.current?.focus();
-              inputRef.current?.select();
-            });
-          }
-          return next;
-        });
+        setIsOpen((prev) => !prev);
       }
     };
 

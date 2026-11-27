@@ -29,6 +29,8 @@ interface GpaSimulatorCardProps {
 type SimulatorScope = "semester" | "degree";
 type SimulatorMode = "time" | "pace";
 
+const EMPTY_ACTIVE_COURSES: NonNullable<GpaSimulatorCardProps["activeCourses"]> = [];
+
 export const GpaSimulatorCard: React.FC<GpaSimulatorCardProps> = ({
   currentGpaCredits,
   currentEarnedCredits,
@@ -36,7 +38,7 @@ export const GpaSimulatorCard: React.FC<GpaSimulatorCardProps> = ({
   currentGpa10,
   completedTermsCount = 2,
   totalDegreeCredits = 126,
-  activeCourses = [],
+  activeCourses = EMPTY_ACTIVE_COURSES,
   activeSemesterId,
   className = "",
 }) => {

@@ -142,7 +142,7 @@ export const SyncWecodeModal: React.FC<SyncWecodeModalProps> = ({
   // CHẾ ĐỘ THU NHỎ (MINIMIZED FLOATING DOCK):
   if (isMinimized) {
     return (
-      <div className="fixed bottom-6 right-6 z-50 w-96 max-w-[calc(100vw-3rem)] rounded-xl border border-emerald-800/50 bg-zinc-950/95 p-4 shadow-2xl backdrop-blur-md font-mono text-zinc-100 transition-all duration-200">
+      <div className="fixed bottom-6 right-6 z-50 w-96 max-w-[calc(100vw-3rem)] rounded-xl border border-emerald-800/50 bg-zinc-950/95 p-4 shadow-2xl backdrop-blur-md font-mono text-zinc-100 transition-colors duration-200">
         {/* Header */}
         <div className="flex items-center justify-between gap-2 border-b border-zinc-800/80 pb-2.5">
           <div className="flex items-center gap-2 min-w-0">
@@ -300,7 +300,7 @@ export const SyncWecodeModal: React.FC<SyncWecodeModalProps> = ({
                   type="button"
                   onClick={handleLaunchAutoSync}
                   disabled={isListening}
-                  className={`w-full py-2.5 px-4 rounded-lg font-semibold text-xs transition-all flex items-center justify-center gap-2 shadow-sm cursor-pointer ${
+                  className={`w-full py-2.5 px-4 rounded-lg font-semibold text-xs transition-colors flex items-center justify-center gap-2 shadow-sm cursor-pointer ${
                     isListening
                       ? "bg-zinc-800 text-zinc-400 cursor-not-allowed border border-zinc-700"
                       : "bg-emerald-500 hover:bg-emerald-400 active:bg-emerald-600 text-zinc-950 font-bold"
@@ -389,7 +389,7 @@ export const SyncWecodeModal: React.FC<SyncWecodeModalProps> = ({
                         <button
                           type="button"
                           onClick={handleCopyScript}
-                          className={`w-full py-2 px-3 rounded-lg font-semibold text-xs transition-all flex items-center justify-center gap-2 shadow-sm ${
+                          className={`w-full py-2 px-3 rounded-lg font-semibold text-xs transition-colors flex items-center justify-center gap-2 shadow-sm ${
                             copied
                               ? "bg-emerald-600 text-white"
                               : "bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700"

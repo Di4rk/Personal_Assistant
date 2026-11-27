@@ -10,10 +10,10 @@ interface DevControlDockProps {
 }
 
 export const DevControlDock: React.FC<DevControlDockProps> = ({ onResetIdentity }) => {
-  if (!IS_DEV) return null;
-
   const [isOpen, setIsOpen] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
+
+  if (!IS_DEV) return null;
 
   const handleReset = async () => {
     if (isResetting) return;
@@ -67,7 +67,7 @@ export const DevControlDock: React.FC<DevControlDockProps> = ({ onResetIdentity 
           <button
             type="button"
             onClick={() => usePrivacyStore.getState().toggleDemoMode()}
-            className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded bg-cyan-500/20 hover:bg-cyan-500/30 active:bg-cyan-500/40 text-cyan-300 border border-cyan-500/40 font-semibold transition-all cursor-pointer"
+            className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded bg-cyan-500/20 hover:bg-cyan-500/30 active:bg-cyan-500/40 text-cyan-300 border border-cyan-500/40 font-semibold transition-colors cursor-pointer"
           >
             <Shield className="w-3.5 h-3.5" />
             <span>🔒 TOGGLE DEMO PRIVACY</span>
@@ -77,7 +77,7 @@ export const DevControlDock: React.FC<DevControlDockProps> = ({ onResetIdentity 
             type="button"
             onClick={() => void handleReset()}
             disabled={isResetting}
-            className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded bg-amber-500/20 hover:bg-amber-500/30 active:bg-amber-500/40 text-amber-300 border border-amber-500/40 font-semibold transition-all cursor-pointer disabled:opacity-50"
+            className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded bg-amber-500/20 hover:bg-amber-500/30 active:bg-amber-500/40 text-amber-300 border border-amber-500/40 font-semibold transition-colors cursor-pointer disabled:opacity-50"
           >
             {isResetting ? (
               <>
@@ -95,7 +95,7 @@ export const DevControlDock: React.FC<DevControlDockProps> = ({ onResetIdentity 
           <button
             type="button"
             onClick={() => void handleDevFactoryReset()}
-            className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg hover:bg-red-500/20 active:scale-95 transition-all cursor-pointer"
+            className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg hover:bg-red-500/20 active:scale-95 transition-colors cursor-pointer"
           >
             <AlertTriangle className="w-3.5 h-3.5 text-red-400" />
             <span>Factory Reset (Genesis)</span>
@@ -106,7 +106,7 @@ export const DevControlDock: React.FC<DevControlDockProps> = ({ onResetIdentity 
       <button
         type="button"
         onClick={() => setIsOpen((prev) => !prev)}
-        className="bg-slate-900/90 hover:bg-slate-800/90 active:bg-slate-950 border border-amber-500/40 text-amber-400 text-xs font-mono px-3 py-1.5 rounded shadow-lg backdrop-blur flex items-center gap-2 cursor-pointer transition-all hover:shadow-[0_0_15px_rgba(245,158,11,0.2)]"
+        className="bg-slate-900/90 hover:bg-slate-800/90 active:bg-slate-950 border border-amber-500/40 text-amber-400 text-xs font-mono px-3 py-1.5 rounded shadow-lg backdrop-blur flex items-center gap-2 cursor-pointer transition-colors hover:shadow-[0_0_15px_rgba(245,158,11,0.2)]"
         title="Bật/tắt Dev Control Dock"
       >
         <Wrench className="w-3.5 h-3.5 text-amber-400" />

@@ -100,7 +100,9 @@ export const VaultDashboard: React.FC = () => {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const autosaveTimerRef = useRef<number | null>(null);
   const activeNoteIdRef = useRef<string | null>(null);
-  activeNoteIdRef.current = activeNoteId;
+  useEffect(() => {
+    activeNoteIdRef.current = activeNoteId;
+  }, [activeNoteId]);
 
   const refreshNotesList = useCallback(async (selectIdIfEmpty = true) => {
     try {
@@ -458,13 +460,14 @@ export const VaultDashboard: React.FC = () => {
 
             {/* Instant Search */}
             <div className="relative">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-500" />
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-500" aria-hidden="true" />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
+                aria-label="Tìm kiếm ghi chú"
                 placeholder="Tìm nhanh tiêu đề, nội dung, code..."
-                className="w-full rounded-lg border border-zinc-800 bg-zinc-950 pl-8 pr-3 py-1.5 text-xs text-zinc-200 placeholder-zinc-500 focus:border-emerald-500 focus:outline-none"
+                className="w-full rounded-lg border border-line bg-canvas pl-8 pr-3 py-1.5 text-xs text-zinc-200 placeholder-zinc-500 focus:border-uit focus:outline-none"
               />
             </div>
 
@@ -669,16 +672,16 @@ export const VaultDashboard: React.FC = () => {
         </aside>
 
         {/* RIGHT PANE: Markdown Editor & Preview */}
-        <section className="lg:col-span-8 xl:col-span-9 flex flex-col rounded-xl border border-zinc-800 bg-zinc-900/50 overflow-hidden">
+        <section className="lg:col-span-8 xl:col-span-9 flex flex-col rounded-xl border border-line bg-surface overflow-hidden">
           {isLoadingNote ? (
             <div className="flex-1 flex items-center justify-center gap-2 text-xs text-zinc-500">
-              <Loader2 className="h-4 w-4 animate-spin text-emerald-400" />
+              <Loader2 className="h-4 w-4 animate-spin text-uit-accent" aria-hidden="true" />
               <span>Đang mở ghi chú...</span>
             </div>
           ) : (
             <>
               {/* Title + Metadata Bar */}
-              <div className="border-b border-zinc-800 px-5 pt-4 pb-3 space-y-3">
+              <div className="border-b border-line px-5 pt-4 pb-3 space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <input
                     type="text"
@@ -687,6 +690,7 @@ export const VaultDashboard: React.FC = () => {
                       setTitle(e.target.value);
                       setSaveState("dirty");
                     }}
+                    aria-label="Tiêu đề ghi chú"
                     placeholder="Tiêu đề ghi chú..."
                     className="min-w-0 flex-1 bg-transparent text-lg font-bold text-zinc-100 placeholder-zinc-600 focus:outline-none"
                   />
@@ -697,7 +701,7 @@ export const VaultDashboard: React.FC = () => {
                         saveState === "saving"
                           ? "border-amber-700/50 bg-amber-950/30 text-amber-300"
                           : saveState === "dirty"
-                          ? "border-zinc-700 bg-zinc-800 text-zinc-300"
+                          ? "border-line bg-surface-hover text-zinc-300"
                           : "border-emerald-800/50 bg-emerald-950/30 text-emerald-400"
                       }`}
                     >
@@ -711,48 +715,48 @@ export const VaultDashboard: React.FC = () => {
                     <button
                       type="button"
                       onClick={() => void handleSaveNote()}
-                      className="inline-flex items-center gap-1 rounded-lg border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 px-2.5 py-1 text-xs font-medium text-zinc-200 transition-colors cursor-pointer"
+                      className="inline-flex items-center gap-1 rounded-lg border border-line bg-surface-hover hover:border-uit/40 px-2.5 py-1 text-xs font-medium text-zinc-200 transition-colors cursor-pointer"
                     >
-                      <Save className="h-3.5 w-3.5 text-emerald-400" />
+                      <Save className="h-3.5 w-3.5 text-emerald-400" aria-hidden="true" />
                       <span>Lưu</span>
                     </button>
 
                     {/* View mode switcher */}
-                    <div className="flex rounded-lg border border-zinc-800 bg-zinc-950 p-0.5 text-[11px]">
+                    <div className="flex rounded-lg border border-line bg-canvas p-0.5 text-[11px]">
                       <button
                         type="button"
                         onClick={() => setEditorMode("edit")}
-                        className={`inline-flex items-center gap-1 rounded-md px-2 py-1 cursor-pointer ${
+                        className={`inline-flex items-center gap-1 rounded-md px-2 py-1 transition-colors cursor-pointer ${
                           editorMode === "edit"
-                            ? "bg-zinc-800 text-zinc-100 font-semibold"
+                            ? "bg-uit/20 text-white font-semibold"
                             : "text-zinc-400 hover:text-zinc-200"
                         }`}
                       >
-                        <Pencil className="h-3 w-3" />
+                        <Pencil className="h-3 w-3" aria-hidden="true" />
                         <span>Soạn thảo</span>
                       </button>
                       <button
                         type="button"
                         onClick={() => setEditorMode("split")}
-                        className={`inline-flex items-center gap-1 rounded-md px-2 py-1 cursor-pointer ${
+                        className={`inline-flex items-center gap-1 rounded-md px-2 py-1 transition-colors cursor-pointer ${
                           editorMode === "split"
-                            ? "bg-zinc-800 text-zinc-100 font-semibold"
+                            ? "bg-uit/20 text-white font-semibold"
                             : "text-zinc-400 hover:text-zinc-200"
                         }`}
                       >
-                        <Columns2 className="h-3 w-3" />
+                        <Columns2 className="h-3 w-3" aria-hidden="true" />
                         <span>Chia đôi</span>
                       </button>
                       <button
                         type="button"
                         onClick={() => setEditorMode("preview")}
-                        className={`inline-flex items-center gap-1 rounded-md px-2 py-1 cursor-pointer ${
+                        className={`inline-flex items-center gap-1 rounded-md px-2 py-1 transition-colors cursor-pointer ${
                           editorMode === "preview"
-                            ? "bg-zinc-800 text-zinc-100 font-semibold"
+                            ? "bg-uit/20 text-white font-semibold"
                             : "text-zinc-400 hover:text-zinc-200"
                         }`}
                       >
-                        <Eye className="h-3 w-3" />
+                        <Eye className="h-3 w-3" aria-hidden="true" />
                         <span>Đọc</span>
                       </button>
                     </div>
@@ -762,8 +766,11 @@ export const VaultDashboard: React.FC = () => {
                 {/* Folder + Tags row */}
                 <div className="flex flex-wrap items-center gap-3 text-xs">
                   <div className="flex items-center gap-1.5">
-                    <span className="text-[11px] text-zinc-500">Thư mục:</span>
+                    <label htmlFor="vault-folder-input" className="text-[11px] text-zinc-500">
+                      Thư mục:
+                    </label>
                     <input
+                      id="vault-folder-input"
                       type="text"
                       value={folder}
                       onChange={(e) => {
@@ -773,14 +780,14 @@ export const VaultDashboard: React.FC = () => {
                         }
                       }}
                       readOnly={Boolean(activeNoteId)}
-                      className={`w-28 rounded border border-zinc-800 bg-zinc-950 px-2 py-0.5 font-mono text-[11px] text-zinc-300 focus:border-emerald-500 focus:outline-none ${
+                      className={`w-28 rounded border border-line bg-canvas px-2 py-0.5 font-mono text-[11px] text-zinc-300 focus:border-uit focus:outline-none ${
                         activeNoteId ? "opacity-75" : ""
                       }`}
                     />
                   </div>
 
                   <div className="flex flex-1 min-w-[200px] items-center gap-1.5">
-                    <Hash className="h-3.5 w-3.5 text-zinc-500 shrink-0" />
+                    <Hash className="h-3.5 w-3.5 text-zinc-500 shrink-0" aria-hidden="true" />
                     <input
                       type="text"
                       value={tagsInput}
@@ -788,8 +795,9 @@ export const VaultDashboard: React.FC = () => {
                         setTagsInput(e.target.value);
                         setSaveState("dirty");
                       }}
+                      aria-label="Thẻ ghi chú"
                       placeholder="Thẻ: it004, on-thi, thuat-toan..."
-                      className="w-full rounded border border-zinc-800 bg-zinc-950 px-2 py-0.5 text-[11px] text-zinc-300 placeholder-zinc-600 focus:border-emerald-500 focus:outline-none"
+                      className="w-full rounded border border-line bg-canvas px-2 py-0.5 text-[11px] text-zinc-300 placeholder-zinc-600 focus:border-uit focus:outline-none"
                     />
                   </div>
 
@@ -896,7 +904,7 @@ export const VaultDashboard: React.FC = () => {
               {/* Editor + Preview Body */}
               <div
                 className={`flex-1 min-h-0 grid ${
-                  editorMode === "split" ? "grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-zinc-800" : "grid-cols-1"
+                  editorMode === "split" ? "grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-line" : "grid-cols-1"
                 }`}
               >
                 {editorMode !== "preview" && (
@@ -907,8 +915,9 @@ export const VaultDashboard: React.FC = () => {
                       setContent(e.target.value);
                       setSaveState("dirty");
                     }}
+                    aria-label="Nội dung ghi chú Markdown"
                     placeholder="Viết ghi chú bằng Markdown... Hỗ trợ # tiêu đề, - [ ] checklist, > [!tip] callout, bảng, khối code và [[Liên kết ghi chú]]."
-                    className="h-full min-h-[380px] w-full resize-none bg-zinc-950/40 p-5 font-mono text-xs leading-relaxed text-zinc-200 placeholder-zinc-600 focus:outline-none"
+                    className="h-full min-h-[380px] w-full resize-none bg-canvas/60 p-5 font-mono text-xs leading-relaxed text-zinc-200 placeholder-zinc-600 focus:outline-none"
                   />
                 )}
 

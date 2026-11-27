@@ -34,7 +34,9 @@ export const ShortcutRecorder: React.FC<ShortcutRecorderProps> = ({
 
   const containerRef = useRef<HTMLDivElement>(null);
   const isRecordingRef = useRef<boolean>(false);
-  isRecordingRef.current = isRecording;
+  useEffect(() => {
+    isRecordingRef.current = isRecording;
+  }, [isRecording]);
 
   // An toàn: khi thoát recording bằng bất kỳ lý do nào (unmount, blur, escape, done)
   // luôn gọi resumeHotkey() để đảm bảo hotkey không bị treo.

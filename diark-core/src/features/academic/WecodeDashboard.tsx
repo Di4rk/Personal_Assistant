@@ -315,7 +315,7 @@ export const WecodeDashboard: React.FC = () => {
 
             <button
               onClick={handleTriggerSync}
-              className="px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white text-xs font-semibold flex items-center gap-2 shadow-sm transition-all cursor-pointer"
+              className="px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white text-xs font-semibold flex items-center gap-2 shadow-sm transition-colors cursor-pointer"
             >
               <ExternalLink className="w-3.5 h-3.5" />
               <span>Đồng bộ Wecode</span>
@@ -463,7 +463,7 @@ export const WecodeDashboard: React.FC = () => {
                   setSelectedCourse(null);
                   setSelectedClass(null);
                 }}
-                className={`px-3 py-1.5 rounded-lg border text-xs transition-all cursor-pointer flex items-center gap-1.5 ${
+                className={`px-3 py-1.5 rounded-lg border text-xs transition-colors cursor-pointer flex items-center gap-1.5 ${
                   selectedCourse === null
                     ? "bg-emerald-950 text-emerald-300 border-emerald-700 font-bold shadow-sm"
                     : "bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60"
@@ -484,7 +484,7 @@ export const WecodeDashboard: React.FC = () => {
                       setSelectedCourse(isSelected ? null : course.courseCode);
                       setSelectedClass(null);
                     }}
-                    className={`px-3 py-1.5 rounded-lg border text-xs transition-all cursor-pointer flex items-center gap-1.5 ${
+                    className={`px-3 py-1.5 rounded-lg border text-xs transition-colors cursor-pointer flex items-center gap-1.5 ${
                       isSelected
                         ? "bg-emerald-950 text-emerald-300 border-emerald-700 font-bold shadow-sm"
                         : "bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60"

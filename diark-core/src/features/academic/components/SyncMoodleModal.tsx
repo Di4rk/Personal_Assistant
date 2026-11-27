@@ -148,7 +148,7 @@ export const SyncMoodleModal: React.FC<SyncMoodleModalProps> = ({
   // Không che màn hình, người dùng hoàn toàn có thể tương tác với bảng danh sách môn học, quest hub,...
   if (isMinimized) {
     return (
-      <div className="fixed bottom-6 right-6 z-50 w-96 max-w-[calc(100vw-3rem)] rounded-xl border border-zinc-800 bg-zinc-950/95 p-4 shadow-2xl backdrop-blur-md transition-all duration-200">
+      <div className="fixed bottom-6 right-6 z-50 w-96 max-w-[calc(100vw-3rem)] rounded-xl border border-zinc-800 bg-zinc-950/95 p-4 shadow-2xl backdrop-blur-md transition-colors duration-200">
         {/* Header */}
         <div className="flex items-center justify-between gap-2 border-b border-zinc-800/80 pb-2.5">
           <div className="flex items-center gap-2 min-w-0">
@@ -209,7 +209,7 @@ export const SyncMoodleModal: React.FC<SyncMoodleModalProps> = ({
               </div>
               <div className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-800">
                 <div
-                  className="h-full bg-sky-500 transition-all duration-300 ease-out"
+                  className="h-full bg-sky-500 transition-colors duration-300 ease-out"
                   style={{ width: `${Math.min(100, Math.max(0, progress?.percent || 8))}%` }}
                 />
               </div>
@@ -346,7 +346,7 @@ export const SyncMoodleModal: React.FC<SyncMoodleModalProps> = ({
                 )}
                 <div className="h-2 w-full overflow-hidden rounded-full bg-slate-800">
                   <div
-                    className="h-full bg-sky-500 transition-all duration-300 ease-out"
+                    className="h-full bg-sky-500 transition-colors duration-300 ease-out"
                     style={{ width: `${Math.min(100, Math.max(0, progress?.percent || 8))}%` }}
                   />
                 </div>

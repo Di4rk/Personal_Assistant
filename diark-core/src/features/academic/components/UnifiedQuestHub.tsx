@@ -90,7 +90,7 @@ export const UnifiedQuestHub: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(true);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [platformFilter, setPlatformFilter] = useState<QuestPlatform>('all');
-  const [nowSec, setNowSec] = useState<number>(Math.floor(Date.now() / 1000));
+  const [nowSec, setNowSec] = useState<number>(() => Math.floor(Date.now() / 1000));
 
   const { requestSync, serviceState } = useSyncOrchestratorStore();
   const isSyncing = serviceState.moodle.isSyncing || serviceState.wecode.isSyncing;
@@ -461,7 +461,7 @@ export const UnifiedQuestHub: React.FC = () => {
                   return (
                     <div
                       key={quest.id}
-                      className="group flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-xl border border-rose-500/30 bg-zinc-900/90 hover:border-rose-500/60 transition-all shadow-sm"
+                      className="group flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-xl border border-rose-500/30 bg-zinc-900/90 hover:border-rose-500/60 transition-colors shadow-sm"
                     >
                       <div className="space-y-1.5 flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
@@ -558,7 +558,7 @@ export const UnifiedQuestHub: React.FC = () => {
                   return (
                     <div
                       key={quest.id}
-                      className="group flex flex-col justify-between p-3.5 rounded-xl border border-zinc-800 bg-zinc-900/80 hover:border-zinc-700 transition-all space-y-3"
+                      className="group flex flex-col justify-between p-3.5 rounded-xl border border-zinc-800 bg-zinc-900/80 hover:border-zinc-700 transition-colors space-y-3"
                     >
                       <div className="space-y-2">
                         <div className="flex items-center justify-between gap-2">
@@ -652,7 +652,7 @@ export const UnifiedQuestHub: React.FC = () => {
                   return (
                     <div
                       key={quest.id}
-                      className="group flex flex-col justify-between p-3.5 rounded-xl border border-zinc-800 bg-zinc-900/80 hover:border-zinc-700 transition-all space-y-3"
+                      className="group flex flex-col justify-between p-3.5 rounded-xl border border-zinc-800 bg-zinc-900/80 hover:border-zinc-700 transition-colors space-y-3"
                     >
                       <div className="space-y-2">
                         <div className="flex items-center justify-between gap-2">
@@ -747,7 +747,7 @@ export const UnifiedQuestHub: React.FC = () => {
                   return (
                     <div
                       key={quest.id}
-                      className="group flex flex-col justify-between p-3.5 rounded-xl border border-zinc-800 bg-zinc-900/80 hover:border-zinc-700 transition-all space-y-3"
+                      className="group flex flex-col justify-between p-3.5 rounded-xl border border-zinc-800 bg-zinc-900/80 hover:border-zinc-700 transition-colors space-y-3"
                     >
                       <div className="space-y-2.5">
                         <div className="flex items-center justify-between gap-2">
@@ -784,7 +784,7 @@ export const UnifiedQuestHub: React.FC = () => {
                             </div>
                             <div className="h-1.5 w-full rounded-full bg-zinc-800 overflow-hidden">
                               <div
-                                className="h-full bg-emerald-500 rounded-full transition-all duration-300"
+                                className="h-full bg-emerald-500 rounded-full transition-colors duration-300"
                                 style={{ width: `${percent}%` }}
                               />
                             </div>

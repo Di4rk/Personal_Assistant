@@ -153,7 +153,7 @@ export const AcademicRadarChart: React.FC<AcademicRadarChartProps> = ({
             stroke="#6B9BFF"
             strokeWidth="2"
             filter="url(#glowEffect)"
-            className="transition-all duration-300 ease-out"
+            className="transition-colors duration-300 ease-out"
           />
         )}
 
@@ -185,7 +185,7 @@ export const AcademicRadarChart: React.FC<AcademicRadarChartProps> = ({
                 fill={isHovered ? "#ffffff" : hasScore ? "#6B9BFF" : "#475569"}
                 stroke={hasScore ? "#2F6BFF" : "#334155"}
                 strokeWidth={isHovered ? 2.5 : 1.5}
-                className="pointer-events-none transition-all duration-200"
+                className="pointer-events-none transition-colors duration-200"
               />
 
               <text
@@ -195,7 +195,7 @@ export const AcademicRadarChart: React.FC<AcademicRadarChartProps> = ({
                 fill={isHovered ? "#f8fafc" : hasScore ? "#cbd5e1" : "#64748b"}
                 fontSize={isHovered ? "12" : "11"}
                 fontWeight={isHovered ? "600" : "500"}
-                className="cursor-pointer transition-all duration-150"
+                className="cursor-pointer transition-colors duration-150"
                 onMouseEnter={() => setHoveredIndex(idx)}
                 onMouseLeave={() => setHoveredIndex(null)}
               >

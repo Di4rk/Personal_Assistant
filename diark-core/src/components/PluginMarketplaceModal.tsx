@@ -241,7 +241,7 @@ export const PluginMarketplaceModal: React.FC<PluginMarketplaceModalProps> = ({
                       <button
                         onClick={() => handleToggle(plugin)}
                         disabled={isToggling}
-                        className={`shrink-0 px-3.5 py-1.5 rounded-lg text-xs font-mono font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                        className={`shrink-0 px-3.5 py-1.5 rounded-lg text-xs font-mono font-bold transition-colors cursor-pointer flex items-center gap-1.5 ${
                           plugin.isEnabled
                             ? "bg-emerald-950 text-emerald-300 border border-emerald-500/40 hover:bg-emerald-900/60"
                             : "bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700"
@@ -334,7 +334,7 @@ export const PluginMarketplaceModal: React.FC<PluginMarketplaceModalProps> = ({
                           <button
                             onClick={() => handleInstall(remote)}
                             disabled={isInstalling}
-                            className="px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-mono text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                            className="px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-mono text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
                           >
                             {isInstalling ? (
                               <>

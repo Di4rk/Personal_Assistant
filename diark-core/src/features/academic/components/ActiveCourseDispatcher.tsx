@@ -118,6 +118,8 @@ function calcRequiredFinal(
 //  COMPONENT
 // ============================================================
 
+const EMPTY_DEADLINES: NonNullable<ActiveCourseDispatcherProps["deadlines"]> = [];
+
 export const ActiveCourseDispatcher: React.FC<ActiveCourseDispatcherProps> = ({
   courseCode,
   courseTitle,
@@ -125,7 +127,7 @@ export const ActiveCourseDispatcher: React.FC<ActiveCourseDispatcherProps> = ({
   midtermScore,
   midtermWeight = 0.3,
   workspacePath,
-  deadlines = [],
+  deadlines = EMPTY_DEADLINES,
   className = "",
 }) => {
   // Lấy deadline gần nhất chưa quá hạn

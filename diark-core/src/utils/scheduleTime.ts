@@ -67,8 +67,22 @@ export function getMondayOfWeek(date: Date): Date {
   return copy;
 }
 
+const VND_FORMATTER = new Intl.NumberFormat("vi-VN");
+const VN_TIME_HM_FORMATTER = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "Asia/Ho_Chi_Minh",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
+const VN_DATE_ISO_FORMATTER = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Asia/Ho_Chi_Minh",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
 export function formatVnd(amount: number): string {
-  return new Intl.NumberFormat("vi-VN").format(amount) + " đ";
+  return VND_FORMATTER.format(amount) + " đ";
 }
 
 export function parseExamDateIso(dateStr: string): string | null {
@@ -85,30 +99,15 @@ export function parseExamDateIso(dateStr: string): string | null {
 }
 
 export function formatTimeHm(unixSeconds: number): string {
-  return new Intl.DateTimeFormat("en-GB", {
-    timeZone: "Asia/Ho_Chi_Minh",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(new Date(unixSeconds * 1000));
+  return VN_TIME_HM_FORMATTER.format(new Date(unixSeconds * 1000));
 }
 
 export function toVnDateIso(unixSeconds: number): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Ho_Chi_Minh",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(new Date(unixSeconds * 1000));
+  return VN_DATE_ISO_FORMATTER.format(new Date(unixSeconds * 1000));
 }
 
 export function getVnMinutesOfDay(unixSeconds: number): number {
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    timeZone: "Asia/Ho_Chi_Minh",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).formatToParts(new Date(unixSeconds * 1000));
+  const parts = VN_TIME_HM_FORMATTER.formatToParts(new Date(unixSeconds * 1000));
   const h = parseInt(parts.find((p) => p.type === "hour")?.value ?? "0", 10);
   const m = parseInt(parts.find((p) => p.type === "minute")?.value ?? "0", 10);
   return h * 60 + m;
