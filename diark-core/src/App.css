@@ -1,6 +1,19 @@
 @import "tailwindcss";
 
+@theme {
+  --color-sidebar: #060910;
+  --color-canvas: #080b12;
+  --color-surface: #0f1420;
+  --color-surface-hover: #151c2c;
+  --color-line: #1d263b;
+  --color-line-active: #2b3957;
+  --color-uit: #2f6bff;
+  --color-uit-accent: #6b9bff;
+  --color-danger-soft: #f87171;
+}
+
 :root {
+  color-scheme: dark;
   --bg-base: #080b12;
   --bg-surface: #0f1420;
   --bg-surface-hover: #151c2c;
@@ -26,25 +39,16 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-@keyframes uit-radar-pulse {
-  0% {
-    transform: scale(1);
-    opacity: 0.75;
-  }
-  100% {
-    transform: scale(2.6);
-    opacity: 0;
-  }
+/* Native <dialog> modal scroll containment (prevents background page scroll chaining) */
+dialog:modal {
+  overscroll-behavior: contain;
 }
 
-@keyframes uit-glow-breathe {
-  0%,
-  100% {
-    opacity: 0.68;
-  }
-  50% {
-    opacity: 1;
-  }
+dialog::backdrop {
+  overflow: hidden;
+  overscroll-behavior: contain;
+  background-color: rgba(2, 4, 10, 0.72);
+  backdrop-filter: blur(4px);
 }
 
 @keyframes uit-shimmer-sweep {
@@ -67,217 +71,6 @@ body {
   }
 }
 
-.uit-radar-ring {
-  animation: uit-radar-pulse 2.8s cubic-bezier(0.22, 1, 0.36, 1) infinite;
-}
-
-.uit-glow-breathe {
-  animation: uit-glow-breathe 6.5s ease-in-out infinite;
-}
-
-.uit-shimmer-once {
-  animation: uit-shimmer-sweep 1.1s cubic-bezier(0.22, 1, 0.36, 1) 0.25s 1 both;
-}
-
-.uit-shimmer-loop {
-  animation: uit-shimmer-sweep 2.2s ease-in-out infinite;
-}
-
-.uit-stagger-in {
-  animation: uit-stagger-in 340ms cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-
-@keyframes uit-hero-orb {
-  0%,
-  100% {
-    opacity: 0.38;
-    transform: scale(0.92);
-  }
-  50% {
-    opacity: 1;
-    transform: scale(1.08);
-  }
-}
-
-@keyframes uit-hero-logo-glow {
-  0%,
-  100% {
-    opacity: 0.14;
-  }
-  50% {
-    opacity: 0.23;
-  }
-}
-
-@keyframes uit-hero-mist-1 {
-  0%,
-  100% {
-    opacity: 0.55;
-    transform: translate3d(0%, 0%, 0) scale(1, 1);
-  }
-  45% {
-    opacity: 0.92;
-    transform: translate3d(-10%, 6%, 0) scale(1.08, 0.96);
-  }
-  75% {
-    opacity: 0.68;
-    transform: translate3d(3%, -4%, 0) scale(0.97, 1.05);
-  }
-}
-
-@keyframes uit-hero-mist-2 {
-  0%,
-  100% {
-    opacity: 0.45;
-    transform: translate3d(-6%, -5%, 0) scale(0.96, 1.04);
-  }
-  50% {
-    opacity: 0.85;
-    transform: translate3d(9%, 5%, 0) scale(1.09, 0.95);
-  }
-}
-
-@keyframes uit-hero-beam {
-  0% {
-    transform: translateX(-110%);
-    opacity: 0;
-  }
-  15% {
-    opacity: 0.9;
-  }
-  85% {
-    opacity: 0.9;
-  }
-  100% {
-    transform: translateX(220%);
-    opacity: 0;
-  }
-}
-
-.uit-hero-orb {
-  animation: uit-hero-orb 4.2s ease-in-out infinite;
-}
-
-.uit-hero-logo-glow {
-  animation: uit-hero-logo-glow 7.5s ease-in-out infinite;
-}
-
-.uit-hero-mist-1 {
-  animation: uit-hero-mist-1 14s ease-in-out infinite;
-  will-change: transform, opacity;
-}
-
-.uit-hero-mist-2 {
-  animation: uit-hero-mist-2 18s ease-in-out infinite;
-  animation-delay: -6s;
-  will-change: transform, opacity;
-}
-
-.uit-hero-beam {
-  animation: uit-hero-beam 7.5s cubic-bezier(0.4, 0, 0.2, 1) infinite;
-}
-
-@keyframes uit-mono-aura {
-  0%,
-  100% {
-    opacity: 0.09;
-  }
-  50% {
-    opacity: 0.16;
-  }
-}
-
-.uit-mono-aura {
-  animation: uit-mono-aura 7s ease-in-out infinite;
-}
-
-@keyframes uit-ridge-wave-1 {
-  0%,
-  100% {
-    transform: translate3d(-1.8%, 0px, 0);
-  }
-  50% {
-    transform: translate3d(1.8%, -14px, 0);
-  }
-}
-
-@keyframes uit-ridge-wave-2 {
-  0%,
-  100% {
-    transform: translate3d(2%, -10px, 0);
-  }
-  50% {
-    transform: translate3d(-2%, 8px, 0);
-  }
-}
-
-@keyframes uit-ridge-wave-3 {
-  0%,
-  100% {
-    transform: translate3d(-1.4%, 6px, 0);
-  }
-  50% {
-    transform: translate3d(1.4%, -9px, 0);
-  }
-}
-
-@keyframes uit-ridge-wave-4 {
-  0%,
-  100% {
-    transform: translate3d(0.8%, -4px, 0);
-  }
-  50% {
-    transform: translate3d(-0.8%, 4px, 0);
-  }
-}
-
-.uit-ridge-wave-1 {
-  animation: uit-ridge-wave-1 15s ease-in-out infinite;
-  will-change: transform;
-}
-
-.uit-ridge-wave-2 {
-  animation: uit-ridge-wave-2 12s ease-in-out infinite;
-  animation-delay: -3.5s;
-  will-change: transform;
-}
-
-.uit-ridge-wave-3 {
-  animation: uit-ridge-wave-3 9.8s ease-in-out infinite;
-  animation-delay: -1.8s;
-  will-change: transform;
-}
-
-.uit-ridge-wave-4 {
-  animation: uit-ridge-wave-4 7.8s ease-in-out infinite;
-  animation-delay: -1.1s;
-  will-change: transform;
-}
-
-@keyframes uit-logo-scan {
-  0% {
-    transform: translate3d(0, -110%, 0);
-    opacity: 0;
-  }
-  12% {
-    opacity: 1;
-  }
-  72% {
-    transform: translate3d(0, 110%, 0);
-    opacity: 1;
-  }
-  84%,
-  100% {
-    transform: translate3d(0, 125%, 0);
-    opacity: 0;
-  }
-}
-
-.uit-logo-scan {
-  animation: uit-logo-scan 6.4s cubic-bezier(0.42, 0, 0.58, 1) infinite;
-  will-change: transform, opacity;
-}
-
 @keyframes uit-modal-in {
   0% {
     opacity: 0;
@@ -287,10 +80,6 @@ body {
     opacity: 1;
     transform: scale(1);
   }
-}
-
-.uit-modal-in {
-  animation: uit-modal-in 150ms ease-out both;
 }
 
 @keyframes uit-table-fade-in {
@@ -304,10 +93,6 @@ body {
   }
 }
 
-.uit-table-fade-in {
-  animation: uit-table-fade-in 160ms ease-out both;
-}
-
 @keyframes uit-day-flash {
   0% {
     background-color: rgba(47, 107, 255, 0.24);
@@ -319,8 +104,48 @@ body {
   }
 }
 
-.uit-day-flash {
-  animation: uit-day-flash 800ms ease-out 1;
+/* Opt-in discrete UI animations: static by default, animate only when user allows motion */
+@media (prefers-reduced-motion: no-preference) {
+  .uit-shimmer-once {
+    animation: uit-shimmer-sweep 1.1s cubic-bezier(0.22, 1, 0.36, 1) 0.25s 1 both;
+  }
+
+  .uit-stagger-in {
+    animation: uit-stagger-in 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .uit-modal-in {
+    animation: uit-modal-in 150ms ease-out both;
+  }
+
+  .uit-table-fade-in {
+    animation: uit-table-fade-in 160ms ease-out both;
+  }
+
+  .uit-day-flash {
+    animation: uit-day-flash 800ms ease-out 1;
+  }
+}
+
+/* Decorative ambient classes kept static to protect WebView2 idle GPU/RAM (<100MB budget) */
+.uit-radar-ring,
+.uit-glow-breathe,
+.uit-shimmer-loop,
+.uit-hero-orb,
+.uit-hero-logo-glow,
+.uit-hero-mist-1,
+.uit-hero-mist-2,
+.uit-hero-beam,
+.uit-mono-aura,
+.uit-ridge-wave-1,
+.uit-ridge-wave-2,
+.uit-ridge-wave-3,
+.uit-ridge-wave-4 {
+  animation: none;
+}
+
+.uit-logo-scan {
+  opacity: 0;
 }
 
 .kpi-spotlight-border {
@@ -342,32 +167,4 @@ body {
     rgba(47, 107, 255, 0.09),
     transparent 65%
   );
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .uit-radar-ring,
-  .uit-glow-breathe,
-  .uit-shimmer-once,
-  .uit-shimmer-loop,
-  .uit-stagger-in,
-  .uit-hero-orb,
-  .uit-hero-logo-glow,
-  .uit-hero-mist-1,
-  .uit-hero-mist-2,
-  .uit-hero-beam,
-  .uit-mono-aura,
-  .uit-ridge-wave-1,
-  .uit-ridge-wave-2,
-  .uit-ridge-wave-3,
-  .uit-ridge-wave-4,
-  .uit-logo-scan,
-  .uit-modal-in,
-  .uit-table-fade-in,
-  .uit-day-flash {
-    animation: none !important;
-  }
-
-  .uit-logo-scan {
-    opacity: 0 !important;
-  }
 }

@@ -4,7 +4,6 @@ import {
   CheckCircle2,
   Eye,
   EyeOff,
-  RefreshCw,
 } from "lucide-react";
 import { useSyncOrchestratorStore } from "./stores/syncOrchestratorStore";
 import { useAcademicRadar } from "./hooks/useAcademicRadar";
@@ -345,17 +344,6 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
     return () => window.removeEventListener("resize", updateTabIndicator);
   }, [updateTabIndicator]);
 
-  const handleSyncAcademic = useCallback(() => {
-    if (portalAuthStatus === "expired") {
-      setIsSyncPortalModalOpen(true);
-    } else {
-      void useSyncOrchestratorStore.getState().requestSync("portal", {
-        bypassTtl: true,
-        bypassCircuitBreaker: true,
-      });
-    }
-  }, [portalAuthStatus]);
-
   const totalTuitionDebt = useMemo(
     () => tuitionRecords.reduce((acc, r) => acc + (r.remaining > 0 ? r.remaining : 0), 0),
     [tuitionRecords]
@@ -490,17 +478,6 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
             ) : (
               <Eye className="h-4 w-4" aria-hidden="true" />
             )}
-          </button>
-
-          <button
-            type="button"
-            onClick={handleSyncAcademic}
-            disabled={isPortalSyncing}
-            title="Đồng bộ Học vụ (F5)"
-            aria-label="Đồng bộ Học vụ"
-            className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#2F6BFF] text-white transition-colors duration-150 hover:bg-[#255CE6] active:scale-[0.98] disabled:opacity-60 cursor-pointer"
-          >
-            <RefreshCw className={`h-3.5 w-3.5 ${isPortalSyncing ? "animate-spin" : ""}`} aria-hidden="true" />
           </button>
         </div>
       </div>
@@ -664,16 +641,8 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
               <h3 className="text-xs font-semibold text-zinc-100">Học phí theo học kỳ</h3>
             </div>
             {tuitionRecords.length === 0 ? (
-              <div className="flex flex-col items-center gap-3 px-4 py-7 text-center text-xs text-zinc-400">
-                <p>Chưa có dữ liệu học phí. Nhấn F5 hoặc nút đồng bộ để cập nhật.</p>
-                <button
-                  type="button"
-                  onClick={handleSyncAcademic}
-                  className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-[#1D263B] bg-[#151C2C] px-3.5 text-xs font-medium text-zinc-200 transition-colors hover:border-[#2F6BFF]/50 hover:text-white cursor-pointer"
-                >
-                  <RefreshCw className={`h-3.5 w-3.5 text-[#6B9BFF] ${isPortalSyncing ? "animate-spin" : ""}`} aria-hidden="true" />
-                  <span>Đồng bộ ngay</span>
-                </button>
+              <div className="px-4 py-6 text-center text-xs text-zinc-400">
+                Chưa có dữ liệu học phí. Nhấn F5 hoặc nút đồng bộ ở góc dưới trái để cập nhật.
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -851,7 +820,7 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
             )}
           </section>
 
-          <ExamRadarCard onSyncPortal={handleSyncAcademic} />
+          <ExamRadarCard />
         </div>
       )}
 

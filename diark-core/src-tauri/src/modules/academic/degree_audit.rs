@@ -83,11 +83,11 @@ pub fn get_block_display_name(raw_block: &str) -> String {
     let norm = crate::services::curriculum_harvester::normalize_major_name(raw_block);
     if norm == "dc" || norm.contains("dai cuong") {
         "Đại cương".to_string()
-    } else if norm == "csn" || norm == "co so nganh" {
-        "Cơ sở ngành".to_string()
     } else if norm.starts_with("co so nganh (nhom") || norm.starts_with("csn (nhom") {
         raw_block.to_string()
-    } else if norm == "cn" || norm == "chuyen nganh" {
+    } else if norm == "csn" || norm.contains("co so nganh") {
+        "Cơ sở ngành".to_string()
+    } else if norm == "cn" || norm.contains("chuyen nganh") {
         "Chuyên ngành".to_string()
     } else if norm == "tttn" || norm.contains("thuc tap") {
         "Thực tập tốt nghiệp".to_string()
@@ -95,11 +95,74 @@ pub fn get_block_display_name(raw_block: &str) -> String {
         raw_block.to_string()
     } else if norm.contains("tu do") || norm.contains("tu chon tu do") || norm == "tu_do" {
         "Tự chọn tự do".to_string()
-    } else if norm == "kltn" || norm.contains("khoa luan") {
-        "Khóa luận tốt nghiệp".to_string()
+    } else if norm == "kltn" || norm.contains("khoa luan") || norm.contains("tot nghiep") {
+        "Tốt nghiệp".to_string()
     } else {
         raw_block.to_string()
     }
+}
+
+fn resolve_rule_key_for_block(raw_block: &str, rule_keys: &[String]) -> String {
+    let target_display = get_block_display_name(raw_block);
+    if let Some(existing) = rule_keys
+        .iter()
+        .find(|k| get_block_display_name(k) == target_display)
+    {
+        return existing.clone();
+    }
+    raw_block.to_string()
+}
+
+fn classify_k20_course_block(code: &str, ideal_term: Option<i64>) -> &'static str {
+    let upper = code.trim().to_uppercase();
+    if upper == "IT001"
+        || upper.starts_with("MA")
+        || upper.starts_with("PH")
+        || upper.starts_with("SS")
+        || upper.starts_with("ENG")
+        || upper.starts_with("PE")
+        || upper.starts_with("ME")
+    {
+        return "Đại cương";
+    }
+    if matches!(
+        upper.as_str(),
+        "CS005"
+            | "CS111"
+            | "CS112"
+            | "CS115"
+            | "CS116"
+            | "CS117"
+            | "CS311"
+            | "CS523"
+            | "CS526"
+            | "IT002"
+            | "IT003"
+            | "IT004"
+            | "IT005"
+            | "IT007"
+            | "IT012"
+            | "SE104"
+            | "NT101"
+            | "NT105"
+            | "NT106"
+            | "NT109"
+            | "NT113"
+            | "IS201"
+            | "IS207"
+            | "CE103"
+            | "CE118"
+            | "DS102"
+    ) {
+        return "Cơ sở ngành";
+    }
+    if ideal_term == Some(20) {
+        return "Tự chọn tự do";
+    }
+    if ideal_term == Some(7) || matches!(upper.as_str(), "CS505" | "CS553" | "CS554") {
+        return "Tốt nghiệp";
+    }
+    "Chuyên ngành"
 }
 
 /// Tính toán báo cáo kiểm toán tốt nghiệp chi tiết cho sinh viên.
@@ -126,6 +189,21 @@ pub fn run_degree_audit(conn: &Connection, preferred_slug: Option<&str>) -> AppR
         for r in rows {
             rules.push(r?);
         }
+    }
+    let rules_was_empty = rules.is_empty();
+    if rules_was_empty {
+        let cn_credits = if total_degree_credits > 110.0 {
+            total_degree_credits - 110.0
+        } else {
+            16.0
+        };
+        rules = vec![
+            ("Đại cương".to_string(), 45.0),
+            ("Cơ sở ngành".to_string(), 45.0),
+            ("Chuyên ngành".to_string(), cn_credits),
+            ("Tự chọn tự do".to_string(), 10.0),
+            ("Tốt nghiệp".to_string(), 10.0),
+        ];
     }
 
     // Tải curriculum courses
@@ -354,13 +432,120 @@ pub fn run_degree_audit(conn: &Connection, preferred_slug: Option<&str>) -> AppR
             key
         });
 
-    // Gom môn theo block trong curriculum
+    // Gom môn theo block trong curriculum (và bổ sung từ academic_curriculum nếu curriculum_courses thiếu/0 TC)
+    let mut acad_curr_rows: Vec<(String, String, f64, Option<String>, Option<i64>)> = Vec::new();
+    let mut acad_credits_map: HashMap<String, f64> = HashMap::new();
+    let mut acad_compulsory_map: HashMap<String, bool> = HashMap::new();
+    {
+        let acad_exists: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='academic_curriculum'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(false);
+        if acad_exists {
+            let mut stmt = conn.prepare(
+                "SELECT course_code, course_name, credits, course_type, ideal_term FROM academic_curriculum ORDER BY ideal_term ASC, course_code ASC",
+            )?;
+            let rows = stmt.query_map([], |row| {
+                let code = row.get::<_, String>(0)?.trim().to_uppercase();
+                let name = row.get::<_, String>(1)?;
+                let credits = row.get::<_, f64>(2)?;
+                let course_type = row.get::<_, Option<String>>(3)?;
+                let ideal_term = row.get::<_, Option<i64>>(4)?;
+                Ok((code, name, credits, course_type, ideal_term))
+            })?;
+            for r in rows {
+                let row = r?;
+                let is_comp = row
+                    .3
+                    .as_deref()
+                    .map(|t| t.to_lowercase().contains("bắt buộc"))
+                    .unwrap_or(false);
+                if row.2 > 0.0 {
+                    acad_credits_map.insert(row.0.clone(), row.2);
+                }
+                acad_compulsory_map.insert(row.0.clone(), is_comp);
+                acad_curr_rows.push(row);
+            }
+        }
+    }
+
     let mut curr_courses_by_block: HashMap<String, Vec<crate::services::curriculum_harvester::CurriculumCourse>> = HashMap::new();
     let mut course_to_curr: HashMap<String, crate::services::curriculum_harvester::CurriculumCourse> = HashMap::new();
 
-    for c in curr_courses {
+    for mut c in curr_courses {
+        let code_upper = c.course_code.trim().to_uppercase();
+        c.course_code = code_upper.clone();
+        let is_non_credit = code_upper == "ME001" || code_upper.starts_with("PE");
+        if rules_was_empty && is_non_credit {
+            continue;
+        }
+        if !is_non_credit && c.credits <= 0.0 {
+            if let Some(&cred) = acad_credits_map.get(&code_upper) {
+                c.credits = cred;
+            }
+        }
+        if rules_was_empty {
+            if let Some(&is_comp) = acad_compulsory_map.get(&code_upper) {
+                c.is_compulsory = is_comp;
+            }
+            let classified = if matches!(code_upper.as_str(), "CS505" | "CS553" | "CS554") {
+                "Tốt nghiệp"
+            } else {
+                let by_title = get_block_display_name(&c.knowledge_block);
+                if by_title == "Tự chọn tự do" || by_title == "Chuyên ngành" || by_title == "Cơ sở ngành" || by_title == "Đại cương" || by_title == "Tốt nghiệp" {
+                    let by_code = classify_k20_course_block(&code_upper, c.recommended_semester.map(|s| s as i64));
+                    if by_code == "Cơ sở ngành" || by_code == "Đại cương" || by_code == "Tốt nghiệp" {
+                        by_code
+                    } else if by_title == "Cơ sở ngành" {
+                        "Cơ sở ngành"
+                    } else if by_title == "Tự chọn tự do" {
+                        "Tự chọn tự do"
+                    } else {
+                        "Chuyên ngành"
+                    }
+                } else {
+                    classify_k20_course_block(&code_upper, c.recommended_semester.map(|s| s as i64))
+                }
+            };
+            c.knowledge_block = resolve_rule_key_for_block(classified, &rule_blocks_order);
+        } else {
+            c.knowledge_block = resolve_rule_key_for_block(&c.knowledge_block, &rule_blocks_order);
+        }
         course_to_curr.insert(c.course_code.clone(), c.clone());
         curr_courses_by_block.entry(c.knowledge_block.clone()).or_default().push(c);
+    }
+
+    let needs_acad_hydration = rules_was_empty
+        || !curr_courses_by_block
+            .keys()
+            .any(|k| get_block_display_name(k) == "Đại cương");
+    if needs_acad_hydration && !acad_curr_rows.is_empty() {
+        for (code, name, credits, course_type, ideal_term) in acad_curr_rows {
+            if code == "ME001" || code.starts_with("PE") || course_to_curr.contains_key(&code) {
+                continue;
+            }
+            let block_display = classify_k20_course_block(&code, ideal_term);
+            let block_key = resolve_rule_key_for_block(block_display, &rule_blocks_order);
+            let is_compulsory = course_type
+                .as_deref()
+                .map(|t| t.to_lowercase().contains("bắt buộc"))
+                .unwrap_or(false);
+            let course_item = crate::services::curriculum_harvester::CurriculumCourse {
+                course_code: code.clone(),
+                course_name: name,
+                credits,
+                theory_credits: None,
+                practical_credits: None,
+                knowledge_block: block_key.clone(),
+                is_compulsory,
+                recommended_semester: ideal_term.map(|v| v as i32),
+            };
+            course_to_curr.insert(code, course_item.clone());
+            curr_courses_by_block.entry(block_key).or_default().push(course_item);
+        }
     }
 
     let mut remaining_passed_courses = deduplicated_passed_courses.clone();
@@ -1151,5 +1336,84 @@ mod tests {
             slug.contains("an-toan-thong-tin"),
             "Sinh viên lớp ATTT2025.1 phải tự nhận diện sang ngành ATTT, nhận được: {slug}"
         );
+    }
+
+    #[test]
+    fn test_k20_khmt_fallback_with_empty_rules_and_academic_curriculum() {
+        let conn = setup_test_curriculum_and_db();
+        let slug = "cu-nhan-nganh-khoa-hoc-may-tinh-khoa-20-2025";
+        conn.execute("DELETE FROM curriculum_rules WHERE slug = ?1", params![slug]).unwrap();
+        conn.execute("DELETE FROM curriculum_courses WHERE slug = ?1", params![slug]).unwrap();
+        conn.execute(
+            "UPDATE curriculum_index SET total_credits = 126.0 WHERE slug = ?1",
+            params![slug],
+        )
+        .unwrap();
+
+        // Mô phỏng curriculum_courses bị parse thiếu tín chỉ và tiêu đề NFD dài
+        conn.execute(
+            "INSERT INTO curriculum_courses (slug, course_code, course_name, credits, knowledge_block, is_compulsory)
+             VALUES (?1, 'CS005', 'Giới thiệu ngành', 0.0, '5.3.1 Ca\u{0301}c môn ho\u{0323}c cơ sở ngành Khoa học Máy tính', 0),
+                    (?1, 'CS115', 'Toán cho KHMT', 0.0, '5.3.1 Ca\u{0301}c môn ho\u{0323}c cơ sở ngành Khoa học Máy tính', 0)",
+            params![slug],
+        )
+        .unwrap();
+
+        // Đổ dữ liệu 42 TC đã qua + 1 môn đang học từ byCtdt (academic_curriculum) + điểm học kỳ (academic_courses)
+        let acad_rows = [
+            ("IT001", "Nhập môn lập trình", 4.0, "Bắt buộc", 1, "Đã qua", Some(9.1)),
+            ("MA003", "Đại số tuyến tính", 3.0, "Bắt buộc", 1, "Đã qua", Some(9.9)),
+            ("MA006", "Giải tích", 4.0, "Bắt buộc", 1, "Đã qua", Some(7.5)),
+            ("MA004", "Cấu trúc rời rạc", 4.0, "Bắt buộc", 2, "Đã qua", Some(9.7)),
+            ("MA005", "Xác suất thống kê", 3.0, "Bắt buộc", 2, "Đã qua", Some(9.3)),
+            ("SS006", "Pháp luật đại cương", 2.0, "Bắt buộc", 1, "Đã qua", Some(5.5)),
+            ("SS007", "Triết học Mác – Lênin", 3.0, "Bắt buộc", 2, "Đã qua", Some(5.8)),
+            ("SS004", "Kỹ năng nghề nghiệp", 2.0, "Bắt buộc", 2, "Đã qua", Some(9.7)),
+            ("ENG01", "Anh văn 1", 4.0, "Bắt buộc", 1, "Đã qua", Some(7.7)),
+            ("ME001", "Giáo dục quốc phòng", 0.0, "Bắt buộc", 1, "Đã qua", Some(7.8)),
+            ("CS005", "Giới thiệu ngành", 1.0, "Bắt buộc", 1, "Đã qua", Some(9.7)),
+            ("IT002", "Lập trình OOP", 4.0, "Bắt buộc", 2, "Đã qua", Some(8.0)),
+            ("IT003", "CTDL & GT", 4.0, "Bắt buộc", 2, "Đã qua", Some(8.5)),
+            ("IT012", "Kiến trúc MT 2", 4.0, "Bắt buộc", 2, "Đã qua", Some(8.9)),
+            ("CS115", "Toán cho KHMT", 4.0, "Bắt buộc", 3, "Đang học", None),
+            ("CS106", "Trí tuệ nhân tạo", 4.0, "Tự chọn", 5, "Chưa học", None),
+            ("CS505", "Khóa luận tốt nghiệp", 10.0, "Tự chọn", 7, "Chưa học", None),
+        ];
+        for (i, (code, name, cred, ctype, term, status, score)) in acad_rows.iter().enumerate() {
+            conn.execute(
+                "INSERT INTO academic_curriculum (course_code, course_name, credits, course_type, ideal_term, status, final_score)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![code, name, cred, ctype, term, status, score],
+            )
+            .unwrap();
+            if *status == "Đã qua" {
+                conn.execute(
+                    "INSERT INTO academic_courses (id, semester_id, course_code, course_name, credits, summary_score_10, is_passed)
+                     VALUES (?1, '2025-2026.1', ?2, ?3, ?4, ?5, 1)",
+                    params![format!("ac_{i}"), code, name, cred, score],
+                )
+                .unwrap();
+            }
+        }
+
+        let report = run_degree_audit(&conn, Some(slug)).unwrap();
+        assert_eq!(report.total_earned_credits, 42.0);
+        assert_eq!(report.total_required_credits, 126.0);
+        assert!(report.non_credit_prerequisites.has_gdqp);
+
+        let find_blk = |name: &str| {
+            report
+                .block_audits
+                .iter()
+                .find(|b| b.block_name_display == name)
+                .unwrap_or_else(|| panic!("Missing block {name}"))
+        };
+        assert_eq!(find_blk("Đại cương").completed_credits, 29.0);
+        assert_eq!(find_blk("Đại cương").required_credits, 45.0);
+        assert_eq!(find_blk("Cơ sở ngành").completed_credits, 13.0);
+        assert_eq!(find_blk("Cơ sở ngành").required_credits, 45.0);
+        assert_eq!(find_blk("Chuyên ngành").required_credits, 16.0);
+        assert_eq!(find_blk("Tự chọn tự do").required_credits, 10.0);
+        assert_eq!(find_blk("Tốt nghiệp").required_credits, 10.0);
     }
 }

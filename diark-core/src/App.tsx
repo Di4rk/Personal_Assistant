@@ -143,16 +143,16 @@ export default function App() {
     });
   }, [activeTab, sidebarCollapsed, plugins.length, profileState.status]);
 
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("diark_sidebar_collapsed", sidebarCollapsed ? "true" : "false");
+    } catch {
+      // ignore storage restrictions
+    }
+  }, [sidebarCollapsed]);
+
   const toggleSidebar = useCallback(() => {
-    setSidebarCollapsed((prev) => {
-      const next = !prev;
-      try {
-        window.localStorage.setItem("diark_sidebar_collapsed", next ? "true" : "false");
-      } catch {
-        // ignore storage restrictions
-      }
-      return next;
-    });
+    setSidebarCollapsed((prev) => !prev);
   }, []);
 
   const refreshSsoStatus = useCallback(async () => {

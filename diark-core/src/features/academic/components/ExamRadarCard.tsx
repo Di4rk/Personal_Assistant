@@ -98,7 +98,6 @@ function formatExamTerm(term: string): string {
 
 export const ExamRadarCard: React.FC<ExamRadarCardProps> = ({
   className = "",
-  onSyncPortal,
 }) => {
   const isWindowVisible = useWindowVisibility();
   const [exams, setExams] = useState<AcademicExamRecord[]>([]);
@@ -475,14 +474,6 @@ export const ExamRadarCard: React.FC<ExamRadarCardProps> = ({
     }
   };
 
-  const handlePrimarySync = () => {
-    if (onSyncPortal) {
-      onSyncPortal();
-    } else {
-      setShowImportModal(true);
-    }
-  };
-
   return (
     <div
       className={`bg-[#0F1420] border border-[#1D263B] rounded-xl p-5 text-slate-200 transition-colors ${className}`}
@@ -523,16 +514,6 @@ export const ExamRadarCard: React.FC<ExamRadarCardProps> = ({
           >
             <span>Nhập thủ công (dự phòng)</span>
             {showManualTools ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-          </button>
-
-          <button
-            type="button"
-            onClick={handlePrimarySync}
-            title="Đồng bộ lịch thi (F5)"
-            aria-label="Đồng bộ lịch thi"
-            className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#2F6BFF] hover:bg-[#2558DB] text-white transition-colors cursor-pointer"
-          >
-            <RefreshCw className="w-3.5 h-3.5" />
           </button>
         </div>
       </div>

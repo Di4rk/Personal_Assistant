@@ -39,6 +39,9 @@ pub struct ParsedCurriculum {
 pub fn normalize_major_name(raw: &str) -> String {
     let mut normalized = String::with_capacity(raw.len());
     for c in raw.trim().to_lowercase().chars() {
+        if ('\u{0300}'..='\u{036f}').contains(&c) {
+            continue;
+        }
         let mapped = match c {
             'à' | 'á' | 'ạ' | 'ả' | 'ã' | 'â' | 'ầ' | 'ấ' | 'ậ' | 'ẩ' | 'ẫ' | 'ă' | 'ằ' | 'ắ' | 'ặ' | 'ẳ' | 'ẵ' => 'a',
             'è' | 'é' | 'ẹ' | 'ẻ' | 'ẽ' | 'ê' | 'ề' | 'ế' | 'ệ' | 'ể' | 'ễ' => 'e',
@@ -93,11 +96,11 @@ pub fn canonicalize_block_name(raw: &str) -> String {
     let norm = normalize_major_name(trimmed);
     if norm == "dc" || norm.contains("dai cuong") {
         "ĐC".to_string()
-    } else if norm == "csn" || norm == "co so nganh" {
-        "CSN".to_string()
     } else if norm.starts_with("co so nganh (nhom") || norm.starts_with("csn (nhom") {
         trimmed.to_string()
-    } else if norm == "cn" || norm == "chuyen nganh" {
+    } else if norm == "csn" || norm.contains("co so nganh") {
+        "CSN".to_string()
+    } else if norm == "cn" || norm.contains("chuyen nganh") {
         "CN".to_string()
     } else if norm.contains("tu do") || norm.contains("tu chon tu do") {
         "TU_DO".to_string()
@@ -252,11 +255,11 @@ pub fn parse_curriculum_stream(rsc_content: &str, slug: &str) -> AppResult<Parse
         }
     }
 
-    // 3. Phân giải Bảng 3.1: Chỉ tiêu các khối kiến thức qua Heading-to-Sibling Traversal
+    // 3. Phân giải Bảng 3.1 / 5.1: Chỉ tiêu các khối kiến thức qua Heading-to-Sibling Traversal
     let mut rules: Vec<CurriculumRule> = Vec::new();
     for h3 in document.select(h3_sel) {
         let h3_text = h3.text().collect::<String>();
-        if h3_text.contains("3.1") {
+        if h3_text.contains("3.1") || h3_text.contains("5.1") {
             // Traversal tìm table kế tiếp
             for sibling in h3.next_siblings() {
                 if let Some(sibling_elem) = ElementRef::wrap(sibling) {
@@ -266,7 +269,12 @@ pub fn parse_curriculum_stream(rsc_content: &str, slug: &str) -> AppResult<Parse
                             let tds: Vec<_> = tr.select(td_sel).collect();
                             if tds.len() >= 2 {
                                 let block_raw = tds[0].text().collect::<String>().trim().to_string();
-                                let credits_str = tds[1].text().collect::<String>().trim().to_string();
+                                let credits_str = tds[1]
+                                    .text()
+                                    .collect::<String>()
+                                    .replace(['≥', '>', '=', '+'], "")
+                                    .trim()
+                                    .to_string();
                                 let percent = if tds.len() >= 3 {
                                     tds[2].text().collect::<String>().trim().parse::<f64>().ok()
                                 } else {
@@ -436,7 +444,7 @@ pub fn parse_curriculum_stream(rsc_content: &str, slug: &str) -> AppResult<Parse
                         let is_compulsory = match type_col {
                             Some(idx) if idx < tds.len() => {
                                 let t = tds[idx].text().collect::<String>().trim().to_lowercase();
-                                t.contains("bắt buộc")
+                                t == "bb" || t == "b" || t.contains("bắt buộc")
                             }
                             _ => {
                                 let norm_block = normalize_major_name(&block_name);

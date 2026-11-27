@@ -9,7 +9,6 @@ import {
   Download,
   Pencil,
   Plus,
-  RefreshCw,
   Settings,
   Trash2,
   UploadCloud,
@@ -152,7 +151,6 @@ export const ScheduleDashboard: React.FC = () => {
   const [isUtilsOpen, setIsUtilsOpen] = useState(false);
   const utilsDropdownRef = useRef<HTMLDivElement | null>(null);
 
-  const [isSyncing, setIsSyncing] = useState(false);
   const [feedback, setFeedback] = useState<{ ok: boolean; text: string } | null>(null);
   const silentSyncInFlightRef = useRef(false);
   const hasAutoSyncedMountRef = useRef(false);
@@ -519,27 +517,6 @@ export const ScheduleDashboard: React.FC = () => {
     return grouped;
   }, [weekDays, timetable, calendarEvents, calendarMap, exams, activities, oauthStatus?.email]);
 
-  const handleSyncAll = async () => {
-    setIsSyncing(true);
-    setFeedback(null);
-    try {
-      const res = await syncGoogleCalendars();
-      await loadData();
-      if (res.errors.length > 0) {
-        setFeedback({ ok: false, text: `Lỗi: ${res.errors.join("; ")}` });
-      } else {
-        setFeedback({
-          ok: true,
-          text: `Đã đồng bộ ${res.total_events} sự kiện từ ${res.synced_calendars} lịch.`,
-        });
-      }
-    } catch (err) {
-      setFeedback({ ok: false, text: String(err) });
-    } finally {
-      setIsSyncing(false);
-    }
-  };
-
   const handlePushUitToGoogle = async () => {
     setIsUtilsOpen(false);
     setIsPushingUit(true);
@@ -885,17 +862,6 @@ export const ScheduleDashboard: React.FC = () => {
               <span>Thêm sự kiện</span>
             </button>
           )}
-
-          <button
-            type="button"
-            onClick={() => void handleSyncAll()}
-            disabled={isSyncing}
-            title="Đồng bộ lịch Google"
-            aria-label="Đồng bộ lịch Google"
-            className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#1D263B] bg-[#080B12] text-[#6B9BFF] transition-colors duration-150 hover:border-[#2F6BFF]/40 hover:bg-[#151C2C] active:scale-[0.98] disabled:opacity-50 cursor-pointer"
-          >
-            <RefreshCw className={`h-3.5 w-3.5 ${isSyncing ? "animate-spin" : ""}`} aria-hidden="true" />
-          </button>
 
           <div ref={utilsDropdownRef} className="relative">
             <button

@@ -13,11 +13,11 @@ import {
   X,
 } from "lucide-react";
 import type { DegreeAuditReport, CurriculumIndexDto, BlockAuditResult } from "../types";
+import { listen } from "@tauri-apps/api/event";
 import {
   getDegreeAuditReport,
   getAvailableCurriculums,
   setStudentCurriculumSlug,
-  fetchAndCacheCurriculum,
 } from "../../../lib/tauri-client";
 
 interface GraduationAuditCardProps {
@@ -80,16 +80,16 @@ export const GraduationAuditCard: React.FC<GraduationAuditCardProps> = ({
   const [searchQuery, setSearchQuery] = useState<string>("");
   const selectorRef = useRef<HTMLDivElement>(null);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem("academic_audit_collapsed", String(isCollapsed));
+    } catch (e) {
+      console.warn("[GraduationAuditCard] Không thể lưu collapse state:", e);
+    }
+  }, [isCollapsed]);
+
   const toggleCollapse = () => {
-    setIsCollapsed((prev) => {
-      const next = !prev;
-      try {
-        localStorage.setItem("academic_audit_collapsed", String(next));
-      } catch (e) {
-        console.warn("[GraduationAuditCard] Không thể lưu collapse state:", e);
-      }
-      return next;
-    });
+    setIsCollapsed((prev) => !prev);
   };
 
   // Đóng popover khi click ra ngoài
@@ -140,6 +140,15 @@ export const GraduationAuditCard: React.FC<GraduationAuditCardProps> = ({
     loadAuditData();
   }, []);
 
+  useEffect(() => {
+    const unlisten = listen("academic-data-synced", () => {
+      void loadAuditData();
+    });
+    return () => {
+      void unlisten.then((fn) => fn());
+    };
+  }, []);
+
   // Xử lý đổi CTĐT
   const handleSelectCurriculum = async (slug: string) => {
     if (!slug || slug === selectedSlug) return;
@@ -151,23 +160,6 @@ export const GraduationAuditCard: React.FC<GraduationAuditCardProps> = ({
       if (onRefreshTrigger) onRefreshTrigger();
     } catch (err) {
       console.error("[GraduationAuditCard] Lỗi đổi CTĐT:", err);
-      setErrorMessage(String(err));
-    } finally {
-      setSyncing(false);
-    }
-  };
-
-  // Đồng bộ lại từ Portal UIT
-  const handleManualSync = async () => {
-    if (!selectedSlug) return;
-    try {
-      setSyncing(true);
-      setErrorMessage(null);
-      await fetchAndCacheCurriculum(selectedSlug);
-      await loadAuditData(selectedSlug);
-      if (onRefreshTrigger) onRefreshTrigger();
-    } catch (err) {
-      console.error("[GraduationAuditCard] Lỗi đồng bộ:", err);
       setErrorMessage(String(err));
     } finally {
       setSyncing(false);
@@ -430,16 +422,6 @@ export const GraduationAuditCard: React.FC<GraduationAuditCardProps> = ({
               )}
             </div>
           )}
-
-          {/* Sync Button */}
-          <button
-            onClick={handleManualSync}
-            disabled={syncing}
-            title="Đồng bộ lại chuẩn CTĐT từ Portal UIT"
-            className="rounded-lg border border-[#1D263B] bg-[#080B12] p-1.5 text-zinc-300 transition-colors hover:border-[#2F6BFF]/40 hover:bg-[#151C2C] disabled:opacity-50 cursor-pointer"
-          >
-            <RefreshCw className={`h-3.5 w-3.5 ${syncing ? "animate-spin text-[#6B9BFF]" : ""}`} />
-          </button>
 
           {/* Toggle Collapse/Expand Button */}
           <button
