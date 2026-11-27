@@ -5,6 +5,8 @@ use scraper::{ElementRef, Html, Selector};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+pub const CURRICULUM_PARSER_VERSION: &str = "3";
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct CurriculumRule {
     pub knowledge_block: String,
@@ -182,8 +184,10 @@ static RE_SEM: LazyLock<Result<Regex, String>> =
     LazyLock::new(|| Regex::new(r"Học kỳ\s+(\d+)").map_err(|e| format!("Invalid regex 'RE_SEM': {e:?}")));
 static RE_MAJOR: LazyLock<Result<Regex, String>> =
     LazyLock::new(|| Regex::new(r"(?i)ngành\s+([^(]+)").map_err(|e| format!("Invalid regex 'RE_MAJOR': {e:?}")));
-static RE_COURSE_CODE: LazyLock<Result<Regex, String>> =
-    LazyLock::new(|| Regex::new(r"\b([A-Z]{2,6}\d{2,4})\b").map_err(|e| format!("Invalid regex 'RE_COURSE_CODE': {e:?}")));
+static RE_COURSE_CODE: LazyLock<Result<Regex, String>> = LazyLock::new(|| {
+    Regex::new(r"^([A-Z]{2,6}\d{1,4}(?:\.[A-Z]{1,4})?)$")
+        .map_err(|e| format!("Invalid regex 'RE_COURSE_CODE': {e:?}"))
+});
 static RE_CREDIT_NUM: LazyLock<Result<Regex, String>> =
     LazyLock::new(|| Regex::new(r"([0-9]+(?:\.[0-9]+)?)").map_err(|e| format!("Invalid regex 'RE_CREDIT_NUM': {e:?}")));
 
@@ -573,8 +577,11 @@ pub fn parse_curriculum_stream(rsc_content: &str, slug: &str) -> AppResult<Parse
                                     for tr in sibling_elem.select(tr_sel) {
                                         let tds: Vec<_> = tr.select(td_sel).collect();
                                         if !tds.is_empty() {
-                                            let code = clean_cell_text(&tds[0].text().collect::<String>()).to_uppercase();
-                                            if !code.is_empty() && !code.starts_with("MÃ") {
+                                            let code = clean_cell_text(&tds[0].text().collect::<String>())
+                                                .replace('*', " ")
+                                                .trim()
+                                                .to_uppercase();
+                                            if re_course_code.is_match(&code) {
                                                 course_to_semester.entry(code).or_insert(sem_val);
                                             }
                                         }
@@ -587,6 +594,49 @@ pub fn parse_curriculum_stream(rsc_content: &str, slug: &str) -> AppResult<Parse
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+    // Hỗ trợ bảng Kế hoạch giảng dạy gộp 1 bảng lớn theo cột Học kỳ 1..8 (chuẩn K20+)
+    for elem in document.select(heading_or_table_sel) {
+        if elem.value().name() != "table" {
+            continue;
+        }
+        let grid = expand_table_grid(elem, cell_sel);
+        if grid.len() < 2 {
+            continue;
+        }
+        let Some(c_idx) = grid[0].iter().position(|col| {
+            let t = normalize_major_name(col);
+            t.contains("ma mh") || t.contains("ma mon")
+        }) else {
+            continue;
+        };
+        let has_sem_rows = grid.iter().skip(1).any(|r| {
+            !r.is_empty()
+                && (re_sem.is_match(&r[0])
+                    || normalize_major_name(&r.join(" ")).contains("tong so tin chi hoc ky"))
+        });
+        if !has_sem_rows {
+            continue;
+        }
+        let mut active_sem: Option<i32> = None;
+        for row in grid.iter().skip(1) {
+            if !row.is_empty() {
+                if let Some(caps) = re_sem.captures(&row[0]) {
+                    if let Some(s) = caps.get(1).and_then(|m| m.as_str().parse::<i32>().ok()) {
+                        active_sem = Some(s);
+                    }
+                }
+            }
+            let Some(sem_val) = active_sem else {
+                continue;
+            };
+            if let Some(raw_code) = row.get(c_idx) {
+                let code = raw_code.replace('*', " ").trim().to_uppercase();
+                if re_course_code.is_match(&code) {
+                    course_to_semester.entry(code).or_insert(sem_val);
                 }
             }
         }
@@ -695,6 +745,15 @@ pub fn parse_curriculum_stream(rsc_content: &str, slug: &str) -> AppResult<Parse
             continue;
         };
 
+        // Bỏ qua bảng Kế hoạch giảng dạy mẫu (Học kỳ 1..8) để không tràn vào khối KLTN
+        let is_semester_plan_table = grid.iter().skip(1).any(|r| {
+            (!r.is_empty() && re_sem.is_match(&r[0]))
+                || normalize_major_name(&r.join(" ")).contains("tong so tin chi hoc ky")
+        });
+        if is_semester_plan_table {
+            continue;
+        }
+
         let mut section_row_compulsory: Option<bool> = None;
 
         for row in grid.iter().skip(1) {
@@ -702,7 +761,10 @@ pub fn parse_curriculum_stream(rsc_content: &str, slug: &str) -> AppResult<Parse
                 continue;
             }
             let row_joined_norm = normalize_major_name(&row.join(" "));
-            if row_joined_norm.contains("tong so tin chi") || row_joined_norm.contains("cac mon hoc khac theo de nghi") {
+            if row_joined_norm.contains("tong so tin chi")
+                || row_joined_norm.contains("cac mon hoc khac theo de nghi")
+                || row_joined_norm.contains("danh sach cac mon chuyen de")
+            {
                 continue;
             }
 
@@ -729,7 +791,11 @@ pub fn parse_curriculum_stream(rsc_content: &str, slug: &str) -> AppResult<Parse
                 continue;
             }
             let raw_code_cell = row[c_idx].replace('*', " ").trim().to_uppercase();
-            if raw_code_cell.is_empty() || raw_code_cell.starts_with("MÃ") || raw_code_cell.contains("STT") {
+            if raw_code_cell.is_empty()
+                || raw_code_cell.len() > 20
+                || raw_code_cell.starts_with("MÃ")
+                || raw_code_cell.contains("STT")
+            {
                 continue;
             }
             let Some(caps) = re_course_code.captures(&raw_code_cell) else {
@@ -992,6 +1058,21 @@ pub fn save_parsed_curriculum(conn: &Connection, parsed: &ParsedCurriculum) -> A
         }
     }
 
+    let has_settings_table: bool = tx
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='settings'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(false);
+    if has_settings_table {
+        let ver_key = format!("curriculum_parser_ver:{}", parsed.slug);
+        tx.execute(
+            "INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![ver_key, CURRICULUM_PARSER_VERSION],
+        )?;
+    }
+
     tx.commit()?;
     Ok(())
 }
@@ -1244,5 +1325,82 @@ mod tests {
         let parsed2 = parse_curriculum_stream(html_k19_k21, "cu-nhan-nganh-ky-thuat-phan-mem-khoa-19-2024").unwrap();
         assert!(parsed2.courses.iter().any(|c| c.course_code == "ME001" && c.credits == 0.0));
         assert!(parsed2.courses.iter().any(|c| c.course_code == "SS006" && c.credits == 2.0));
+    }
+
+    #[test]
+    fn test_live_k20_khmt_summary_notes_and_semester_plan_isolation() {
+        let html = r#"
+            <h1>Cử nhân ngành Khoa học Máy tính (Khoá 20 - 2025)</h1>
+            <h3>5.1 Tỷ lệ các khối kiến thức</h3>
+            <table><tbody>
+                <tr><td>Khối kiến thức</td><td colspan="2">Tổng số tín chỉ</td></tr>
+                <tr><td rowspan="4">Khối kiến thức giáo dục đại cương (45 TC)</td><td>Lý luận chính trị và pháp luật</td><td>13</td></tr>
+                <tr><td>Toán -Tin học - Khoa học tự nhiên</td><td>18</td></tr>
+                <tr><td>Ngoại ngữ</td><td>12</td></tr>
+                <tr><td>Kỹ năng nghề nghiệp</td><td>2</td></tr>
+                <tr><td rowspan="3">Khối kiến thức giáo dục chuyên nghiệp (71 TC)</td><td>Cơ sở ngành</td><td>≥ 45</td></tr>
+                <tr><td>Chuyên ngành</td><td>≥ 16</td></tr>
+                <tr><td>Môn học tự chọn tự do</td><td>≥ 10</td></tr>
+                <tr><td>Tốt nghiệp (10 TC)</td><td>Sinh viên chọn 1 trong 3 hình thức</td><td>≥ 10</td></tr>
+                <tr><td colspan="2">Tổng số tín chỉ tích lũy tối thiểu toàn khóa</td><td>≥ 126</td></tr>
+            </tbody></table>
+            <h3>5.2 Khối kiến thức giáo dục đại cương</h3>
+            <table><tbody>
+                <tr><td>STT</td><td>Mã môn học</td><td>Tên môn học</td><td>Bắt buộc/Chọn</td><td>TC</td><td>LT</td><td>TH</td></tr>
+                <tr><td>1.</td><td>IT001</td><td>Nhập môn Lập trình</td><td>BB</td><td>4</td><td>3</td><td>1</td></tr>
+                <tr><td>2.</td><td>MA006</td><td>Giải tích</td><td>BB</td><td>4</td><td>4</td><td>0</td></tr>
+                <tr><td>3.</td><td>SS007</td><td>Triết học Mác – Lênin</td><td>BB</td><td>3</td><td>3</td><td>0</td></tr>
+            </tbody></table>
+            <h4>5.3.1 Các môn học cơ sở ngành Khoa học Máy tính</h4>
+            <table><tbody>
+                <tr><td>STT</td><td>Mã môn học</td><td>Tên môn học</td><td>Bắt buộc/Chọn</td><td>TC</td><td>LT</td><td>TH</td></tr>
+                <tr><td colspan="7">Toán cho KHMT (4 TC)</td></tr>
+                <tr><td>1.</td><td>CS115</td><td>Toán cho KHMT</td><td>BB</td><td>4</td><td>4</td><td>0</td></tr>
+                <tr><td colspan="7">Lập trình và Kỹ thuật phần mềm (12 TC)</td></tr>
+                <tr><td>2.</td><td>IT002</td><td>Lập trình hướng đối tượng</td><td>BB</td><td>4</td><td>3</td><td>1</td></tr>
+                <tr><td>3.</td><td>IT003</td><td>Cấu trúc dữ liệu và giải thuật</td><td>BB</td><td>4</td><td>3</td><td>1</td></tr>
+            </tbody></table>
+            <h4>5.3.2 Các môn học chuyên ngành</h4>
+            <table><tbody>
+                <tr><td>STT</td><td>Mã môn học</td><td>Tên môn học chuyên ngành</td><td>TC</td><td>LT</td><td>TH</td><td></td></tr>
+                <tr><td>1.</td><td>CS106</td><td>Trí tuệ nhân tạo</td><td>4</td><td>3</td><td>1</td><td></td></tr>
+                <tr><td colspan="7">Và các môn học khác theo đề nghị của Khoa</td></tr>
+            </tbody></table>
+            <h4>5.3.3 Các môn học tự chọn tự do</h4>
+            <table><tbody>
+                <tr><td>STT</td><td>Mã môn học</td><td>Tên môn học tự chọn tự do</td><td>TC</td><td>LT</td><td>TH</td><td></td></tr>
+                <tr><td>1.</td><td>CS551 *</td><td>Thực tập</td><td>2</td><td>2</td><td></td><td></td></tr>
+                <tr><td colspan="7">Và các môn học khác theo đề nghị của Khoa.</td></tr>
+            </tbody></table>
+            <h3>5.4 Khối kiến thức tốt nghiệp</h3>
+            <table><tbody>
+                <tr><td>STT</td><td>Mã môn học</td><td>Tên môn học</td><td>TC</td><td>LT</td><td>TH</td></tr>
+                <tr><td colspan="6">Hoặc: thực hiện Khóa luận tốt nghiệp</td></tr>
+                <tr><td>1.</td><td>CS505</td><td>Khóa luận tốt nghiệp</td><td>10</td><td></td><td></td></tr>
+            </tbody></table>
+            <table><tbody>
+                <tr><td></td><td>Mã MH</td><td>Tên môn học</td><td>TC</td><td>LT</td><td>TH</td></tr>
+                <tr><td rowspan="3">Học kỳ 1</td><td>IT001</td><td>Nhập môn Lập trình</td><td>4</td><td>3</td><td>1</td></tr>
+                <tr><td>MA006</td><td>Giải tích</td><td>4</td><td>4</td><td>0</td></tr>
+                <tr><td>IT012</td><td>Tổ chức và cấu trúc máy tính 2</td><td>4</td><td>3</td><td>1</td></tr>
+                <tr><td></td><td>Tổng số tín chỉ Học kỳ 1</td><td>12</td><td>10</td><td>2</td><td></td></tr>
+                <tr><td rowspan="2">Học kỳ 2</td><td>IT002</td><td>Lập trình hướng đối tượng</td><td>4</td><td>3</td><td>1</td></tr>
+                <tr><td>IT003</td><td>Cấu trúc dữ liệu và giải thuật</td><td>4</td><td>3</td><td>1</td></tr>
+            </tbody></table>
+        "#;
+
+        let parsed = parse_curriculum_stream(html, "cu-nhan-nganh-khoa-hoc-may-tinh-khoa-20-2025").unwrap();
+        assert_eq!(parsed.rules.len(), 5, "Phải có đúng 5 khối chuẩn, không chứa dòng Tổng số tín chỉ");
+        assert_eq!(parsed.total_credits, 126.0);
+        assert!(!parsed.courses.iter().any(|c| c.course_code.contains("VÀ CÁC")));
+        assert!(!parsed.courses.iter().any(|c| c.course_code.contains("TOÁN")));
+
+        // IT001 và IT002 không được phép rò vào KLTN từ bảng kế hoạch giảng dạy
+        assert_eq!(parsed.courses.iter().filter(|c| c.course_code == "IT001").count(), 1);
+        assert_eq!(parsed.courses.iter().find(|c| c.course_code == "IT001").unwrap().knowledge_block, "ĐC");
+        assert_eq!(parsed.courses.iter().find(|c| c.course_code == "IT001").unwrap().recommended_semester, Some(1));
+        assert_eq!(parsed.courses.iter().find(|c| c.course_code == "IT002").unwrap().recommended_semester, Some(2));
+        assert!(!parsed.courses.iter().any(|c| c.knowledge_block == "KLTN" && c.course_code == "IT012"));
+        assert!(parsed.courses.iter().any(|c| c.course_code == "CS551" && c.knowledge_block == "Tự chọn tự do"));
     }
 }

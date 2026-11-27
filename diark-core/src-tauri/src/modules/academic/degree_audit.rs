@@ -194,7 +194,7 @@ pub fn run_degree_audit(conn: &Connection, preferred_slug: Option<&str>) -> AppR
         |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<i32>>(1)?, row.get::<_, f64>(2)?)),
     ).map_err(|e| AppError::CurriculumParse(format!("Không tìm thấy CTĐT với slug {}: {}", slug, e)))?;
 
-    // Tải rules
+    // Tải rules (lọc bỏ các dòng tổng cộng nếu DB cache cũ bị lẫn)
     let mut rules: Vec<(String, f64)> = Vec::new();
     {
         let mut stmt = conn.prepare(
@@ -204,7 +204,16 @@ pub fn run_degree_audit(conn: &Connection, preferred_slug: Option<&str>) -> AppR
             Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?))
         })?;
         for r in rows {
-            rules.push(r?);
+            let (blk, req) = r?;
+            let blk_norm = crate::services::curriculum_harvester::normalize_major_name(&blk);
+            if blk_norm.contains("tong so tin chi")
+                || blk_norm.contains("tich luy toi thieu")
+                || blk_norm == "tong"
+                || blk_norm == "tong cong"
+            {
+                continue;
+            }
+            rules.push((blk, req));
         }
     }
     let rules_was_empty = rules.is_empty();
@@ -528,11 +537,17 @@ pub fn run_degree_audit(conn: &Connection, preferred_slug: Option<&str>) -> AppR
         }
     }
 
+    let re_valid_course_code = Regex::new(r"^[A-Z]{2,6}\d{1,4}(?:\.[A-Z]{1,4})?$")
+        .map_err(|e| AppError::CurriculumParse(e.to_string()))?;
+
     let mut curr_courses_by_block: HashMap<String, Vec<crate::services::curriculum_harvester::CurriculumCourse>> = HashMap::new();
     let mut course_to_curr: HashMap<String, crate::services::curriculum_harvester::CurriculumCourse> = HashMap::new();
 
     for mut c in curr_courses {
-        let code_upper = c.course_code.trim().to_uppercase();
+        let code_upper = c.course_code.replace('*', " ").trim().to_uppercase();
+        if !re_valid_course_code.is_match(&code_upper) {
+            continue;
+        }
         c.course_code = code_upper.clone();
         let is_non_credit = code_upper == "ME001" || code_upper.starts_with("PE");
         if rules_was_empty && is_non_credit {
@@ -762,19 +777,23 @@ pub fn run_degree_audit(conn: &Connection, preferred_slug: Option<&str>) -> AppR
         && non_credit_prerequisites.has_drl_65;
 
     // BƯỚC 6.6: Đề xuất học phần cho kỳ tới dựa trên CTĐT + trạng thái mở lớp + điều kiện tiên quyết
-    let re_prereq_code = Regex::new(r"\b([A-Z]{2,6}\d{2,4})\b")
+    let re_prereq_code = Regex::new(r"\b([A-Z]{2,6}\d{1,4}(?:\.[A-Z]{1,4})?)\b")
         .map_err(|e| AppError::CurriculumParse(e.to_string()))?;
 
     let mut rec_candidates: Vec<(u8, bool, i32, f64, RecommendedCourseItem)> = Vec::new();
     let mut rec_seen: HashSet<String> = HashSet::new();
 
     for block in &block_audits {
+        if completion_percent < 70.0 && block.block_name_display == "Tốt nghiệp" {
+            continue;
+        }
         let Some(courses_in_block) = curr_courses_by_block.get(&block.knowledge_block) else {
             continue;
         };
         for c in courses_in_block {
             let code = c.course_code.trim().to_uppercase();
             if code.is_empty()
+                || !re_valid_course_code.is_match(&code)
                 || code == "ME001"
                 || code.starts_with("PE")
                 || deduplicated_passed_courses.contains_key(&code)
@@ -1649,5 +1668,31 @@ mod tests {
             // Check IT002 is ranked in top 8 open & prerequisites_met courses
             assert!(it002_pos.is_some(), "IT002 (đủ tiên quyết IT001, đang mở lớp) phải được đề xuất trong top 8");
         }
+    }
+
+    #[test]
+    fn test_filters_corrupt_cached_rules_and_prose_course_codes() {
+        let conn = setup_test_curriculum_and_db();
+        let slug = "cu-nhan-nganh-khoa-hoc-may-tinh-khoa-20-2025";
+
+        // Giả lập DB còn sót bản ghi lỗi từ parser cũ (dòng tổng TC làm rule + câu văn làm mã môn)
+        conn.execute(
+            "INSERT INTO curriculum_rules (slug, knowledge_block, required_credits)
+             VALUES (?1, 'Tổng số tín chỉ tích lũy tối thiểu toàn khóa', 126.0)",
+            params![slug],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO curriculum_courses (slug, course_code, course_name, credits, knowledge_block, is_compulsory)
+             VALUES (?1, 'VÀ CÁC MÔN HỌC KHÁC THEO ĐỀ NGHỊ CỦA KHOA', '', 0.0, 'CN', 0),
+                    (?1, 'TOÁN CHO KHMT (4 TC)', '', 0.0, 'CSN', 0)",
+            params![slug],
+        )
+        .unwrap();
+
+        let report = run_degree_audit(&conn, Some(slug)).unwrap();
+        assert!(!report.block_audits.iter().any(|b| b.knowledge_block.contains("tích lũy")));
+        assert!(!report.recommended_next_courses.iter().any(|r| r.course_code.len() > 12));
+        assert!(!report.recommended_next_courses.iter().any(|r| r.knowledge_block == "Tốt nghiệp"));
     }
 }

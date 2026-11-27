@@ -1234,6 +1234,30 @@ pub async fn get_degree_audit_report(
                 |r| r.get(0),
             )
             .unwrap_or(0);
+        let ver_key = format!("curriculum_parser_ver:{}", target_slug);
+        let cached_ver: Option<String> = conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = ?1",
+                params![ver_key],
+                |r| r.get(0),
+            )
+            .ok();
+        let has_corrupt_rules: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM curriculum_rules WHERE slug = ?1 AND (LOWER(knowledge_block) LIKE '%tích lũy%' OR LOWER(knowledge_block) LIKE '%tổng số%')",
+                params![target_slug],
+                |r| r.get(0),
+            )
+            .unwrap_or(false);
+        let has_corrupt_courses: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM curriculum_courses WHERE slug = ?1 AND (LENGTH(course_code) > 12 OR knowledge_block LIKE '5.%' OR knowledge_block LIKE '3.%' OR knowledge_block LIKE '6.%')",
+                params![target_slug],
+                |r| r.get(0),
+            )
+            .unwrap_or(false);
+        let parser_outdated =
+            cached_ver.as_deref() != Some(crate::services::curriculum_harvester::CURRICULUM_PARSER_VERSION);
         let catalog_count: i64 = conn
             .query_row("SELECT COUNT(*) FROM uit_course_catalog", [], |r| r.get(0))
             .unwrap_or(0);
@@ -1243,7 +1267,10 @@ pub async fn get_degree_audit_report(
             7 * 24 * 60 * 60,
             false,
         );
-        (rules_count == 0, catalog_count == 0 || catalog_stale)
+        (
+            rules_count == 0 || parser_outdated || has_corrupt_rules || has_corrupt_courses,
+            catalog_count == 0 || catalog_stale,
+        )
     };
 
     if needs_catalog_sync
@@ -1274,8 +1301,15 @@ pub async fn get_degree_audit_report(
     }
 
     if needs_fetch {
-        // Tự động fetch từ Portal UIT nếu chưa có trong DB
-        let _ = crate::services::curriculum_harvester::sync_curriculum_by_slug(&db, &target_slug).await;
+        // Tự động fetch lại từ Portal UIT nếu chưa có hoặc cache thuộc parser cũ/lỗi
+        if let Err(err) =
+            crate::services::curriculum_harvester::sync_curriculum_by_slug(&db, &target_slug).await
+        {
+            eprintln!(
+                "[Academic] Tự động sync CTĐT {} thất bại: {}",
+                target_slug, err
+            );
+        }
     }
 
     let conn = db.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
