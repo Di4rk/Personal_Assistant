@@ -5,9 +5,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
-// ============================================================
 //  DTOs & Structures
-// ============================================================
 
 pub const GEMINI_EMIT_INTERVAL: Duration = Duration::from_millis(16);
 
@@ -206,9 +204,7 @@ struct OpenAiResponseWire {
     error: Option<OpenAiApiErrorDetail>,
 }
 
-// ============================================================
 //  AI Configuration Store & Endpoint Helpers
-// ============================================================
 
 pub fn is_gemini_native_endpoint(base_url: &str) -> bool {
     let trimmed = base_url.trim();
@@ -320,9 +316,7 @@ pub fn parse_openai_sse_line(line: &str) -> Result<Option<String>, String> {
     Ok(None)
 }
 
-// ============================================================
 //  Gemini SSE Stream Parser
-// ============================================================
 
 pub fn parse_gemini_sse_line(line: &str) -> Result<Option<String>, String> {
     let trimmed = line.trim();
@@ -379,9 +373,7 @@ pub fn clean_json_markdown_block(raw: &str) -> &str {
     trimmed
 }
 
-// ============================================================
 //  Prompt Builders
-// ============================================================
 
 pub fn build_socratic_prompt(req: &SocraticDebugRequestDto) -> String {
     let user_code = req
@@ -477,9 +469,7 @@ YÊU CẦU BÓC TÁCH:
     )
 }
 
-// ============================================================
 //  API Client Operations (Streaming & Non-Streaming)
-// ============================================================
 
 pub async fn test_gemini_api_key(
     api_key: &str,
@@ -898,9 +888,7 @@ pub async fn extract_tasks_with_gemini(
     }
 }
 
-// ============================================================
 //  Insert Extracted Task Into SQLite moodle_tasks
-// ============================================================
 
 pub fn insert_extracted_moodle_task(
     conn: &mut Connection,
@@ -990,9 +978,7 @@ pub fn insert_extracted_moodle_task(
     Ok(generated_task_id)
 }
 
-// ============================================================
 //  Unit Tests
-// ============================================================
 
 #[cfg(test)]
 mod tests {

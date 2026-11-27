@@ -21,9 +21,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { Clock, ExternalLink, FolderOpen, Target, Zap } from "lucide-react";
 import { openExternalUrl } from "../../../lib/tauri-client";
 
-// ============================================================
 //  TYPES
-// ============================================================
 
 export interface ScrapedDeadline {
   id: string;
@@ -52,9 +50,7 @@ export interface ActiveCourseDispatcherProps {
   className?: string;
 }
 
-// ============================================================
 //  TIME HELPERS
-// ============================================================
 
 interface TimeLeft {
   total_seconds: number;
@@ -94,9 +90,7 @@ function urgencyClass(tl: TimeLeft): string {
   return "bg-emerald-500/20 text-emerald-400 border-emerald-500/30";
 }
 
-// ============================================================
 //  GPA SIMULATOR (inline — pure calculation)
-// ============================================================
 
 /**
  * Tính điểm cuối kỳ tối thiểu cần đạt để đạt target GPA.
@@ -114,9 +108,7 @@ function calcRequiredFinal(
   return Math.max(0, Math.min(10, required));
 }
 
-// ============================================================
 //  COMPONENT
-// ============================================================
 
 const EMPTY_DEADLINES: NonNullable<ActiveCourseDispatcherProps["deadlines"]> = [];
 

@@ -12,9 +12,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { invoke } from "@tauri-apps/api/core";
 import { Award, Calendar, CheckCircle2, Flame, RefreshCw, Trophy, Zap } from "lucide-react";
 
-// ============================================================
 //  TYPES
-// ============================================================
 
 export interface DailyMatrixRecord {
   date: string; // 'YYYY-MM-DD' (Normalized to UTC+07:00 ICT)
@@ -37,9 +35,7 @@ interface TooltipState {
   record: DailyMatrixRecord | null;
 }
 
-// ============================================================
 //  TIER STYLES & LABELS
-// ============================================================
 
 function getTierColorClass(tier: number): string {
   switch (tier) {
@@ -73,9 +69,7 @@ function getTierLabel(tier: number): string {
   }
 }
 
-// ============================================================
 //  1. CELL MEMOIZATION (Flat Props)
-// ============================================================
 
 interface MatrixCellProps {
   date: string;
@@ -93,9 +87,7 @@ const MatrixCell = React.memo(function MatrixCell({ date, tier }: MatrixCellProp
   );
 });
 
-// ============================================================
 //  WEEK GROUPING HELPER
-// ============================================================
 
 interface WeekColumn {
   weekIndex: number;
@@ -127,9 +119,7 @@ function buildWeekColumns(records: DailyMatrixRecord[]): WeekColumn[] {
   return columns;
 }
 
-// ============================================================
 //  MAIN HEATMAP COMPONENT
-// ============================================================
 
 export default function LifeMatrixHeatmap({
   className = "",
@@ -192,9 +182,7 @@ export default function LifeMatrixHeatmap({
     loadHeatmapData(selectedYear);
   }, [selectedYear, loadHeatmapData]);
 
-  // ============================================================
   //  2. EVENT DELEGATION (Single onMouseMove / onMouseLeave)
-  // ============================================================
 
   const handleMouseMove = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {

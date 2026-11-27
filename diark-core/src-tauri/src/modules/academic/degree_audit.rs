@@ -519,7 +519,7 @@ pub fn run_degree_audit(conn: &Connection, preferred_slug: Option<&str>) -> AppR
         }
     }
 
-    // BƯỚC 3.3: Nạp dữ liệu từ uit_course_catalog (trạng thái mở lớp, tiên quyết, số TC chuẩn)
+    // Nạp dữ liệu từ uit_course_catalog (trạng thái mở lớp, tiên quyết, số TC chuẩn)
     #[derive(Debug, Clone)]
     struct CatalogCourseInfo {
         total_credits: f64,
@@ -653,7 +653,7 @@ pub fn run_degree_audit(conn: &Connection, preferred_slug: Option<&str>) -> AppR
         .cloned()
         .collect();
 
-    // BƯỚC 6.1: Khớp các môn Bắt buộc (Compulsory) trước
+    // Khớp các môn bắt buộc trước
     for (block_key, block_result) in block_map.iter_mut() {
         if let Some(courses_in_block) = curr_courses_by_block.get(block_key) {
             for c in courses_in_block {
@@ -704,8 +704,7 @@ pub fn run_degree_audit(conn: &Connection, preferred_slug: Option<&str>) -> AppR
         });
     }
 
-    // BƯỚC 6.2: Khớp các môn Tự chọn theo đúng khối kiến thức
-    // Sắp xếp các môn tự chọn của sinh viên theo điểm số giảm dần để ưu tiên môn điểm cao
+    // Khớp các môn tự chọn theo khối kiến thức (ưu tiên môn điểm cao)
     let mut elective_candidates: Vec<StudentCourseRecord> = remaining_passed_courses.into_values().collect();
     elective_candidates.sort_by(|a, b| {
         let score_a = a.summary_score_10.unwrap_or(0.0);
@@ -741,7 +740,7 @@ pub fn run_degree_audit(conn: &Connection, preferred_slug: Option<&str>) -> AppR
         unassigned_courses.push(student_course);
     }
 
-    // BƯỚC 6.3: Thuật toán Greedy Spillover — Dồn tín chỉ dư thừa sang "Tự chọn tự do"
+    // Dồn tín chỉ dư thừa sang khối "Tự chọn tự do"
     let mut final_unmatched: Vec<AuditCourseItem> = Vec::new();
     if let Some(tu_do_block) = block_map.get_mut(&tu_do_key) {
         for student_course in unassigned_courses {
@@ -767,7 +766,7 @@ pub fn run_degree_audit(conn: &Connection, preferred_slug: Option<&str>) -> AppR
         }
     }
 
-    // BƯỚC 6.4: Thu thập danh sách các môn tự chọn chưa học của từng khối kiến thức
+    // Thu thập các môn tự chọn chưa học của từng khối kiến thức
     for (block_key, block_result) in block_map.iter_mut() {
         if let Some(courses_in_block) = curr_courses_by_block.get(block_key) {
             for c in courses_in_block {
@@ -795,7 +794,7 @@ pub fn run_degree_audit(conn: &Connection, preferred_slug: Option<&str>) -> AppR
         }
     }
 
-    // BƯỚC 6.5: Cập nhật cờ fulfilled và tổng hợp toàn diện
+    // Tổng hợp tỷ lệ hoàn thành và điều kiện tốt nghiệp
     let mut total_earned_credits = 0.0;
     let mut total_required_credits = 0.0;
     let mut all_compulsory_done = true;
@@ -831,7 +830,7 @@ pub fn run_degree_audit(conn: &Connection, preferred_slug: Option<&str>) -> AppR
         && non_credit_prerequisites.has_english
         && non_credit_prerequisites.has_drl_65;
 
-    // BƯỚC 6.6: Đề xuất học phần cho kỳ tới dựa trên CTĐT + trạng thái mở lớp + điều kiện tiên quyết
+    // Gợi ý học phần cho kỳ tới dựa trên CTĐT, trạng thái mở lớp và điều kiện tiên quyết
     let re_prereq_code = Regex::new(r"\b([A-Z]{2,6}\d{1,4}(?:\.[A-Z]{1,4})?)\b")
         .map_err(|e| AppError::CurriculumParse(e.to_string()))?;
 

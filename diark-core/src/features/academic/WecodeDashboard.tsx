@@ -587,7 +587,7 @@ export const WecodeDashboard: React.FC = () => {
                     }`}
                     title="Chưa đạt 100% và sắp hết hạn (loại trừ bài vô thời hạn)"
                   >
-                    <span>⚡ Gấp ({statusCounts.urgent})</span>
+                    <span>Gấp ({statusCounts.urgent})</span>
                   </button>
                   <button
                     onClick={() => setStatusFilter("completed")}
@@ -597,7 +597,7 @@ export const WecodeDashboard: React.FC = () => {
                         : "text-zinc-400 hover:text-emerald-300"
                     }`}
                   >
-                    <span>✅ Xong ({statusCounts.completed})</span>
+                    <span>Xong ({statusCounts.completed})</span>
                   </button>
                   <button
                     onClick={() => setStatusFilter("closed")}

@@ -29,12 +29,10 @@ const EVENT_SYNC_COMPLETE: &str = "cf-sync-complete";
 const LEGACY_EVENT_SYNC: &str = "cf://sync-event";
 const SETTING_KEY_CF_HANDLE: &str = "cf_handle";
 
-// ============================================================
 // RAII Concurrency Lock — ngăn API thrashing khi user bấm
 // "Sync" liên tục trong khi background worker đang chạy.
 // AtomicBool thay vì Mutex<bool> vì: không cần giữ bất kỳ
 // shared data nào bên trong — chỉ cần 1 cờ "đang chạy hay chưa".
-// ============================================================
 
 /// Handle dùng chung (clone tự do) để kiểm tra / yêu cầu lock sync.
 #[derive(Clone)]
@@ -67,9 +65,7 @@ impl Drop for SyncGuard {
     }
 }
 
-// ============================================================
 // Codeforces API types
-// ============================================================
 
 #[derive(Debug, Deserialize)]
 pub struct CfApiResponse<T> {
@@ -101,9 +97,7 @@ pub struct CfProblem {
     pub tags: Vec<String>,
 }
 
-// ============================================================
 // Background Worker
-// ============================================================
 
 /// Entry point của background worker - gọi 1 lần trong Tauri setup hook,
 /// chạy cho tới khi nhận tín hiệu shutdown qua `shutdown_rx`.
@@ -193,9 +187,7 @@ pub fn build_http_client() -> AppResult<Client> {
         .map_err(AppError::Http)
 }
 
-// ============================================================
 // Core Sync Logic (shared between worker loop and IPC command)
-// ============================================================
 
 /// Chạy đúng 1 vòng: đọc handle -> gọi CF API -> lọc submission mới -> insert -> emit.
 ///

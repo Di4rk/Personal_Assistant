@@ -11,7 +11,7 @@
     };
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-    // --- 1. UI PROGRESS HUD ---
+    // Progress banner
     function renderBanner(isLoggedIn, statusText = "", percent = 0) {
         let el = document.getElementById("__diark_moodle_overlay");
         if (!el) {
@@ -40,10 +40,9 @@
             el.style.alignItems = "center";
             el.style.gap = "12px";
             el.innerHTML = `
-                <span style="font-size: 20px;">🔐</span>
                 <div>
-                    <div style="font-weight: 700; color: #38bdf8; font-size: 13px;">Diark OS • Tự động đồng bộ Moodle UIT</div>
-                    <div style="color: #94a3b8; font-size: 11px; margin-top: 2px;">Vui lòng đăng nhập tài khoản Courses UIT. Sau khi đăng nhập, hệ thống sẽ tự động thu thập và đóng cửa sổ này.</div>
+                    <div style="font-weight: 700; color: #38bdf8; font-size: 13px;">Diark - Đồng bộ Moodle UIT</div>
+                    <div style="color: #94a3b8; font-size: 11px; margin-top: 2px;">Vui lòng đăng nhập tài khoản Courses UIT để bắt đầu đồng bộ.</div>
                 </div>
             `;
         } else {
@@ -56,10 +55,7 @@
             el.style.maxWidth = "90vw";
             el.innerHTML = `
                 <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px;">
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                        <span style="font-size: 18px;">📚</span>
-                        <span style="font-weight: 700; color: #38bdf8; font-size: 13px;">Diark OS • Đang thu thập Courses & Nhiệm vụ</span>
-                    </div>
+                    <span style="font-weight: 700; color: #38bdf8; font-size: 13px;">Diark - Đang đồng bộ Courses & Nhiệm vụ</span>
                     <span style="font-size: 11px; font-weight: 600; color: #38bdf8; font-family: monospace;">${Math.round(percent)}%</span>
                 </div>
                 <div style="font-size: 11px; color: #a1a1aa; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${statusText}</div>
@@ -237,7 +233,7 @@
         return 0;
     }
 
-    // --- 3. HARVESTER EXECUTION ---
+    // Harvester runner
     async function runAutoHarvester(sesskey) {
         renderBanner(true, "Đang kết nối API Moodle UIT...", 15);
 
@@ -245,7 +241,7 @@
         let allMaterials = [];
         const taskMap = new Map();
 
-        // Bước 1: Fetch danh sách môn học đã đăng ký
+        // Fetch danh sách môn học đã đăng ký
         try {
             renderBanner(true, "Đang tải danh sách môn học kỳ hiện tại...", 25);
             const coursesUrl = `https://courses.uit.edu.vn/lib/ajax/service.php?sesskey=${sesskey}&info=core_course_get_enrolled_courses_by_timeline_classification`;
@@ -331,7 +327,7 @@
             console.warn("[Diark Moodle] Lỗi fetch enrolled courses:", err);
         }
 
-        // Bước 2: Fetch sự kiện lịch & deadline bài tập
+        // Fetch sự kiện lịch & deadline bài tập
         try {
             renderBanner(true, "Đang kiểm tra bài tập và deadline tới hạn...", 45);
             const calUrl = `https://courses.uit.edu.vn/lib/ajax/service.php?sesskey=${sesskey}&info=core_calendar_get_action_events_by_timesort`;
@@ -697,7 +693,7 @@
         }
     }
 
-        // Bước 3: Fetch chi tiết từng môn theo lô song song & streaming real-time
+        // Fetch chi tiết từng môn theo lô song song
         const totalCourses = enrolledCourses.length;
         let completedCount = 0;
 
@@ -845,8 +841,8 @@
             }
         } catch (_) {}
 
-        // Bước 4: Chốt hạ hoàn tất và gửi tín hiệu is_final = true
-        renderBanner(true, `✅ Hoàn tất! Đã đồng bộ ${enrolledCourses.length} môn học Moodle. Đang đóng cửa sổ...`, 100);
+        // Chốt đồng bộ và gửi tín hiệu is_final = true
+        renderBanner(true, `Đã đồng bộ ${enrolledCourses.length} môn học Moodle. Đang đóng cửa sổ...`, 100);
 
         try {
             await fetch(LOCAL_SERVER_URL, {
@@ -871,7 +867,7 @@
         window.location.href = `diark-sso://callback#target=moodle&status=success&total_courses=${enrolledCourses.length}`;
     }
 
-    // --- 4. STARTUP WATCHDOG & AUTH DETECTOR ---
+    // Watchdog & auth check
     function initMoodleWatcher() {
         const isLoggedIn = checkIsLoggedIn();
         const sesskey = extractSesskey();

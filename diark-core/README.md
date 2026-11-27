@@ -1,12 +1,11 @@
-# DIARK OS — Frontend & Desktop Core
+# diark-core
 
-This directory contains the Tauri v2 + React 19 + TypeScript desktop core application for DIARK OS.
+Tauri v2, Rust, and React 19 desktop application source for Diark. See the [root README](../README.md) for the full feature overview, architecture, and prerequisites.
 
-For full architectural documentation, feature overviews, and deployment guidelines, please refer to the [Root README](../README.md).
+## Common Commands
 
-### Quick Commands
-
-- `npm run dev`: Start Vite web server only (http://localhost:1420)
-- `npm run tauri dev`: Launch the desktop app in live-reload debug mode
-- `npm run tauri build`: Package production Windows NSIS installer
-- `npx tsc --noEmit`: Run strict TypeScript static type checks
+- `npm run dev`: start the Vite dev server (`http://localhost:1420`)
+- `npm run tauri dev`: launch the Tauri desktop app in dev mode
+- `npm run tauri build`: package the production installer
+- `npm run lint:safety`: run panic/any scans and `tsc --noEmit`
+- `npm test`: run frontend unit tests

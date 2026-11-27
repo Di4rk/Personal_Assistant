@@ -282,7 +282,7 @@ export const ExamRadarCard: React.FC<ExamRadarCardProps> = ({
 
       setImportStatus("Đang lưu lịch thi vào SQLite...");
       const count = await syncExamSchedules({ items });
-      setImportStatus(`✅ Đã nạp thành công ${count} ca thi vào Exam Radar!`);
+      setImportStatus(`Đã nạp ${count} ca thi vào Lịch thi.`);
       setJsonInput("");
       await loadExams();
       setTimeout(() => {
@@ -1063,7 +1063,7 @@ export const ExamRadarCard: React.FC<ExamRadarCardProps> = ({
             {importStatus && (
               <div
                 className={`text-xs p-2.5 rounded ${
-                  importStatus.startsWith("✅")
+                  importStatus.startsWith("Đã nạp")
                     ? "bg-emerald-950/50 text-emerald-300 border border-emerald-800"
                     : "bg-rose-950/50 text-rose-300 border border-rose-800"
                 }`}

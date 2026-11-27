@@ -2,10 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { savePostMortem, searchPostMortems, deletePostMortem } from "../lib/tauri-client";
 import type { PostMortemInput, PostMortemRecord, PostMortemSearchResult } from "../types/post_mortem";
 
-// ============================================================
 // Hook state types — explicit discriminated union keeps consumer
 // code clean: no boolean soup (isLoading + isError + data).
-// ============================================================
 
 type SaveState =
   | { status: "idle" }

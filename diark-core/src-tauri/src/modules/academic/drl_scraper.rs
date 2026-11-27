@@ -227,7 +227,7 @@ pub async fn fetch_all_semester_drl(
     let mut cookie_jar: HashMap<String, String> = HashMap::new();
     let user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
 
-    // Bước 1: GET trang chủ để lấy form_build_id và cookie phiên đầu
+    // GET trang chủ để lấy form_build_id và cookie phiên đầu
     let get_login_resp = client
         .get(DRL_BASE_URL)
         .header(USER_AGENT, user_agent)
@@ -241,7 +241,7 @@ pub async fn fetch_all_semester_drl(
         .map_err(|e| format!("Lỗi đọc trang đăng nhập drl.uit.edu.vn: {e}"))?;
     let (login_build_id, login_form_id) = parse_login_form_fields(&login_html)?;
 
-    // Bước 2: POST đăng nhập
+    // POST đăng nhập
     let login_body = encode_form_pairs(&[
         ("name", clean_user),
         ("pass", password),
@@ -271,7 +271,7 @@ pub async fn fetch_all_semester_drl(
         );
     }
 
-    // Bước 3: GET bảng điểm ĐRL (mặc định trả về học kỳ mới nhất / đang học)
+    // GET bảng điểm ĐRL (mặc định trả về học kỳ mới nhất)
     let view_resp = client
         .get(DRL_VIEW_URL)
         .header(USER_AGENT, user_agent)
@@ -308,7 +308,7 @@ pub async fn fetch_all_semester_drl(
         }
     }
 
-    // Bước 4: Kéo các học kỳ còn lại trong dropdown SV-*
+    // Kéo các học kỳ còn lại trong dropdown SV-*
     let mut curr_build_id = first_page.form_build_id;
     let mut curr_token = first_page.form_token;
     let mut curr_form_id = first_page.form_id;

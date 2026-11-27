@@ -96,9 +96,7 @@ pub fn batch_insert_new_submissions(
 
     let tx = conn.transaction()?;
 
-    // Bước 1: nạp trước tập problem_id đã từng AC, dùng để phát hiện First AC
-    // chính xác tuyệt đối - kể cả problem đó được AC lần đầu ở 1 sync cycle
-    // TRƯỚC ĐÓ chứ không phải trong batch hiện tại.
+    // Nạp sẵn tập problem_id đã từng AC trước batch này để tính First AC
     let mut ac_problem_set: HashSet<String> = {
         let mut stmt = tx.prepare("SELECT DISTINCT problem_id FROM submissions WHERE verdict = 'OK'")?;
         let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;

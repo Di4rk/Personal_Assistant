@@ -217,9 +217,7 @@ export function getRecommendedTerms(remainingCredits: number, completedTerms = 0
   return presets[presets.length - 1]?.terms ?? 1;
 }
 
-// ============================================================
 //  UIT Knowledge Category Classification & Stats
-// ============================================================
 
 export type CourseCategory = "general" | "foundational" | "specialized" | "auxiliary";
 

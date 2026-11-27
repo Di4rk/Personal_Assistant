@@ -362,7 +362,6 @@ pub fn apply_shortcut_change<F>(
 where
     F: FnOnce(&str) -> Result<(), AppError>,
 {
-    // Bước 4: So sánh phím đã parse
     if new_shortcut == hotkey_inner.current && hotkey_inner.registered {
         return Ok(canonical);
     }
@@ -370,9 +369,8 @@ where
     let old_shortcut = hotkey_inner.current.clone();
     let was_registered = hotkey_inner.registered;
 
-    // Bước 5: Đăng ký phím mới trước
+    // Register the new shortcut first so we can keep the old one on failure
     if let Err(e) = backend.register(&new_shortcut) {
-        // Nếu trước đó đang bị suspended hoặc lỗi, cố gắng khôi phục phím cũ
         if was_registered {
             let _ = backend.register(&old_shortcut);
         }
@@ -382,19 +380,16 @@ where
         ));
     }
 
-    // Bước 6: Hủy đăng ký phím cũ (nếu khác phím mới và đã từng register)
     if was_registered && old_shortcut != new_shortcut {
         if let Err(e) = backend.unregister(&old_shortcut) {
             eprintln!("[WARN] Unregister old shortcut failed (continuing): {e}");
         }
     }
 
-    // Bước 7: Ghi đĩa DB (Persist)
+    // Persist to DB, rolling back OS registration if write fails
     if let Err(persist_err) = persist_fn(&canonical) {
         eprintln!("[ERROR] Persist shortcut to DB failed, rolling back OS registration: {persist_err}");
-        // Rollback: Hủy đăng ký phím mới
         let _ = backend.unregister(&new_shortcut);
-        // Đăng ký lại phím cũ nếu trước đó có đăng ký
         if was_registered {
             if let Err(rb_err) = backend.register(&old_shortcut) {
                 eprintln!("[FATAL] Rollback re-register old shortcut failed: {rb_err}");
@@ -411,7 +406,6 @@ where
         ));
     }
 
-    // Bước 8: Cập nhật RAM state thành công
     hotkey_inner.current = new_shortcut;
     hotkey_inner.registered = true;
 
@@ -470,9 +464,7 @@ pub fn global_hotkey_handler(app: &AppHandle, _shortcut: &Shortcut, event: Short
     }
 }
 
-// ============================================================================
 // IPC COMMAND IMPLEMENTATIONS
-// ============================================================================
 
 /// 1. Lấy thông số hệ thống và reconcile trạng thái Autostart với Registry OS
 #[tauri::command]
@@ -644,11 +636,9 @@ pub async fn update_global_shortcut(
         ));
     }
 
-    // Bước 1 & 2: Parse phím tắt an toàn và validate
     let parsed: Shortcut = parse_shortcut(&new_shortcut)?;
     let canonical = validate_shortcut(&parsed)?;
 
-    // Bước 3: Khóa tuần tự hóa op_lock (chống double click / race condition)
     let _guard = hotkey.op_lock.lock().await;
 
     let backend = TauriHotkeyBackend(&app);

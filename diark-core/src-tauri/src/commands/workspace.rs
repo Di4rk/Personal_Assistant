@@ -13,9 +13,7 @@ use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-// ============================================================
 //  DATA CONTRACTS (IPC boundary)
-// ============================================================
 
 /// Kết quả của 1 lần ingest Moodle course.
 #[derive(Debug, Serialize)]
@@ -34,9 +32,7 @@ pub struct WorkspaceConfig {
     pub target_score: f64,
 }
 
-// ============================================================
 //  DEADLINE COMMANDS
-// ============================================================
 
 /// Parse HTML trang Moodle course view và persist danh sách deadline vào SQLite.
 ///
@@ -191,9 +187,7 @@ pub fn mark_deadline_submitted(
     Ok(())
 }
 
-// ============================================================
 //  WORKSPACE COMMANDS
-// ============================================================
 
 /// Upsert config workspace cho 1 môn học (đường dẫn folder + target score).
 #[tauri::command]

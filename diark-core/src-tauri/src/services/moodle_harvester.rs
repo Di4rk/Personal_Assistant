@@ -33,9 +33,7 @@ impl MoodleIngestionEngine {
     }
 }
 
-// ============================================================
 //  JSON API PARSERS
-// ============================================================
 
 #[derive(Deserialize)]
 struct RawEnrolledCourse {
@@ -233,9 +231,7 @@ pub fn parse_moodle_calendar_events_json(json_str: &str) -> Result<Vec<MoodleTas
     Ok(tasks)
 }
 
-// ============================================================
 //  HTML COURSE VIEW PARSER
-// ============================================================
 
 /// Parse toàn bộ trang HTML `course/view.php?id={course_id}`
 /// Trích xuất:
@@ -520,9 +516,7 @@ pub fn parse_flexible_moodle_date(date_str: &str) -> Option<i64> {
     None
 }
 
-// ============================================================
 //  UNIT TESTS
-// ============================================================
 
 #[cfg(test)]
 mod tests {

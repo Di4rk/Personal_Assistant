@@ -434,7 +434,7 @@ pub async fn run_vault_worker_loop<F>(
                     has_overflow = false;
                     pending_paths.clear();
 
-                    // Step 3: Run full rescan upon queue overflow or burst limit
+                    // Full rescan after queue overflow or burst limit
                     let root_clone = root.clone();
                     let rescan_res = pools
                         .write(move |conn| {
@@ -459,7 +459,7 @@ pub async fn run_vault_worker_loop<F>(
                         }
 
                         if path.exists() {
-                            // Step 5: Read file outside of writer transaction
+                            // Read outside the SQLite write lock to avoid blocking other writers
                             if let Ok(content) = read_file_with_retry(&path, 3, 300).await {
                                 let root_clone = root.clone();
                                 let path_clone = path.clone();
@@ -555,7 +555,6 @@ where
         }
     }
 
-    // Step 6: Stop existing watcher if running and await worker join
     stop_vault_watcher(state).await?;
 
     let (shutdown_tx, shutdown_rx) = watch::channel(false);

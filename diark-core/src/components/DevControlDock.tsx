@@ -87,7 +87,7 @@ export const DevControlDock: React.FC<DevControlDockProps> = ({ onResetIdentity 
             ) : (
               <>
                 <RotateCcw className="w-3.5 h-3.5" />
-                <span>⚡ RESET ONBOARDING</span>
+                <span>RESET ONBOARDING</span>
               </>
             )}
           </button>

@@ -9,7 +9,7 @@
 
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-    // --- 1. UI BANNER / PROGRESS HUD ---
+    // Banner overlay
     function renderBanner(isLoggedIn, statusText = "", percent = 0) {
         let el = document.getElementById("__diark_wecode_overlay");
         if (!el) {
@@ -38,10 +38,9 @@
             el.style.alignItems = "center";
             el.style.gap = "12px";
             el.innerHTML = `
-                <span style="font-size: 20px;">🔐</span>
                 <div>
-                    <div style="font-weight: 700; color: #34d399; font-size: 13px;">Diark OS • Tự động đồng bộ Wecode</div>
-                    <div style="color: #94a3b8; font-size: 11px; margin-top: 2px;">Vui lòng đăng nhập tài khoản Wecode. Sau khi đăng nhập, hệ thống sẽ tự động thu thập và đóng cửa sổ này.</div>
+                    <div style="font-weight: 700; color: #34d399; font-size: 13px;">Diark - Đồng bộ Wecode</div>
+                    <div style="color: #94a3b8; font-size: 11px; margin-top: 2px;">Vui lòng đăng nhập tài khoản Wecode để bắt đầu đồng bộ.</div>
                 </div>
             `;
         } else {
@@ -54,10 +53,7 @@
             el.style.maxWidth = "90vw";
             el.innerHTML = `
                 <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px;">
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                        <span style="font-size: 18px;">🚀</span>
-                        <span style="font-weight: 700; color: #34d399; font-size: 13px;">Diark OS • Đang tự động thu thập</span>
-                    </div>
+                    <span style="font-weight: 700; color: #34d399; font-size: 13px;">Diark - Đang đồng bộ Wecode</span>
                     <span style="font-size: 11px; font-weight: 600; color: #10b981; font-family: monospace;">${Math.round(percent)}%</span>
                 </div>
                 <div style="font-size: 11px; color: #a1a1aa; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${statusText}</div>
@@ -454,13 +450,13 @@
         } catch (_) {}
 
         if (committedViaPort) {
-            renderBanner(true, `✅ Hoàn tất! Đã đồng bộ ${allSubmissions.length} bài nộp. Đang đóng cửa sổ...`, 100);
+            renderBanner(true, `Đã đồng bộ ${allSubmissions.length} bài nộp. Đang đóng cửa sổ...`, 100);
             await sleep(400);
             window.location.href = `diark-sso://callback#target=wecode&status=success&total_items=${allSubmissions.length}`;
             return;
         }
 
-        // Kênh 2: Dự phòng qua URL Scheme Chunks nếu port 3030 không phản hồi
+        // Fallback URL scheme chunks nếu port 3030 không phản hồi
         console.log("[Diark Wecode] Fallback sang URL Scheme Chunks...");
         const totalBatches = Math.ceil(allSubmissions.length / BATCH_SIZE) || 1;
         for (let i = 0; i < totalBatches; i++) {
@@ -470,12 +466,12 @@
             await sleep(60);
         }
 
-        renderBanner(true, `✅ Hoàn tất! Đã đồng bộ ${allSubmissions.length} bài nộp. Đang đóng cửa sổ...`, 100);
+        renderBanner(true, `Đã đồng bộ ${allSubmissions.length} bài nộp. Đang đóng cửa sổ...`, 100);
         await sleep(300);
         window.location.href = `diark-sso://callback#target=wecode&action=commit&total_items=${allSubmissions.length}`;
     }
 
-    // --- 5. ĐIỀU PHỐI KHỞI ĐỘNG (WATCHDOG & AUTH DETECTOR) ---
+    // Watchdog & auth check
     function initHarvesterWatcher() {
         const userId = extractWecodeUserId();
         if (userId) {

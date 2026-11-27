@@ -393,7 +393,7 @@ export const WecodeProblemList: React.FC<WecodeProblemListProps> = ({
                             title="Lưu bí kíp giải thuật vào Native Vault"
                           >
                             <Zap className="w-3 h-3 text-amber-400" />
-                            <span>⚡ Lưu Trick</span>
+                            <span>Lưu Trick</span>
                           </button>
                         </div>
 

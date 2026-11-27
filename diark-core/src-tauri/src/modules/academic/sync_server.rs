@@ -281,7 +281,7 @@ async fn handle_connection(
         }
 
         let _ = app_handle.emit("student-profile-synced", &payload);
-        println!("[SyncServer] ✅ Student profile sync thành công — đã emit student-profile-synced.");
+        println!("[SyncServer] Student profile synced.");
         send_json_response(
             &mut stream,
             200,
@@ -310,7 +310,7 @@ async fn handle_connection(
         return Ok(());
     }
 
-    // --- Phase 8: Ghi DB nguyên tử qua DbPools writer ---
+    // Ghi DB nguyên tử qua DbPools writer
     let state_for_db = Arc::clone(&state);
     let commit_result = state_for_db
         .db
@@ -329,9 +329,8 @@ async fn handle_connection(
         return Ok(());
     }
 
-    // --- Phase 9: Thông báo frontend refresh ---
     let _ = app.emit("academic-data-synced", ());
-    println!("[SyncServer] ✅ Sync thành công — đã emit academic-data-synced.");
+    println!("[SyncServer] Academic data synced.");
 
     send_json_response(
         &mut stream,

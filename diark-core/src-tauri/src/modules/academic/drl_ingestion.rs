@@ -10,9 +10,7 @@ use rusqlite::{params, Connection, Result as SqlResult};
 use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
 
-// ============================================================
 //  DATA CONTRACTS
-// ============================================================
 
 /// Bản ghi ĐRL cho 1 học kỳ, trích từ bảng lịch sử Portal UIT.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -41,9 +39,7 @@ pub struct DrlIngestReport {
     pub cumulative_classification: Option<String>,
 }
 
-// ============================================================
 //  PURE PARSER — DOM Selectors khóa theo Portal UIT thực tế
-// ============================================================
 
 /// Parse fragment HTML của trang `portal.uit.edu.vn/sinh-vien/diem-ren-luyen`.
 ///
@@ -166,9 +162,7 @@ pub fn parse_portal_drl(html: &str) -> Result<DrlParseResult, String> {
     })
 }
 
-// ============================================================
 //  PERSISTENCE — 1 transaction nguyên tử
-// ============================================================
 
 /// Ghi kết quả parse ĐRL vào 2 bảng trong 1 SQLite transaction nguyên tử:
 ///
@@ -243,9 +237,7 @@ pub fn persist_portal_drl(
     })
 }
 
-// ============================================================
 //  UNIT TESTS
-// ============================================================
 
 #[cfg(test)]
 mod tests {

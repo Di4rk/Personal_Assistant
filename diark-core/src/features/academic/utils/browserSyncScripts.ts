@@ -9,7 +9,7 @@ export function withLocalSyncToken(script: string, token: string): string {
 
 export const PORTAL_BROWSER_SYNC_SCRIPT = `(async () => {
     console.clear();
-    console.log("%c[Diark OS] 🚀 Bắt đầu đồng bộ dữ liệu Portal UIT...", "color: #38bdf8; font-weight: bold; font-size: 14px;");
+    console.log("%c[Diark] Bắt đầu đồng bộ dữ liệu Portal UIT...", "color: #38bdf8; font-weight: bold; font-size: 14px;");
 
     const LOCAL_SERVER_URL = "http://127.0.0.1:3030/api/v1/sync/portal";
     const SYNC_TOKEN = "__DIARK_SYNC_TOKEN__";
@@ -42,7 +42,7 @@ export const PORTAL_BROWSER_SYNC_SCRIPT = `(async () => {
     }
 
     try {
-        showBanner("⏳ Đang tải Bảng điểm & Điểm rèn luyện từ API UIT...", true);
+        showBanner("Đang tải Bảng điểm & Điểm rèn luyện từ API UIT...", true);
         console.log("[Diark OS] Đang gọi API Bảng điểm & Điểm rèn luyện...");
 
         const [bdResp, drlResp, examResp] = await Promise.all([
@@ -151,10 +151,10 @@ export const PORTAL_BROWSER_SYNC_SCRIPT = `(async () => {
         // Tự động sao chép JSON vào clipboard làm bản sao lưu an toàn 100%
         try {
             await navigator.clipboard.writeText(JSON.stringify(bdData, null, 2));
-            console.log("%c[Diark OS] 📋 Đã sao chép JSON tổng hợp vào Clipboard!", "color: #4ade80; font-weight: bold;");
+            console.log("%c[Diark] Đã sao chép JSON vào Clipboard.", "color: #4ade80; font-weight: bold;");
         } catch (_) {}
 
-        showBanner("🚀 Đang đẩy dữ liệu về Diark OS (port 3030)...", true);
+        showBanner("Đang gửi dữ liệu về Diark (port 3030)...", true);
         const resp = await fetch(LOCAL_SERVER_URL, {
             method: "POST",
             headers: LOCAL_JSON_HEADERS,
@@ -162,20 +162,20 @@ export const PORTAL_BROWSER_SYNC_SCRIPT = `(async () => {
         });
 
         if (resp.ok) {
-            console.log("%c[Diark OS] ✅ ĐỒNG BỘ THÀNH CÔNG!", "color: #22c55e; font-size: 16px; font-weight: bold;");
-            showBanner(\`✅ <b>ĐỒNG BỘ THÀNH CÔNG!</b><br>Đã nạp \${totalCourses} môn học & Điểm rèn luyện vào Diark OS.\`, true);
+            console.log("%c[Diark] Đồng bộ thành công.", "color: #22c55e; font-size: 16px; font-weight: bold;");
+            showBanner(\`<b>Đồng bộ thành công</b><br>Đã nạp \${totalCourses} môn học & Điểm rèn luyện vào Diark.\`, true);
         } else {
             throw new Error(\`Local server status \${resp.status}\`);
         }
     } catch (err) {
-        console.error("[Diark OS] Lỗi đồng bộ:", err);
-        showBanner(\`⚠️ <b>ĐÃ LẤY XONG DỮ LIỆU BẢNG ĐIỂM!</b><br>JSON đã được lưu vào Clipboard.<br>Bạn có thể mở Diark OS, bấm "Dán JSON" để nạp trực tiếp.\`, false);
+        console.error("[Diark] Lỗi đồng bộ:", err);
+        showBanner(\`<b>Đã lấy xong dữ liệu bảng điểm</b><br>JSON đã lưu vào Clipboard. Mở Diark, bấm "Dán JSON" để nạp trực tiếp.\`, false);
     }
 })();`;
 
 export const WECODE_BROWSER_SYNC_SCRIPT = `(async () => {
     console.clear();
-    console.log("%c[Diark OS] 🚀 Bắt đầu tiến trình đồng bộ Wecode Submissions...", "color: #10b981; font-weight: bold; font-size: 14px;");
+    console.log("%c[Diark] Bắt đầu đồng bộ Wecode Submissions...", "color: #10b981; font-weight: bold; font-size: 14px;");
 
     const LOCAL_SERVER_URL = "http://127.0.0.1:3030/api/v1/sync/wecode";
     const SYNC_TOKEN = "__DIARK_SYNC_TOKEN__";
@@ -205,7 +205,7 @@ export const WECODE_BROWSER_SYNC_SCRIPT = `(async () => {
     }
 
     try {
-        showBanner("⏳ Đang kiểm tra đăng nhập Wecode...", true);
+        showBanner("Đang kiểm tra đăng nhập Wecode...", true);
 
         // 1. Trích xuất Wecode User ID số (ví dụ: 2429, KHÔNG lấy MSSV như 25520458)
         let wecodeUserId = null;
@@ -257,7 +257,7 @@ export const WECODE_BROWSER_SYNC_SCRIPT = `(async () => {
             if (pm) basePrefix = pm[1];
         }
 
-        showBanner("⏳ Đang lấy danh sách bài tập...", true);
+        showBanner("Đang lấy danh sách bài tập...", true);
 
         // Map lưu assignment_id -> { id, name, subUrl, classes, totalProblems }
         const assignmentMap = new Map();
@@ -393,7 +393,7 @@ export const WECODE_BROWSER_SYNC_SCRIPT = `(async () => {
 
         for (const assign of sortedAssignments) {
             completed++;
-            showBanner(\`⏳ Đang lấy bài nộp \${completed}/\${sortedAssignments.length}: \${assign.name}...\`, true);
+            showBanner(\`Đang lấy bài nộp \${completed}/\${sortedAssignments.length}: \${assign.name}...\`, true);
 
             const rawSubUrl = (assign.subUrl || "").trim();
             const subUrl = rawSubUrl && rawSubUrl.startsWith("http")
@@ -555,10 +555,10 @@ export const WECODE_BROWSER_SYNC_SCRIPT = `(async () => {
 
         try {
             await navigator.clipboard.writeText(JSON.stringify(syncPayload, null, 2));
-            console.log("%c[Diark OS] 📋 Đã copy JSON vào Clipboard!", "color: #34d399;");
+            console.log("%c[Diark] Đã copy JSON vào Clipboard.", "color: #34d399;");
         } catch (_) {}
 
-        showBanner(\`🚀 Đang gửi \${allSubmissions.length} bài nộp & \${allProblems.length} câu hỏi về Diark OS...\`, true);
+        showBanner(\`Đang gửi \${allSubmissions.length} bài nộp & \${allProblems.length} câu hỏi về Diark...\`, true);
         const resp = await fetch(LOCAL_SERVER_URL, {
             method: "POST",
             headers: {
@@ -569,19 +569,19 @@ export const WECODE_BROWSER_SYNC_SCRIPT = `(async () => {
         });
 
         if (resp.ok) {
-            showBanner(\`✅ <b>ĐỒNG BỘ WECODE THÀNH CÔNG!</b><br>Đã nạp \${allSubmissions.length} bài nộp & \${allProblems.length} câu hỏi từ \${sortedAssignments.length} assignments vào Diark OS.\`, true);
+            showBanner(\`<b>Đồng bộ Wecode thành công</b><br>Đã nạp \${allSubmissions.length} bài nộp & \${allProblems.length} câu hỏi từ \${sortedAssignments.length} assignments.\`, true);
         } else {
             throw new Error(\`Server status \${resp.status}\`);
         }
     } catch (err) {
-        console.error("[Diark OS] Lỗi đồng bộ:", err);
-        showBanner(\`⚠️ <b>ĐÃ THU THẬP XONG!</b><br>JSON dữ liệu đã được copy vào Clipboard.<br>Bạn có thể dán trực tiếp vào Diark OS.\`, false);
+        console.error("[Diark] Lỗi đồng bộ:", err);
+        showBanner(\`<b>Đã thu thập xong</b><br>JSON dữ liệu đã copy vào Clipboard để dán trực tiếp vào Diark.\`, false);
     }
 })();`;
 
 export const PORTAL_EXAM_SCHEDULE_SYNC_SCRIPT = `(async () => {
     console.clear();
-    console.log("%c[Diark OS] 🎯 Bắt đầu đồng bộ Lịch thi UIT...", "color: #f59e0b; font-weight: bold; font-size: 14px;");
+    console.log("%c[Diark] Bắt đầu đồng bộ Lịch thi UIT...", "color: #f59e0b; font-weight: bold; font-size: 14px;");
 
     const LOCAL_SERVER_URL = "http://127.0.0.1:3030/api/v1/sync/exam-schedule";
     const SYNC_TOKEN = "__DIARK_SYNC_TOKEN__";
@@ -610,7 +610,7 @@ export const PORTAL_EXAM_SCHEDULE_SYNC_SCRIPT = `(async () => {
     }
 
     try {
-        showBanner("⏳ Đang tải lịch thi từ API Portal UIT...", true);
+        showBanner("Đang tải lịch thi từ API Portal UIT...", true);
         const resp = await fetch("https://portal.uit.edu.vn/api/sv/exam-schedule", {
             method: "POST",
             credentials: "include"
@@ -628,10 +628,10 @@ export const PORTAL_EXAM_SCHEDULE_SYNC_SCRIPT = `(async () => {
         // Copy vào Clipboard làm backup
         try {
             await navigator.clipboard.writeText(JSON.stringify(data, null, 2));
-            console.log("%c[Diark OS] 📋 Đã sao chép " + examCount + " ca thi vào Clipboard!", "color: #4ade80; font-weight: bold;");
+            console.log("%c[Diark] Đã sao chép " + examCount + " ca thi vào Clipboard.", "color: #4ade80; font-weight: bold;");
         } catch (_) {}
 
-        showBanner("🚀 Đang gửi " + examCount + " ca thi về Diark OS (port 3030)...", true);
+        showBanner("Đang gửi " + examCount + " ca thi về Diark (port 3030)...", true);
         const localResp = await fetch(LOCAL_SERVER_URL, {
             method: "POST",
             headers: {
@@ -642,14 +642,14 @@ export const PORTAL_EXAM_SCHEDULE_SYNC_SCRIPT = `(async () => {
         });
 
         if (localResp.ok) {
-            console.log("%c[Diark OS] ✅ ĐỒNG BỘ LỊCH THI THÀNH CÔNG!", "color: #22c55e; font-size: 16px; font-weight: bold;");
-            showBanner("✅ <b>ĐỒNG BỘ LỊCH THI THÀNH CÔNG!</b><br>Đã nạp " + examCount + " ca thi vào Exam Radar Diark OS.", true);
+            console.log("%c[Diark] Đồng bộ lịch thi thành công.", "color: #22c55e; font-size: 16px; font-weight: bold;");
+            showBanner("<b>Đồng bộ lịch thi thành công</b><br>Đã nạp " + examCount + " ca thi vào Lịch thi.", true);
         } else {
             throw new Error("Local server status " + localResp.status);
         }
     } catch (err) {
-        console.error("[Diark OS] Lỗi đồng bộ lịch thi:", err);
-        showBanner("⚠️ <b>ĐÃ LẤY XONG DỮ LIỆU LỊCH THI!</b><br>JSON đã được lưu vào Clipboard.<br>Bạn có thể mở Diark OS, vào Exam Radar bấm 'Dán JSON' để nạp trực tiếp.", false);
+        console.error("[Diark] Lỗi đồng bộ lịch thi:", err);
+        showBanner("<b>Đã lấy xong dữ liệu lịch thi</b><br>JSON đã lưu vào Clipboard. Mở mục Lịch thi bấm 'Dán JSON' để nạp trực tiếp.", false);
     }
 })();`;
 

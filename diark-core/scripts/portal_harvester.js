@@ -1,9 +1,7 @@
 /**
- * DIARK OS — Automated Zero-Friction UIT Portal Harvester v3.0
- * 
- * Auto-detects authenticated session, fetches official APIs (Transcript, DRL, Profile)
- * in parallel, dispatches directly to Diark OS local sync server (port 3030), and closes window.
- * Zero manual F12, zero console pasting required.
+ * UIT Portal background harvester.
+ * Fetches transcript, DRL, profile, timetable, tuition, and syllabus weights
+ * from an authenticated session and dispatches them to the local sync server.
  */
 (() => {
     if (window.__DIARK_PORTAL_HARVESTER_V3__) return;
@@ -22,7 +20,7 @@
         return new Promise(resolve => setTimeout(resolve, ms));
     }
 
-    // --- SLEEK FLOATING STATUS PILL ---
+    // Floating status pill
     let pillEl = null;
     function showPill(text, type = "info") {
         try {
@@ -177,14 +175,14 @@
         return existingProfile;
     }
 
-    // --- MAIN ENGINE ---
+    // Main sync runner
     let harvestRunning = false;
     async function runAutoHarvester() {
         if (harvestRunning) return;
         harvestRunning = true;
 
-        console.log("[Diark OS] Starting Auto-Harvester Engine...");
-        showPill("<span>⚡ Diark OS: Đang kiểm tra phiên làm việc...</span>", "info");
+        console.log("[Diark OS] Starting Portal sync...");
+        showPill("<span>Diark: Đang kiểm tra phiên làm việc...</span>", "info");
 
         // 1. Fetch official Transcript API
         let transcriptData = null;
@@ -205,7 +203,7 @@
             return false;
         }
 
-        showPill("<span>📥 Đã nhận diện phiên đăng nhập! Đang kéo Bảng điểm & DRL...</span>", "info");
+        showPill("<span>Đang đồng bộ Bảng điểm & DRL...</span>", "info");
 
         // 2. Fetch official DRL API
         let drlData = null;
@@ -244,7 +242,7 @@
         } catch (_) {}
 
         // 4.5. Fetch TKB, Lớp học phần, Lịch thi, Học phí, Chứng chỉ, Lịch sinh hoạt song song
-        showPill("<span>📅 Đang kéo Thời khóa biểu, Lịch thi & Học vụ mở rộng...</span>", "info");
+        showPill("<span>Đang đồng bộ Thời khóa biểu, Lịch thi & Học phí...</span>", "info");
         try {
             const dangKyRes = await fetch("/api/sinh-vien/tkb/dang-ky", { credentials: "include" }).then(r => r.ok ? r.json() : null).catch(() => null);
             const hocKy = Number(dangKyRes?.hocKy) || 1;
@@ -392,7 +390,7 @@
         });
 
         // 6. Push to Diark OS Local Sync Server (Port 3030)
-        showPill("<span>💾 Đang nạp dữ liệu vào Diark OS (SQLite)...</span>", "info");
+        showPill("<span>Đang lưu dữ liệu vào SQLite...</span>", "info");
         try {
             const syncResponse = await fetch(LOCAL_SYNC_ENDPOINT, {
                 method: "POST",
@@ -403,7 +401,7 @@
             if (syncResponse.ok) {
                 const json = await syncResponse.json();
                 console.log("[Diark OS] Sync Server Response:", json);
-                showPill("<span>✅ Đồng bộ thành công 100%! Cửa sổ sẽ đóng lại...</span>", "success");
+                showPill("<span>Đồng bộ hoàn tất. Cửa sổ sẽ tự đóng...</span>", "success");
 
                 // Dispatch callback scheme to close Webview window
                 setTimeout(() => {
@@ -415,15 +413,14 @@
             }
         } catch (err) {
             console.warn("[Diark OS] Local server sync failed, falling back to scheme navigation:", err);
-            // Fallback: Dispatch via diark-sso scheme
-            showPill("<span>✅ Đã chuyển dữ liệu về ứng dụng...</span>", "success");
+            showPill("<span>Đã chuyển dữ liệu về ứng dụng...</span>", "success");
             const fallbackUri = "diark-sso://callback#target=academic&data=" + encodeURIComponent(JSON.stringify(unifiedPayload));
             window.location.href = fallbackUri;
             return true;
         }
     }
 
-    // --- LIFECYCLE POLLER ---
+    // Lifecycle poller
     let pollInterval = null;
     function startPoller() {
         const hostname = (window.location.hostname || "").toLowerCase();
@@ -443,7 +440,7 @@
             attempts++;
             if (attempts > maxAttempts) {
                 clearInterval(pollInterval);
-                showPill("<span>⚠️ Quá thời gian chờ đăng nhập UIT.</span>", "error");
+                showPill("<span>Quá thời gian chờ đăng nhập UIT.</span>", "error");
                 return;
             }
 

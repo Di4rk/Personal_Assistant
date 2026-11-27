@@ -11,9 +11,7 @@ use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
 
-// ============================================================
 //  DATA CONTRACTS
-// ============================================================
 
 /// 1 deadline bài tập trích từ Moodle course page.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -37,9 +35,7 @@ pub struct CourseParseResult {
     pub deadlines: Vec<ScrapedDeadline>,
 }
 
-// ============================================================
 //  HELPER: Course code extraction
-// ============================================================
 
 /// Trích mã môn từ header Moodle, ví dụ:
 /// - `"Kỹ năng mềm - SS009.R12.250210"` → `"SS009"`
@@ -75,9 +71,7 @@ fn extract_course_code(raw_title: &str) -> String {
         .unwrap_or_else(|| raw_title.trim().to_string())
 }
 
-// ============================================================
 //  HELPER: Date parsing
-// ============================================================
 
 /// Parse chuỗi ngày Moodle UIT dạng tiếng Việt:
 /// `"Thứ Sáu, 18 tháng 9 2026, 11:59 CH"` → Unix timestamp UTC
@@ -142,9 +136,7 @@ pub(crate) fn parse_moodle_date(date_str: &str) -> Option<i64> {
     Some(utc_timestamp)
 }
 
-// ============================================================
 //  PURE PARSER
-// ============================================================
 
 /// Parse HTML của trang `course/view.php` Moodle UIT.
 ///
@@ -277,9 +269,7 @@ fn format_display_date(ts: i64) -> String {
     naive.format("%d/%m/%Y %H:%M").to_string()
 }
 
-// ============================================================
 //  UNIT TESTS
-// ============================================================
 
 #[cfg(test)]
 mod tests {

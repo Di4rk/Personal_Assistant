@@ -352,10 +352,8 @@ export default function App() {
     }
   };
 
-  // ============================================================
   // SINGLE SOURCE OF TRUTH: mọi state hiển thị dồn về đây, các
   // component con (LevelProgressBar...) chỉ nhận props, KHÔNG tự fetch.
-  // ============================================================
   const [stats, setStats] = useState<DailyStats | null>(null);
   const [levelInfo, setLevelInfo] = useState<LevelInfo | null>(null);
   const [submissions, setSubmissions] = useState<SubmissionRecord[]>([]);
@@ -384,12 +382,10 @@ export default function App() {
     refetchAll();
   }, [refetchAll]);
 
-  // ============================================================
   // Event-driven refresh: lắng nghe cả 2 event channel từ Rust worker.
   // - "cf-sync-complete" → payload đầy đủ, dùng cho toast + refetch
   // - "cf://sync-event"  → legacy channel, refetch only (backward compat)
   // useTauriEvent tự cleanup khi unmount, safe với React 18 StrictMode.
-  // ============================================================
 
   // Flag để bỏ qua lần chạy đầu tiên của handler (tương đương isFirstSyncRender cũ).
   const initialRender = useRef(true);

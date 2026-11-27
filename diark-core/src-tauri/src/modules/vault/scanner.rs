@@ -1,10 +1,6 @@
-//! Native Vault Scanner Engine & Incremental FTS5 Synchronization.
-//!
-//! Follows Karpathy simplicity principles:
-//! - Direct file walking with walkdir, skipping `.git`, `.obsidian`, `node_modules`.
-//! - Contentless FTS5 lifecycle with contentless_delete=1:
-//!   Delete existing rowid from FTS5 directly by rowid, then update table & reinsert FTS5.
-//! - Extracts YAML frontmatter and [[wikilinks]].
+//! Vault directory scanner and incremental FTS5 sync.
+//! Walks the vault skipping ignored dirs, extracts YAML frontmatter and [[wikilinks]],
+//! and keeps the contentless FTS5 table in sync via rowid deletes/reinserts.
 
 use std::collections::{HashMap, HashSet};
 use std::fs;

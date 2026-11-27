@@ -193,9 +193,7 @@ pub fn score_to_scale_4(score: f64) -> (f64, &'static str) {
     }
 }
 
-// ============================================================
 //  TAB 1: Summary Tab Parser ("Tổng kết theo kỳ")
-// ============================================================
 
 /// Parse Tab 1 (Tổng kết theo kỳ):
 /// Trích xuất danh sách `MacroMetricRecord`: Cột Học kỳ ("HK1 · 2025" -> 2025_2026_HK1),
@@ -285,9 +283,7 @@ pub fn parse_summary_tab(html: &str) -> Result<Vec<MacroMetricRecord>, String> {
     Ok(records)
 }
 
-// ============================================================
 //  TAB 2: By-Semester Tab Parser ("Chi tiết môn học")
-// ============================================================
 
 /// Parse Tab 2 (Chi tiết môn học theo từng học kỳ):
 /// Hỗ trợ duyệt qua từng card `div.rounded-lg.border` hoặc fallback các table.
@@ -531,9 +527,7 @@ pub fn parse_portal_transcript(html_fragment: &str) -> Result<Vec<ParsedSemester
     parse_by_semester_tab(html_fragment)
 }
 
-// ============================================================
 //  TAB 3: By-CTDT Tab Parser ("Theo CTĐT")
-// ============================================================
 
 /// Parse Tab 3 (Theo khung Chương trình đào tạo CTĐT):
 /// Duyệt qua từng block `Học kỳ X (CTĐT)` (Term 1 đến 7 và 20), trích xuất danh sách `CurriculumCourseRecord`:
@@ -679,9 +673,7 @@ pub fn parse_by_ctdt_tab(html: &str) -> Result<Vec<CurriculumCourseRecord>, Stri
     Ok(records)
 }
 
-// ============================================================
 //  UNIFIED 3-IN-1 PARSER ENTRYPOINT
-// ============================================================
 
 /// Parse chuỗi payload 3-in-1 trả về từ Webview SSO:
 /// Hỗ trợ cả định dạng JSON `{ summary, by_semester, by_ctdt }` lẫn raw HTML fallback.
@@ -709,9 +701,7 @@ pub fn parse_unified_portal_payload(raw_payload: &str) -> Result<UnifiedAcademic
         curriculum_courses: Vec::new(),
     })
 }
-// ============================================================
 //  DRL PAGE PARSER (portal.uit.edu.vn/sinh-vien/diem-ren-luyen)
-// ============================================================
 
 /// Bản ghi ĐRL của 1 học kỳ cụ thể, trích từ bảng lịch sử trang DRL.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -864,9 +854,7 @@ pub fn parse_portal_drl(html_content: &str) -> Result<PortalDrlOverview, String>
     })
 }
 
-// ============================================================
 //  DRL PARSER UNIT TESTS
-// ============================================================
 
 #[cfg(test)]
 mod drl_tests {

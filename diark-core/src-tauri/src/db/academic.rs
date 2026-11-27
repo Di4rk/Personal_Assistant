@@ -9,9 +9,7 @@ use rusqlite::{params, Connection, Result as SqlResult};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-// ============================================================
 //  SECTION 1: Grading Engine (ĐHQG-HCM Credit System)
-// ============================================================
 
 /// Thang điểm chữ theo quy chế ĐHQG-HCM.
 /// Sử dụng strongly-typed enum thay vì string để:
@@ -93,9 +91,7 @@ impl GradeScale {
     }
 }
 
-// ============================================================
 //  SECTION 2: Data Transfer Objects
-// ============================================================
 
 /// Bản ghi đầy đủ của 1 học kỳ, trả về từ IPC `get_academic_overview`.
 /// `actual_gpa_*` và `actual_drl` là COMPUTED FIELDS (tính live từ SQL aggregate),
@@ -189,9 +185,7 @@ pub struct UpsertSemesterDto {
     pub is_completed: Option<bool>,
 }
 
-// ============================================================
 //  SECTION 3: Schema Migration
-// ============================================================
 
 /// Tạo 3 bảng Academic Radar nếu chưa có (idempotent).
 ///
@@ -494,9 +488,7 @@ pub fn init_academic_module(conn: &Connection) -> SqlResult<()> {
     ensure_academic_schema(conn)
 }
 
-// ============================================================
 //  SECTION 4: Repository Functions
-// ============================================================
 
 /// Tính GPA hệ 10, GPA hệ 4, số tín chỉ đạt và tổng tín chỉ của 1 học kỳ
 /// ĐỘNG qua SQL aggregate. Không bao giờ đọc từ cột lưu sẵn vì không có cột đó.
@@ -1141,9 +1133,7 @@ pub fn purge_and_seed_canonical_data(conn: &mut Connection) -> Result<(), rusqli
     Ok(())
 }
 
-// ============================================================
 //  SECTION 5: Unit Tests
-// ============================================================
 
 #[cfg(test)]
 mod tests {

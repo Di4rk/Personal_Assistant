@@ -79,10 +79,9 @@ pub fn generate_daily_briefing_content(conn: &Connection) -> Result<DailyBriefin
     let new_materials_count = new_materials.len();
     let sample_mat_title = new_materials.first().map(|(t, _)| t.clone()).unwrap_or_default();
 
-    // 3. Kiểm tra môn thi sắp tới gần nhất
+    // Kiểm tra môn thi sắp tới gần nhất
     let upcoming_exam = crate::db::exam::get_next_upcoming_exam(conn, now_ts).unwrap_or(None);
 
-    // 4. Định dạng thông điệp thông báo súc tích chuẩn DIARK OS
     let mut parts = Vec::new();
 
     if let Some(ref exam) = upcoming_exam {
@@ -91,17 +90,17 @@ pub fn generate_daily_briefing_content(conn: &Connection) -> Result<DailyBriefin
 
         if diff_seconds > 0 && diff_days == 0 {
             parts.push(format!(
-                "🎯 HÔM NAY THI: {} (Ca {} lúc {}, Phòng {})",
+                "HÔM NAY THI: {} (Ca {} lúc {}, Phòng {})",
                 exam.subject_name, exam.shift, exam.start_time, exam.room
             ));
         } else if diff_seconds > 0 && diff_days == 1 {
             parts.push(format!(
-                "🎯 NGÀY MAI THI: {} (lúc {}, Phòng {})",
+                "NGÀY MAI THI: {} (lúc {}, Phòng {})",
                 exam.subject_name, exam.start_time, exam.room
             ));
         } else if diff_seconds > 0 && diff_days <= 5 {
             parts.push(format!(
-                "🎯 Sắp thi {} (còn {} ngày nữa, {})",
+                "Sắp thi {} (còn {} ngày nữa, {})",
                 exam.subject_code, diff_days, exam.date_str
             ));
         }
@@ -125,12 +124,12 @@ pub fn generate_daily_briefing_content(conn: &Connection) -> Result<DailyBriefin
 
     let (title, message) = if parts.is_empty() {
         (
-            "DIARK OS — Daily Briefing".to_string(),
-            "Hôm nay bạn không có deadline nào gấp. Tiếp tục giữ vững phong độ học tập!".to_string(),
+            "Diark - Nhắc lịch học".to_string(),
+            "Hôm nay chưa có deadline hoặc ca thi gấp.".to_string(),
         )
     } else {
         (
-            "DIARK OS — Nhắc Nhở Học Tập".to_string(),
+            "Diark - Nhắc lịch học".to_string(),
             parts.join(". ") + ".",
         )
     };

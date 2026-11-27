@@ -313,8 +313,7 @@ export const SyncWecodeModal: React.FC<SyncWecodeModalProps> = ({
                     </>
                   ) : (
                     <>
-                      <span className="text-base">🚀</span>
-                      <span>Đăng nhập & Tự động đồng bộ Wecode</span>
+                      <span>Đăng nhập &amp; Đồng bộ Wecode</span>
                     </>
                   )}
                 </button>

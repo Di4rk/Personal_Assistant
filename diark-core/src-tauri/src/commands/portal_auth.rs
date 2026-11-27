@@ -2632,7 +2632,7 @@ mod tests {
         let registry = PartialStateRegistry::default();
         let label = "test-sso-window";
 
-        // Step 1: Stage profile
+        // Stage profile
         let profile_json = json!({
             "profile": {
                 "student_id": "21520001",
@@ -2653,7 +2653,7 @@ mod tests {
             assert!(state.courses.is_none());
         }
 
-        // Step 2: Stage courses
+        // Stage courses
         let courses_json = json!({
             "courses": [
                 {
@@ -2668,7 +2668,7 @@ mod tests {
         let res = handle_partial_checkpoint_sync(&registry, label, &fragment_courses);
         assert!(res.is_ok());
 
-        // Step 3: Final callback with only DRL data
+        // Final callback with only DRL data
         let final_drl = json!({
             "drl": [
                 {

@@ -57,11 +57,9 @@ import type {
  * 2. Bắt lỗi tập trung 1 chỗ, dễ thêm toast/log sau này.
  */
 
-// ============================================================
 // Codeforces sync types — phải khớp với SyncCompletePayload
 // trong src-tauri/src/commands/mod.rs (tên field snake_case vì
 // Tauri serialize Rust struct thẳng không qua camelCase transform).
-// ============================================================
 
 export interface SyncCompletePayload {
   success: boolean;
@@ -210,9 +208,7 @@ export function startPolling(
   return () => clearInterval(id);
 }
 
-// ============================================================
 //  Academic Radar IPC wrappers
-// ============================================================
 
 /**
  * Lấy toàn bộ danh sách học kỳ kèm thống kê động (GPA hệ 10, GPA hệ 4, DRL, tín chỉ).
@@ -376,9 +372,7 @@ export async function getLifeMatrixRange(
   });
 }
 
-// ============================================================
 //  Native Vault IPC Wrappers (Module 5)
-// ============================================================
 
 /**
  * Trigger manual sync of markdown vault directory.
@@ -603,9 +597,7 @@ export async function openExternalUrl(url: string): Promise<void> {
   return invoke<void>("open_external_url", { url });
 }
 
-// ============================================================
 // Moodle & Courses Engine Types & Commands
-// ============================================================
 
 export interface MoodleCourse {
   course_id: number;
@@ -770,9 +762,7 @@ export async function archiveSemester(
   });
 }
 
-// ============================================================
 //  Exam Radar & System Tray Daily Briefing (v0.7.0)
-// ============================================================
 
 export type {
   ExamChecklistItem,
@@ -837,9 +827,7 @@ export async function previewExamExcel(filePath: string): Promise<ExamExcelParse
   return invoke<ExamExcelParsePreview>("preview_exam_excel", { filePath });
 }
 
-// ============================================================
 //  Gemini AI Copilot (v1.0.0 — BYOK, Socratic Debugger & Task Extractor)
-// ============================================================
 
 export type {
   GeminiConfig,
@@ -900,9 +888,7 @@ export async function saveExtractedMoodleTasks(tasks: ExtractedTask[]): Promise<
   return invoke<number>("save_extracted_moodle_tasks", { tasks });
 }
 
-// ============================================================
 //  Portal Extra & Personal Google Calendar ICS (v1.2.0)
-// ============================================================
 
 export async function getPortalRegisteredClasses(): Promise<PortalRegisteredClass[]> {
   return invoke<PortalRegisteredClass[]>("get_portal_registered_classes");

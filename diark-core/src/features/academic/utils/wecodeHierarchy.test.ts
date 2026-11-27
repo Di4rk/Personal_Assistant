@@ -106,7 +106,7 @@ export function runWecodeHierarchyTests(): void {
   assert(deadline1999.status === "unlimited", "Year 1999 must have status 'unlimited'");
   assert(deadline1999.label === "Vô thời hạn", "Year 1999 must have label 'Vô thời hạn'");
 
-  // Test Hard Rule lọc tab: Không được lọt vào tab "⚡ Cần làm gấp"
+  // Không được lọt vào tab Cần làm gấp
   const isCompleted = false;
   const isUrgentTab = !isCompleted && (deadline1999.status === "urgent" || deadline1999.status === "critical");
   assert(isUrgentTab === false, "Unlimited assignment MUST NOT be classified as urgent in filter tab!");
@@ -192,4 +192,4 @@ export function runWecodeHierarchyTests(): void {
 
 // Run tests
 runWecodeHierarchyTests();
-console.log("✅ [wecodeHierarchy.test] All unit tests passed!");
+console.log("[wecodeHierarchy.test] All unit tests passed.");

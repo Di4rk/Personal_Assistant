@@ -6,9 +6,7 @@
  * in the Rust backend.
  */
 
-// ============================================================
 //  Thang điểm chữ theo quy chế ĐHQG-HCM
-// ============================================================
 
 export type GradeScale =
   | "APlus"
@@ -33,9 +31,7 @@ export const GRADE_SCALE_MAP: Record<GradeScale, { char: string; scale4: number;
   F: { char: "F", scale4: 0.0, minScore10: 0.0 },
 };
 
-// ============================================================
 //  Academic Semester Record & Overview DTO
-// ============================================================
 
 /**
  * Bản ghi metadata học kỳ lưu trong SQLite `academic_semesters`.
@@ -76,9 +72,7 @@ export interface AcademicOverviewDto {
 /** Alias tương đương với struct SemesterOverview trong db/academic.rs */
 export type SemesterOverview = AcademicOverviewDto;
 
-// ============================================================
 //  Academic Course Record & Input DTOs
-// ============================================================
 
 /**
  * Bản ghi môn học lưu trong SQLite `academic_courses`.
@@ -139,9 +133,7 @@ export interface UpsertSemesterDto {
   isCompleted?: boolean | null;
 }
 
-// ============================================================
 //  UIT Portal Next.js Ingestion Types
-// ============================================================
 
 export interface RawPortalCourse {
   courseCode: string;
@@ -199,9 +191,7 @@ export interface ParsedSemester {
   courses: ParsedCourse[];
 }
 
-// ============================================================
 //  Academic Macro Metrics SSOT & Ingestion Types
-// ============================================================
 
 export interface AcademicMacroMetricSSOT {
   semesterId: string;
@@ -258,9 +248,7 @@ export interface FullPortalIngestionRequest {
   drl_history: DrlItemPayload[];
 }
 
-// ============================================================
 //  UIT Workload & Scholarship Eligibility Types
-// ============================================================
 
 export type UitWorkloadTier =
   | "overload"
@@ -279,9 +267,7 @@ export interface UitWorkloadEvaluation {
   isInvalid: boolean;
 }
 
-// ============================================================
 //  Degree Audit & Curriculum Engine Types
-// ============================================================
 
 export interface AuditCourseItem {
   courseCode: string;
@@ -358,9 +344,7 @@ export interface CurriculumIndexDto {
   updatedAt: number | null;
 }
 
-// ============================================================
 //  Exam Radar & Daily Briefing Types (v0.7.0)
-// ============================================================
 
 export interface ExamChecklistItem {
   id: string;
