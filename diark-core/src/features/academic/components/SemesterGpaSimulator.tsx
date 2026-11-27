@@ -1,11 +1,5 @@
 import React, { useState, useMemo, useEffect } from "react";
-import {
-  Sliders,
-  CheckCircle2,
-  AlertTriangle,
-  RotateCcw,
-  Zap,
-} from "lucide-react";
+import { RotateCcw } from "lucide-react";
 import type { AcademicCourseRecord } from "../types";
 
 export interface SemesterGpaSimulatorProps {
@@ -157,21 +151,11 @@ export const SemesterGpaSimulator: React.FC<SemesterGpaSimulatorProps> = ({
     <div className={`space-y-5 rounded-xl border border-[#1D263B] bg-[#0F1420] p-5 shadow-sm ${className}`}>
       {/* 1. Header & Presets */}
       <div className="flex flex-col justify-between gap-3 border-b border-[#1D263B] pb-3.5 sm:flex-row sm:items-center">
-        <div className="flex items-center gap-2.5">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#2F6BFF]/30 bg-[#2F6BFF]/[0.16] text-[#6B9BFF]">
-            <Sliders className="h-4 w-4" />
-          </div>
-          <div>
-            <h3 className="flex items-center gap-2 text-sm font-bold text-white">
-              <span>GPA Target Simulator</span>
-              <span className="rounded border border-[#2F6BFF]/35 bg-[#2F6BFF]/[0.16] px-2 py-0.5 font-mono text-[10px] font-medium text-[#6B9BFF]">
-                Chiến thuật kỳ này
-              </span>
-            </h3>
-            <p className="text-[11px] text-zinc-400">
-              Giả lập điểm thi từng môn để dự báo bước nhảy cGPA và điều kiện học bổng KKHT UIT
-            </p>
-          </div>
+        <div>
+          <h3 className="text-sm font-bold text-white">GPA Target Simulator</h3>
+          <p className="text-[11px] text-zinc-400">
+            Giả lập điểm thi từng môn để dự báo bước nhảy cGPA và điều kiện học bổng KKHT UIT
+          </p>
         </div>
 
         {/* Quick Presets */}
@@ -206,7 +190,6 @@ export const SemesterGpaSimulator: React.FC<SemesterGpaSimulatorProps> = ({
             className={presetBtnCls}
             title="Đẩy môn 4 tín chỉ lên 9.0, các môn khác 8.0"
           >
-            <Zap className="mr-0.5 inline h-3 w-3 text-amber-400" />
             Đòn bẩy TC
           </button>
           <button
@@ -298,20 +281,16 @@ export const SemesterGpaSimulator: React.FC<SemesterGpaSimulatorProps> = ({
           <span className="text-[11px] font-medium text-zinc-400">Học bổng KKHT UIT</span>
           <div className="pt-0.5">
             {calculations.isScholarshipEligible ? (
-              <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400">
-                <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
-                <span>Đủ tiêu chuẩn xét HB</span>
+              <div className="text-xs font-semibold text-emerald-400">
+                Đủ tiêu chuẩn xét HB
               </div>
             ) : (
-              <div className="flex items-center gap-1.5 text-xs font-medium text-amber-400">
-                <AlertTriangle className="h-4 w-4 shrink-0 text-amber-400" />
-                <span>
-                  {!calculations.isScholarshipCreditEligible
-                    ? "Dưới sàn 14 TC"
-                    : calculations.hasFailedCourse
-                    ? "Có môn rớt (<5.0)"
-                    : "Chưa chạm mốc 8.0"}
-                </span>
+              <div className="text-xs font-medium text-amber-400">
+                {!calculations.isScholarshipCreditEligible
+                  ? "Dưới sàn 14 TC"
+                  : calculations.hasFailedCourse
+                  ? "Có môn rớt (<5.0)"
+                  : "Chưa chạm mốc 8.0"}
               </div>
             )}
           </div>

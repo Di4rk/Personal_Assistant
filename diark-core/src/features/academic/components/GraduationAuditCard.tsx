@@ -1,13 +1,8 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
-  GraduationCap,
-  CheckCircle2,
-  AlertCircle,
-  Clock,
   ChevronDown,
   ChevronUp,
   RefreshCw,
-  BookOpen,
   Search,
   Check,
   X,
@@ -217,9 +212,8 @@ export const GraduationAuditCard: React.FC<GraduationAuditCardProps> = ({
   if (!report) {
     return (
       <div className={`rounded-xl border border-[#1D263B] bg-[#0F1420] p-6 ${className}`}>
-        <div className="mb-2 flex items-center gap-2 text-sm font-medium text-rose-400">
-          <AlertCircle className="h-4 w-4" />
-          <span>Không thể tải báo cáo kiểm toán tốt nghiệp</span>
+        <div className="mb-2 text-sm font-medium text-rose-400">
+          Không thể tải báo cáo kiểm toán tốt nghiệp
         </div>
         <p className="mb-4 text-xs text-zinc-400">{errorMessage || "Chưa có dữ liệu CTĐT hoặc bảng điểm."}</p>
         <button
@@ -236,28 +230,23 @@ export const GraduationAuditCard: React.FC<GraduationAuditCardProps> = ({
     <div className={`space-y-5 rounded-xl border border-[#1D263B] bg-[#0F1420] p-5 shadow-sm ${className}`}>
       {/* 1. Header: Title, Major & Select CTĐT */}
       <div className="flex flex-col justify-between gap-4 border-b border-[#1D263B] pb-4 sm:flex-row sm:items-center">
-        <div className="flex items-start gap-3">
-          <div className="rounded-lg border border-[#2F6BFF]/30 bg-[#2F6BFF]/[0.14] p-2.5 text-[#6B9BFF]">
-            <GraduationCap className="h-5 w-5" />
+        <div>
+          <div className="flex items-center gap-2">
+            <h3 className="text-base font-semibold text-zinc-100">Kiểm toán Tốt nghiệp</h3>
+            {report.isGraduationReady ? (
+              <span className="inline-flex items-center rounded-full border border-emerald-500/30 bg-emerald-950/60 px-2.5 py-0.5 text-xs font-semibold text-emerald-400">
+                ĐỦ ĐIỀU KIỆN
+              </span>
+            ) : (
+              <span className="inline-flex items-center rounded-full border border-amber-500/30 bg-amber-950/50 px-2.5 py-0.5 text-xs font-semibold text-amber-400">
+                ĐANG TÍCH LŨY ({report.completionPercent}%)
+              </span>
+            )}
           </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h3 className="text-base font-semibold text-zinc-100">Kiểm toán Tốt nghiệp</h3>
-              {report.isGraduationReady ? (
-                <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-950/60 px-2.5 py-0.5 text-xs font-semibold text-emerald-400">
-                  <CheckCircle2 className="h-3 w-3" /> ĐỦ ĐIỀU KIỆN
-                </span>
-              ) : (
-                <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-950/50 px-2.5 py-0.5 text-xs font-semibold text-amber-400">
-                  <Clock className="h-3 w-3" /> ĐANG TÍCH LŨY ({report.completionPercent}%)
-                </span>
-              )}
-            </div>
-            <p className="mt-0.5 text-xs text-zinc-400">
-              Chuẩn CTĐT: <span className="font-medium text-zinc-200">{report.majorName}</span>
-              {report.cohortYear ? ` — Khóa ${report.cohortYear}` : ""}
-            </p>
-          </div>
+          <p className="mt-0.5 text-xs text-zinc-400">
+            Chuẩn CTĐT: <span className="font-medium text-zinc-200">{report.majorName}</span>
+            {report.cohortYear ? ` — Khóa ${report.cohortYear}` : ""}
+          </p>
         </div>
 
         {/* Custom Dropdown Combobox Popover & Actions */}
@@ -271,7 +260,6 @@ export const GraduationAuditCard: React.FC<GraduationAuditCardProps> = ({
                 className="flex max-w-[230px] items-center gap-1.5 rounded-lg border border-[#1D263B] bg-[#080B12] px-2.5 py-1.5 text-xs text-zinc-200 transition-colors hover:border-[#2F6BFF]/40 hover:bg-[#151C2C] focus:border-[#2F6BFF]/60 focus:outline-none disabled:opacity-50 cursor-pointer"
                 title="Bấm để chọn CTĐT khác"
               >
-                <BookOpen className="h-3.5 w-3.5 shrink-0 text-[#6B9BFF]" />
                 <span className="truncate text-left font-medium">
                   {selectedMajorParsed.cleanName}
                 </span>
@@ -490,11 +478,11 @@ export const GraduationAuditCard: React.FC<GraduationAuditCardProps> = ({
               : "border-[#1D263B] bg-[#080B12] text-zinc-400"
           }`}
         >
-          {report.nonCreditPrerequisites.hasGdqp ? (
-            <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
-          ) : (
-            <AlertCircle className="h-4 w-4 text-zinc-500 shrink-0" />
-          )}
+          <span
+            className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+              report.nonCreditPrerequisites.hasGdqp ? "bg-emerald-400" : "bg-zinc-600"
+            }`}
+          />
           <div className="min-w-0">
             <div className="text-[11px] font-semibold uppercase tracking-wider">GDQP (ME001)</div>
             <div className="text-[10px] truncate opacity-80">
@@ -511,11 +499,11 @@ export const GraduationAuditCard: React.FC<GraduationAuditCardProps> = ({
               : "border-[#1D263B] bg-[#080B12] text-zinc-400"
           }`}
         >
-          {report.nonCreditPrerequisites.hasGdtc ? (
-            <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
-          ) : (
-            <AlertCircle className="h-4 w-4 text-zinc-500 shrink-0" />
-          )}
+          <span
+            className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+              report.nonCreditPrerequisites.hasGdtc ? "bg-emerald-400" : "bg-zinc-600"
+            }`}
+          />
           <div className="min-w-0">
             <div className="text-[11px] font-semibold uppercase tracking-wider">GDTC (2 HP)</div>
             <div className="text-[10px] truncate opacity-80">
@@ -532,11 +520,11 @@ export const GraduationAuditCard: React.FC<GraduationAuditCardProps> = ({
               : "border-[#1D263B] bg-[#080B12] text-zinc-400"
           }`}
         >
-          {report.nonCreditPrerequisites.hasEnglish ? (
-            <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
-          ) : (
-            <AlertCircle className="h-4 w-4 text-zinc-500 shrink-0" />
-          )}
+          <span
+            className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+              report.nonCreditPrerequisites.hasEnglish ? "bg-emerald-400" : "bg-zinc-600"
+            }`}
+          />
           <div className="min-w-0">
             <div className="text-[11px] font-semibold uppercase tracking-wider">Ngoại ngữ</div>
             <div className="text-[10px] truncate opacity-80">
@@ -553,11 +541,11 @@ export const GraduationAuditCard: React.FC<GraduationAuditCardProps> = ({
               : "border-[#1D263B] bg-[#080B12] text-zinc-400"
           }`}
         >
-          {report.nonCreditPrerequisites.hasDrl65 ? (
-            <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
-          ) : (
-            <AlertCircle className="h-4 w-4 text-zinc-500 shrink-0" />
-          )}
+          <span
+            className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+              report.nonCreditPrerequisites.hasDrl65 ? "bg-emerald-400" : "bg-zinc-600"
+            }`}
+          />
           <div className="min-w-0">
             <div className="text-[11px] font-semibold uppercase tracking-wider">ĐRL (≥ 65)</div>
             <div className="text-[10px] truncate opacity-80">
@@ -630,9 +618,8 @@ export const GraduationAuditCard: React.FC<GraduationAuditCardProps> = ({
 
                     {/* Cảnh báo môn bắt buộc bị thiếu */}
                     {!block.compulsoryFulfilled && block.missingCompulsoryCodes.length > 0 && (
-                      <div className="text-[11px] text-amber-400/90 flex items-center gap-1 pt-0.5">
-                        <AlertCircle className="h-3 w-3 shrink-0" />
-                        <span>Chưa tích lũy: {block.missingCompulsoryCodes.join(", ")}</span>
+                      <div className="pt-0.5 text-[11px] text-amber-400/90">
+                        Chưa tích lũy: {block.missingCompulsoryCodes.join(", ")}
                       </div>
                     )}
                   </div>
@@ -776,14 +763,11 @@ export const GraduationAuditCard: React.FC<GraduationAuditCardProps> = ({
                           onClick={() => toggleElectives(block.knowledgeBlock)}
                           className="flex w-full items-center justify-between rounded px-2 py-1.5 text-xs text-zinc-400 transition-colors hover:bg-[#151C2C] hover:text-zinc-200 cursor-pointer"
                         >
-                          <div className="flex items-center gap-1.5">
-                            <BookOpen className="h-3.5 w-3.5 text-[#6B9BFF]" />
-                            <span className="font-medium">
-                              {isGradBlock
-                                ? `Lựa chọn tốt nghiệp & môn chuyên đề (${block.remainingElectives.length} học phần)`
-                                : `Môn tự chọn chưa học (${block.remainingElectives.length} môn)`}
-                            </span>
-                          </div>
+                          <span className="font-medium">
+                            {isGradBlock
+                              ? `Lựa chọn tốt nghiệp & môn chuyên đề (${block.remainingElectives.length} học phần)`
+                              : `Môn tự chọn chưa học (${block.remainingElectives.length} môn)`}
+                          </span>
                           {isElectivesOpen ? (
                             <ChevronUp className="h-3.5 w-3.5 text-zinc-400" />
                           ) : (
@@ -834,9 +818,8 @@ export const GraduationAuditCard: React.FC<GraduationAuditCardProps> = ({
         {report.recommendedNextCourses && report.recommendedNextCourses.length > 0 && (
           <div className="space-y-2 rounded-lg border border-[#1D263B] bg-[#080B12] p-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-1.5 text-xs font-semibold text-zinc-200">
-                <BookOpen className="h-3.5 w-3.5 text-[#6B9BFF]" />
-                <span>Đề xuất học phần kỳ tới</span>
+              <div className="text-xs font-semibold text-zinc-200">
+                Đề xuất học phần kỳ tới
               </div>
               <span className="text-[11px] text-zinc-500">
                 Theo đúng CTĐT &amp; điều kiện tiên quyết ({report.recommendedNextCourses.length} môn ưu tiên)

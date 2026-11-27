@@ -633,7 +633,11 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
                 currentEarnedCredits={cumulativeStats.currentEarnedCredits}
                 currentTotalWeighted10={cumulativeStats.currentTotalWeighted10}
                 currentGpa10={cumulativeStats.cGpa10}
-                completedTermsCount={macroMetrics.length > 0 ? macroMetrics.length : overview.length}
+                completedTermsCount={
+                  macroMetrics.length > 0
+                    ? macroMetrics.filter((m) => m.termGpa > 0).length
+                    : overview.filter((s) => s.isCompleted).length
+                }
                 totalDegreeCredits={curriculumCredits}
                 activeCourses={courses}
                 activeSemesterId={selectedSemesterId || undefined}

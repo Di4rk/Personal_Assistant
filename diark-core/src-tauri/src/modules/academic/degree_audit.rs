@@ -97,6 +97,7 @@ struct StudentCourseRecord {
     grade_char: Option<String>,
     semester_id: String,
     is_passed: bool,
+    is_enrolled_in_progress: bool,
 }
 
 /// Lấy tên hiển thị thân thiện cho từng khối kiến thức
@@ -310,6 +311,7 @@ pub fn run_degree_audit(conn: &Connection, preferred_slug: Option<&str>) -> AppR
                 grade_char,
                 semester_id: sem_id,
                 is_passed,
+                is_enrolled_in_progress: !is_passed,
             })
         })?;
         for r in rows {
@@ -363,6 +365,8 @@ pub fn run_degree_audit(conn: &Connection, preferred_slug: Option<&str>) -> AppR
                 };
 
                 let sem_id = ideal_term.map(|t| format!("HK{}", t)).unwrap_or_else(|| "CTĐT".to_string());
+                let is_enrolled_in_progress = !is_passed
+                    && (status_lower.contains("đang học") || status_lower.contains("dang hoc"));
 
                 Ok(StudentCourseRecord {
                     course_code: code,
@@ -372,6 +376,7 @@ pub fn run_degree_audit(conn: &Connection, preferred_slug: Option<&str>) -> AppR
                     grade_char,
                     semester_id: sem_id,
                     is_passed,
+                    is_enrolled_in_progress,
                 })
             })?;
 
@@ -383,10 +388,12 @@ pub fn run_degree_audit(conn: &Connection, preferred_slug: Option<&str>) -> AppR
 
     // 4. Deduplication: Chỉ giữ điểm cao nhất của môn học lại / học cải thiện
     let mut deduplicated_passed_courses: HashMap<String, StudentCourseRecord> = HashMap::new();
-    let mut all_taken_codes: HashSet<String> = HashSet::new();
+    let mut enrolled_in_progress_codes: HashSet<String> = HashSet::new();
 
     for mut course in raw_student_courses {
-        all_taken_codes.insert(course.course_code.clone());
+        if course.is_enrolled_in_progress {
+            enrolled_in_progress_codes.insert(course.course_code.clone());
+        }
         if !course.is_passed {
             continue;
         }
@@ -641,7 +648,7 @@ pub fn run_degree_audit(conn: &Connection, preferred_slug: Option<&str>) -> AppR
     }
 
     let mut remaining_passed_courses = deduplicated_passed_courses.clone();
-    let in_progress_codes: HashSet<String> = all_taken_codes
+    let in_progress_codes: HashSet<String> = enrolled_in_progress_codes
         .difference(&deduplicated_passed_courses.keys().cloned().collect())
         .cloned()
         .collect();
@@ -1667,6 +1674,13 @@ mod tests {
             .find(|c| c.course_code == "CS115")
             .expect("CS115 must be in missing_compulsory_courses");
         assert!(cs115_missing.is_in_progress, "CS115 đang học phải đánh dấu is_in_progress = true");
+
+        let cs106_elective = find_blk("Chuyên ngành")
+            .remaining_electives
+            .iter()
+            .find(|c| c.course_code == "CS106")
+            .expect("CS106 must be in remaining_electives");
+        assert!(!cs106_elective.is_in_progress, "CS106 chưa học không được đánh dấu Đang học");
     }
 
     #[test]

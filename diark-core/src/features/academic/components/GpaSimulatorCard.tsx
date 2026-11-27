@@ -1,15 +1,4 @@
 import React, { useMemo, useState } from "react";
-import {
-  AlertTriangle,
-  Award,
-  Calendar,
-  CheckCircle2,
-  GraduationCap,
-  Sliders,
-  Sparkles,
-  Target,
-  Zap,
-} from "lucide-react";
 import { evaluateUitWorkload } from "../utils/forecastEngine";
 import { SemesterGpaSimulator } from "./SemesterGpaSimulator";
 import type { AcademicCourseRecord } from "../types";
@@ -49,7 +38,7 @@ export const GpaSimulatorCard: React.FC<GpaSimulatorCardProps> = ({
   const [mode, setMode] = useState<SimulatorMode>("time");
   const [targetGpa10, setTargetGpa10] = useState<number>(8.5);
 
-  const completedTerms = Math.max(1, completedTermsCount);
+  const completedTerms = Math.max(0, completedTermsCount);
   const [selectedTerms, setSelectedTerms] = useState<number>(5);
   const [creditsPerTerm, setCreditsPerTerm] = useState<number>(21);
 
@@ -135,34 +124,31 @@ export const GpaSimulatorCard: React.FC<GpaSimulatorCardProps> = ({
           <button
             type="button"
             onClick={() => setScope("semester")}
-            className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs transition-colors cursor-pointer ${
+            className={`rounded-md px-3 py-1.5 text-xs transition-colors cursor-pointer ${
               scope === "semester"
                 ? "bg-[#2F6BFF] font-semibold text-white"
                 : "text-zinc-400 hover:text-zinc-200"
             }`}
           >
-            <Target className="h-3.5 w-3.5" />
             Chiến thuật kỳ này
           </button>
           <button
             type="button"
             onClick={() => setScope("degree")}
-            className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs transition-colors cursor-pointer ${
+            className={`rounded-md px-3 py-1.5 text-xs transition-colors cursor-pointer ${
               scope === "degree"
                 ? "bg-[#2F6BFF] font-semibold text-white"
                 : "text-zinc-400 hover:text-zinc-200"
             }`}
           >
-            <GraduationCap className="h-3.5 w-3.5" />
             Dự báo toàn khóa
           </button>
         </div>
 
         {scope === "degree" ? (
           <div
-            className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold ${degreeRank.color}`}
+            className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${degreeRank.color}`}
           >
-            <Award className="h-3.5 w-3.5" />
             Hạng: {degreeRank.label}
           </div>
         ) : (
@@ -187,26 +173,18 @@ export const GpaSimulatorCard: React.FC<GpaSimulatorCardProps> = ({
       ) : (
         <>
           {/* Header card */}
-          <div className="mb-3 flex items-center gap-2.5">
-            <div className="rounded-lg border border-[#2F6BFF]/30 bg-[#2F6BFF]/[0.16] p-2 text-[#6B9BFF]">
-              <GraduationCap className="h-5 w-5" />
-            </div>
-            <div>
-              <h3 className="flex items-center gap-2 text-sm font-semibold text-zinc-100">
-                Dự Báo Tốt Nghiệp &amp; GPA Simulator
-              </h3>
-              <p className="text-xs text-zinc-500">
-                Mô phỏng cGPA mục tiêu và phân bổ lộ trình tín chỉ UIT
-              </p>
-            </div>
+          <div className="mb-3">
+            <h3 className="text-sm font-semibold text-zinc-100">
+              Dự Báo Tốt Nghiệp &amp; GPA Simulator
+            </h3>
+            <p className="text-xs text-zinc-500">
+              Mô phỏng cGPA mục tiêu và phân bổ lộ trình tín chỉ UIT
+            </p>
           </div>
 
           {/* Progress Badge */}
           <div className="mb-4 flex items-center justify-between rounded-lg border border-[#1D263B] bg-[#080B12] px-3.5 py-2">
-            <span className="flex items-center gap-1.5 text-xs text-zinc-400">
-              <Sparkles className="h-3.5 w-3.5 text-[#6B9BFF]" />
-              Tiến độ tích lũy CTĐT:
-            </span>
+            <span className="text-xs text-zinc-400">Tiến độ tích lũy CTĐT:</span>
             <span className="font-mono text-xs font-semibold text-zinc-200">
               <span className="font-bold text-emerald-400">{currentEarnedCredits}</span> /{" "}
               {TOTAL_DEGREE_CREDITS} TC{" "}
@@ -220,11 +198,7 @@ export const GpaSimulatorCard: React.FC<GpaSimulatorCardProps> = ({
           <div className="space-y-4">
             <div>
               <div className="mb-1.5 flex items-center justify-between">
-                <label
-                  htmlFor="gpa-slider"
-                  className="flex items-center gap-1.5 text-xs font-medium text-zinc-300"
-                >
-                  <Sliders className="h-3.5 w-3.5 text-[#6B9BFF]" />
+                <label htmlFor="gpa-slider" className="text-xs font-medium text-zinc-300">
                   Mục tiêu cGPA Tốt nghiệp:
                 </label>
                 <span className="font-mono text-lg font-bold text-[#6B9BFF] tabular-nums">
@@ -261,25 +235,23 @@ export const GpaSimulatorCard: React.FC<GpaSimulatorCardProps> = ({
                   <button
                     type="button"
                     onClick={() => setMode("time")}
-                    className={`flex items-center gap-1 rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors cursor-pointer ${
+                    className={`rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors cursor-pointer ${
                       mode === "time"
                         ? "bg-[#2F6BFF] text-white"
                         : "text-zinc-400 hover:text-zinc-200"
                     }`}
                   >
-                    <Calendar className="h-3 w-3" />
                     Lộ trình thời gian
                   </button>
                   <button
                     type="button"
                     onClick={() => setMode("pace")}
-                    className={`flex items-center gap-1 rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors cursor-pointer ${
+                    className={`rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors cursor-pointer ${
                       mode === "pace"
                         ? "bg-[#2F6BFF] text-white"
                         : "text-zinc-400 hover:text-zinc-200"
                     }`}
                   >
-                    <Zap className="h-3 w-3" />
                     Tải trọng tín chỉ
                   </button>
                 </div>
@@ -364,112 +336,97 @@ export const GpaSimulatorCard: React.FC<GpaSimulatorCardProps> = ({
             {/* Real-time Result Alert Card */}
             {remainingCredits <= 0 ? (
               <div className="rounded-lg border border-emerald-800/40 bg-emerald-950/30 p-3.5 text-xs text-emerald-300">
-                <div className="flex items-start gap-2.5">
-                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />
-                  <div className="leading-relaxed">
-                    Bạn đã hoàn thành đủ{" "}
-                    <span className="font-mono font-bold text-zinc-100">{TOTAL_DEGREE_CREDITS}</span>{" "}
-                    tín chỉ theo khung chương trình đào tạo với cGPA hiện tại là{" "}
-                    <span className="font-mono font-bold text-emerald-400">
-                      {currentGpa10.toFixed(2)}
-                    </span>
-                    . Đủ điều kiện tốt nghiệp loại{" "}
-                    <span className="font-semibold text-emerald-200">{degreeRank.label}</span>!
-                  </div>
+                <div className="leading-relaxed">
+                  Bạn đã hoàn thành đủ{" "}
+                  <span className="font-mono font-bold text-zinc-100">{TOTAL_DEGREE_CREDITS}</span>{" "}
+                  tín chỉ theo khung chương trình đào tạo với cGPA hiện tại là{" "}
+                  <span className="font-mono font-bold text-emerald-400">
+                    {currentGpa10.toFixed(2)}
+                  </span>
+                  . Đủ điều kiện tốt nghiệp loại{" "}
+                  <span className="font-semibold text-emerald-200">{degreeRank.label}</span>!
                 </div>
               </div>
             ) : !isAchievable ? (
               <div className="rounded-lg border border-rose-800/50 bg-rose-950/40 p-3.5 text-xs text-rose-300">
-                <div className="flex items-start gap-2.5">
-                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-rose-400" />
-                  <div className="leading-relaxed">
-                    <p className="font-semibold text-rose-200">Mục tiêu cGPA bất khả thi!</p>
-                    <p className="mt-0.5 text-rose-400/90">
-                      Cần đạt cGPA trung bình{" "}
-                      <span className="font-mono text-sm font-bold text-rose-300">
-                        {requiredAverageGpa10.toFixed(2)} / 10.0
-                      </span>{" "}
-                      ở các tín chỉ còn lại (vượt trần tối đa 10.0). Vui lòng hạ chỉ tiêu hoặc kéo dài
-                      lộ trình.
-                    </p>
-                  </div>
+                <div className="leading-relaxed">
+                  <p className="font-semibold text-rose-200">Mục tiêu cGPA bất khả thi!</p>
+                  <p className="mt-0.5 text-rose-400/90">
+                    Cần đạt cGPA trung bình{" "}
+                    <span className="font-mono text-sm font-bold text-rose-300">
+                      {requiredAverageGpa10.toFixed(2)} / 10.0
+                    </span>{" "}
+                    ở các tín chỉ còn lại (vượt trần tối đa 10.0). Vui lòng hạ chỉ tiêu hoặc kéo dài
+                    lộ trình.
+                  </p>
                 </div>
               </div>
             ) : effectiveWorkload.isInvalid ? (
               <div className="rounded-lg border border-rose-800/50 bg-rose-950/40 p-3.5 text-xs text-rose-300">
-                <div className="flex items-start gap-2.5">
-                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-rose-400" />
-                  <div className="leading-relaxed">
-                    <p className="font-semibold text-rose-200">
-                      Vi phạm quy chế đào tạo UIT (Vượt trần 30 TC)!
-                    </p>
-                    <p className="mt-0.5 text-rose-300/90">
-                      Với mức tải{" "}
-                      <span className="font-mono font-bold text-rose-200">
-                        ~{effectiveCreditsPerTerm} TC/kỳ
-                      </span>
-                      , bạn đang vượt quá giới hạn tối đa 30 tín chỉ trong một học kỳ chính. Hệ thống
-                      Portal UIT sẽ từ chối đăng ký phương án này.
-                    </p>
-                  </div>
+                <div className="leading-relaxed">
+                  <p className="font-semibold text-rose-200">
+                    Vi phạm quy chế đào tạo UIT (Vượt trần 30 TC)!
+                  </p>
+                  <p className="mt-0.5 text-rose-300/90">
+                    Với mức tải{" "}
+                    <span className="font-mono font-bold text-rose-200">
+                      ~{effectiveCreditsPerTerm} TC/kỳ
+                    </span>
+                    , bạn đang vượt quá giới hạn tối đa 30 tín chỉ trong một học kỳ chính. Hệ thống
+                    Portal UIT sẽ từ chối đăng ký phương án này.
+                  </p>
                 </div>
               </div>
             ) : effectiveWorkload.tier === "below_floor" ? (
               <div className="rounded-lg border border-amber-800/50 bg-amber-950/40 p-3.5 text-xs text-amber-300">
-                <div className="flex items-start gap-2.5">
-                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
-                  <div className="leading-relaxed">
-                    Cần duy trì{" "}
-                    <span className="font-semibold text-amber-200">cGPA trung bình tối thiểu</span>{" "}
-                    <span className="font-mono text-sm font-bold text-amber-400">
-                      {requiredAverageGpa10.toFixed(2)}
-                    </span>{" "}
-                    trên{" "}
-                    <span className="font-mono font-bold text-zinc-100">
-                      {remainingCredits} tín chỉ còn lại
-                    </span>
-                    . <span className="font-bold text-amber-200">Lưu ý:</span> Với mức tải{" "}
-                    <span className="font-mono font-bold text-amber-400">
-                      ~{effectiveCreditsPerTerm} TC/kỳ
-                    </span>
-                    , bạn{" "}
-                    <span className="font-bold text-amber-200 underline decoration-amber-500/50">
-                      sẽ không đủ điều kiện xét Học bổng KKHT
-                    </span>{" "}
-                    theo quy chế đào tạo UIT.
-                  </div>
+                <div className="leading-relaxed">
+                  Cần duy trì{" "}
+                  <span className="font-semibold text-amber-200">cGPA trung bình tối thiểu</span>{" "}
+                  <span className="font-mono text-sm font-bold text-amber-400">
+                    {requiredAverageGpa10.toFixed(2)}
+                  </span>{" "}
+                  trên{" "}
+                  <span className="font-mono font-bold text-zinc-100">
+                    {remainingCredits} tín chỉ còn lại
+                  </span>
+                  . <span className="font-bold text-amber-200">Lưu ý:</span> Với mức tải{" "}
+                  <span className="font-mono font-bold text-amber-400">
+                    ~{effectiveCreditsPerTerm} TC/kỳ
+                  </span>
+                  , bạn{" "}
+                  <span className="font-bold text-amber-200 underline decoration-amber-500/50">
+                    sẽ không đủ điều kiện xét Học bổng KKHT
+                  </span>{" "}
+                  theo quy chế đào tạo UIT.
                 </div>
               </div>
             ) : (
               <div className="rounded-lg border border-emerald-800/40 bg-emerald-950/30 p-3.5 text-xs text-emerald-300">
-                <div className="flex items-start gap-2.5">
-                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />
-                  <div className="leading-relaxed">
-                    Cần duy trì{" "}
-                    <span className="font-semibold text-emerald-200">cGPA trung bình tối thiểu</span>{" "}
-                    <span className="font-mono text-sm font-bold text-emerald-400">
-                      {requiredAverageGpa10.toFixed(2)}
-                    </span>{" "}
-                    trên tổng số{" "}
-                    <span className="font-mono font-bold text-zinc-100">
-                      {remainingCredits} tín chỉ còn lại
-                    </span>{" "}
-                    (trung bình{" "}
-                    <span className="font-mono font-bold text-emerald-300">
-                      {effectiveCreditsPerTerm} TC/kỳ
-                    </span>{" "}
-                    trong{" "}
-                    <span className="font-mono font-bold text-zinc-100">
-                      {effectiveTerms} học kỳ tới
-                    </span>
-                    ) để tốt nghiệp loại{" "}
-                    <span className="font-semibold text-emerald-200">{degreeRank.label}</span>. Mức
-                    tải này{" "}
-                    <span className="font-bold text-emerald-200">
-                      đủ điều kiện tối thiểu để xét Học bổng KKHT
-                    </span>
-                    .
-                  </div>
+                <div className="leading-relaxed">
+                  Cần duy trì{" "}
+                  <span className="font-semibold text-emerald-200">cGPA trung bình tối thiểu</span>{" "}
+                  <span className="font-mono text-sm font-bold text-emerald-400">
+                    {requiredAverageGpa10.toFixed(2)}
+                  </span>{" "}
+                  trên tổng số{" "}
+                  <span className="font-mono font-bold text-zinc-100">
+                    {remainingCredits} tín chỉ còn lại
+                  </span>{" "}
+                  (trung bình{" "}
+                  <span className="font-mono font-bold text-emerald-300">
+                    {effectiveCreditsPerTerm} TC/kỳ
+                  </span>{" "}
+                  trong{" "}
+                  <span className="font-mono font-bold text-zinc-100">
+                    {effectiveTerms} học kỳ tới
+                  </span>
+                  ) để tốt nghiệp loại{" "}
+                  <span className="font-semibold text-emerald-200">{degreeRank.label}</span>. Mức
+                  tải này{" "}
+                  <span className="font-bold text-emerald-200">
+                    đủ điều kiện tối thiểu để xét Học bổng KKHT
+                  </span>
+                  .
                 </div>
               </div>
             )}
