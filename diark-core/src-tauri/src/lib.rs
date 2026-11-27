@@ -155,6 +155,9 @@ macro_rules! registered_commands {
             commands::vault::read_vault_note,
             commands::vault::save_vault_note,
             commands::vault::delete_vault_note,
+            commands::vault::save_vault_asset,
+            commands::vault::read_vault_asset_data_url,
+            commands::vault::get_vault_graph,
             commands::open_external_url,
             commands::hide_hud,
             // Settings & Identity

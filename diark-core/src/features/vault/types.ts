@@ -85,3 +85,21 @@ export interface VaultSyncEvent {
   distinct_tags: number;
   updated_file: string;
 }
+
+export interface VaultGraphNodeDto {
+  id: string;
+  title: string;
+  folder: string;
+  linkCount: number;
+  isUnresolved: boolean;
+}
+
+export interface VaultGraphEdgeDto {
+  source: string;
+  target: string;
+}
+
+export interface VaultGraphDto {
+  nodes: VaultGraphNodeDto[];
+  edges: VaultGraphEdgeDto[];
+}

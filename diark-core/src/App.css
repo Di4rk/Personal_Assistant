@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "katex/dist/katex.min.css";
 
 @theme {
   --color-sidebar: #060910;
@@ -167,4 +168,223 @@ dialog::backdrop {
     rgba(47, 107, 255, 0.09),
     transparent 65%
   );
+}
+
+/* Notion-style TipTap editor styling */
+.diark-prosemirror {
+  color: #e4e4e7;
+  font-size: 0.9375rem;
+  line-height: 1.7;
+}
+
+.diark-prosemirror > * + * {
+  margin-top: 0.45rem;
+}
+
+.diark-prosemirror h1 {
+  margin-top: 1.4rem;
+  margin-bottom: 0.5rem;
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 1.25;
+  color: #f4f4f5;
+  border-bottom: 1px solid #1d263b;
+  padding-bottom: 0.35rem;
+}
+
+.diark-prosemirror h2 {
+  margin-top: 1.2rem;
+  margin-bottom: 0.4rem;
+  font-size: 1.2rem;
+  font-weight: 600;
+  color: #f4f4f5;
+}
+
+.diark-prosemirror h3 {
+  margin-top: 0.95rem;
+  margin-bottom: 0.3rem;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: #e4e4e7;
+}
+
+.diark-prosemirror h4 {
+  margin-top: 0.75rem;
+  margin-bottom: 0.25rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #a1a1aa;
+}
+
+.diark-prosemirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: #52525b;
+  pointer-events: none;
+  height: 0;
+}
+
+.diark-prosemirror ul:not([data-type="taskList"]) {
+  list-style-type: disc;
+  padding-left: 1.35rem;
+}
+
+.diark-prosemirror ol {
+  list-style-type: decimal;
+  padding-left: 1.35rem;
+}
+
+.diark-prosemirror li > p {
+  margin: 0.15rem 0;
+}
+
+.diark-prosemirror ul[data-type="taskList"] {
+  list-style: none;
+  padding-left: 0;
+}
+
+.diark-prosemirror ul[data-type="taskList"] li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin: 0.2rem 0;
+}
+
+.diark-prosemirror ul[data-type="taskList"] li > label {
+  flex: 0 0 auto;
+  margin-top: 0.28rem;
+  user-select: none;
+  cursor: pointer;
+}
+
+.diark-prosemirror ul[data-type="taskList"] li > label input[type="checkbox"] {
+  accent-color: #2f6bff;
+  width: 0.95rem;
+  height: 0.95rem;
+  cursor: pointer;
+}
+
+.diark-prosemirror ul[data-type="taskList"] li[data-checked="true"] > div {
+  text-decoration: line-through;
+  color: #71717a;
+}
+
+.diark-prosemirror ul[data-type="taskList"] li > div {
+  flex: 1 1 auto;
+}
+
+.diark-prosemirror code {
+  border: 1px solid #1d263b;
+  background-color: #080b12;
+  color: #fbbf24;
+  border-radius: 0.3rem;
+  padding: 0.1rem 0.35rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.82rem;
+}
+
+.diark-prosemirror pre {
+  margin: 0.75rem 0;
+  overflow-x: auto;
+  border: 1px solid #1d263b;
+  background-color: #060910;
+  border-radius: 0.5rem;
+  padding: 0.85rem 1rem;
+}
+
+.diark-prosemirror pre code {
+  border: none;
+  background: transparent;
+  color: #e4e4e7;
+  padding: 0;
+  font-size: 0.8rem;
+  line-height: 1.55;
+}
+
+.diark-prosemirror blockquote {
+  margin: 0.75rem 0;
+  border-left: 3px solid #2f6bff;
+  padding-left: 0.9rem;
+  color: #a1a1aa;
+}
+
+.diark-prosemirror mark {
+  background-color: rgba(251, 191, 36, 0.22);
+  color: #fde68a;
+  border-radius: 0.2rem;
+  padding: 0.05rem 0.2rem;
+}
+
+.diark-prosemirror a {
+  color: #6b9bff;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.diark-prosemirror hr {
+  margin: 1rem 0;
+  border: none;
+  border-top: 1px solid #1d263b;
+}
+
+.diark-prosemirror table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.85rem 0;
+  table-layout: fixed;
+  overflow: hidden;
+  border-radius: 0.4rem;
+}
+
+.diark-prosemirror th,
+.diark-prosemirror td {
+  border: 1px solid #1d263b;
+  padding: 0.45rem 0.65rem;
+  vertical-align: top;
+  text-align: left;
+  font-size: 0.84rem;
+}
+
+.diark-prosemirror th {
+  background-color: #0f1420;
+  font-weight: 600;
+  color: #f4f4f5;
+}
+
+.diark-prosemirror td {
+  background-color: #080b12;
+}
+
+.diark-prosemirror .selectedCell {
+  background-color: rgba(47, 107, 255, 0.14);
+}
+
+@media print {
+  aside,
+  header,
+  nav,
+  .vault-no-print {
+    display: none !important;
+  }
+
+  html,
+  body,
+  .vault-print-target {
+    background: #ffffff !important;
+    color: #111827 !important;
+  }
+
+  .diark-prosemirror,
+  .diark-prosemirror h1,
+  .diark-prosemirror h2,
+  .diark-prosemirror h3,
+  .diark-prosemirror td,
+  .diark-prosemirror th {
+    color: #111827 !important;
+    background: #ffffff !important;
+    border-color: #d1d5db !important;
+  }
 }

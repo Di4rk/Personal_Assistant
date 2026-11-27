@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useDeferredValue, useMemo, useRef } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   FileText,
@@ -14,10 +14,12 @@ import {
   ChevronDown,
   ChevronUp,
   ExternalLink,
-  Columns2,
-  Eye,
-  Pencil,
+  Code2,
+  GitBranch,
+  Maximize2,
+  Printer,
   Hash,
+  X,
 } from "lucide-react";
 import {
   ensureDefaultVaultPath,
@@ -31,19 +33,23 @@ import {
   scaffoldSemesterVault,
   openOnenoteLink,
   openExternalUrl,
+  getVaultGraph,
   VaultSyncEvent,
 } from "@/lib/tauri-client";
 import { useTauriEvent } from "@/hooks/useTauriEvent";
 import type {
   VaultBacklinkDto,
+  VaultGraphDto,
+  VaultGraphNodeDto,
   VaultNoteSummaryDto,
   VaultSearchResultDto,
 } from "../types";
-import { MarkdownRenderer } from "./MarkdownRenderer";
+import { NotionNoteEditor } from "./NotionNoteEditor";
+import { VaultGraphView } from "./VaultGraphView";
 import { QuickCaptureModal } from "./QuickCaptureModal";
 import { renderHighlightedSnippet } from "@/lib/snippet";
 
-type EditorMode = "edit" | "split" | "preview";
+type EditorViewMode = "wysiwyg" | "source";
 
 function formatRelativeTime(ts: number): string {
   if (!ts) return "";
@@ -86,14 +92,16 @@ export const VaultDashboard: React.FC = () => {
   const [noteType, setNoteType] = useState<string>("GENERAL");
   const [externalUri, setExternalUri] = useState<string>("");
   const [content, setContent] = useState<string>("");
-  const deferredContent = useDeferredValue(content);
   const [backlinks, setBacklinks] = useState<VaultBacklinkDto[]>([]);
   const [isLoadingNote, setIsLoadingNote] = useState<boolean>(false);
 
-  // Save state
+  // Save & layout state
   const [saveState, setSaveState] = useState<"saved" | "dirty" | "saving">("saved");
   const [editorError, setEditorError] = useState<string | null>(null);
-  const [editorMode, setEditorMode] = useState<EditorMode>("split");
+  const [viewMode, setViewMode] = useState<EditorViewMode>("wysiwyg");
+  const [showGraphInspector, setShowGraphInspector] = useState<boolean>(true);
+  const [isGlobalGraphOpen, setIsGlobalGraphOpen] = useState<boolean>(false);
+  const [vaultGraph, setVaultGraph] = useState<VaultGraphDto>({ nodes: [], edges: [] });
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   // Search state
@@ -107,39 +115,51 @@ export const VaultDashboard: React.FC = () => {
   const [isQuickCaptureOpen, setIsQuickCaptureOpen] = useState<boolean>(false);
   const [toolMessage, setToolMessage] = useState<string | null>(null);
 
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const autosaveTimerRef = useRef<number | null>(null);
   const activeNoteIdRef = useRef<string | null>(null);
   useEffect(() => {
     activeNoteIdRef.current = activeNoteId;
   }, [activeNoteId]);
 
-  const refreshNotesList = useCallback(async (selectIdIfEmpty = true) => {
+  const refreshGraph = useCallback(async () => {
     try {
-      const list = await listVaultNotes();
-      setNotes(list);
-      if (selectIdIfEmpty && !activeNoteIdRef.current && list.length > 0) {
-        const first = list[0];
-        setIsLoadingNote(true);
-        try {
-          const detail = await readVaultNote(first.id);
-          setActiveNoteId(detail.id);
-          setTitle(detail.title);
-          setFolder(detail.folder);
-          setTagsInput(detail.tags.join(", "));
-          setNoteType(detail.noteType);
-          setExternalUri(detail.externalUri);
-          setContent(detail.content);
-          setBacklinks(detail.backlinks);
-          setSaveState("saved");
-        } finally {
-          setIsLoadingNote(false);
-        }
-      }
-    } catch (err) {
-      setEditorError(typeof err === "string" ? err : "Không thể tải danh sách ghi chú.");
+      const g = await getVaultGraph();
+      setVaultGraph(g);
+    } catch {
+      // keep existing graph snapshot
     }
   }, []);
+
+  const refreshNotesList = useCallback(
+    async (selectIdIfEmpty = true) => {
+      try {
+        const list = await listVaultNotes();
+        setNotes(list);
+        void refreshGraph();
+        if (selectIdIfEmpty && !activeNoteIdRef.current && list.length > 0) {
+          const first = list[0];
+          setIsLoadingNote(true);
+          try {
+            const detail = await readVaultNote(first.id);
+            setActiveNoteId(detail.id);
+            setTitle(detail.title);
+            setFolder(detail.folder);
+            setTagsInput(detail.tags.join(", "));
+            setNoteType(detail.noteType);
+            setExternalUri(detail.externalUri);
+            setContent(detail.content);
+            setBacklinks(detail.backlinks);
+            setSaveState("saved");
+          } finally {
+            setIsLoadingNote(false);
+          }
+        }
+      } catch (err) {
+        setEditorError(typeof err === "string" ? err : "Không thể tải danh sách ghi chú.");
+      }
+    },
+    [refreshGraph]
+  );
 
   useEffect(() => {
     let mounted = true;
@@ -298,7 +318,7 @@ export const VaultDashboard: React.FC = () => {
     setBacklinks([]);
     setSaveState("dirty");
     setEditorError(null);
-    setEditorMode((prev) => (prev === "preview" ? "split" : prev));
+    setViewMode("wysiwyg");
   };
 
   const handleDeleteNote = async (noteId: string) => {
@@ -319,22 +339,6 @@ export const VaultDashboard: React.FC = () => {
     }
   };
 
-  const handleToggleTaskLine = (lineIndex: number) => {
-    const lines = content.split(/\r?\n/);
-    if (lineIndex < 0 || lineIndex >= lines.length) return;
-    const line = lines[lineIndex];
-    if (/^\s*[-*]\s+\[ \]/.test(line)) {
-      lines[lineIndex] = line.replace(/^(\s*[-*]\s+)\[ \]/, "$1[x]");
-    } else if (/^\s*[-*]\s+\[[xX]\]/.test(line)) {
-      lines[lineIndex] = line.replace(/^(\s*[-*]\s+)\[[xX]\]/, "$1[ ]");
-    } else {
-      return;
-    }
-    const updated = lines.join("\n");
-    setContent(updated);
-    setSaveState("dirty");
-  };
-
   const handleOpenWikilink = async (target: string) => {
     const targetLower = target.toLowerCase();
     const matched = notes.find(
@@ -348,7 +352,6 @@ export const VaultDashboard: React.FC = () => {
       await openNoteById(matched.id);
       return;
     }
-    // Create a new draft note with this wikilink title
     setActiveNoteId(null);
     setTitle(target);
     setFolder("notes");
@@ -358,27 +361,19 @@ export const VaultDashboard: React.FC = () => {
     setContent(`# ${target}\n\n`);
     setBacklinks([]);
     setSaveState("dirty");
-    setEditorMode((prev) => (prev === "preview" ? "split" : prev));
+    setViewMode("wysiwyg");
   };
 
-  const insertSnippet = (before: string, after = "", placeholder = "") => {
-    const el = textareaRef.current;
-    if (!el) {
-      setContent((prev) => `${prev}${prev.endsWith("\n") || prev === "" ? "" : "\n"}${before}${placeholder}${after}`);
-      setSaveState("dirty");
+  const handleGraphSelectNode = (node: VaultGraphNodeDto) => {
+    if (node.isUnresolved) {
+      void handleOpenWikilink(node.title);
       return;
     }
-    const start = el.selectionStart;
-    const end = el.selectionEnd;
-    const selected = content.slice(start, end) || placeholder;
-    const nextText = `${content.slice(0, start)}${before}${selected}${after}${content.slice(end)}`;
-    setContent(nextText);
-    setSaveState("dirty");
-    window.requestAnimationFrame(() => {
-      el.focus();
-      const cursorPos = start + before.length + selected.length;
-      el.setSelectionRange(cursorPos, cursorPos);
-    });
+    void openNoteById(node.id);
+  };
+
+  const handleExportPdf = () => {
+    window.print();
   };
 
   const handleSelectVaultDir = async () => {
@@ -692,18 +687,18 @@ export const VaultDashboard: React.FC = () => {
           </div>
         </aside>
 
-        {/* RIGHT PANE: Markdown Editor & Preview */}
-        <section className="lg:col-span-8 xl:col-span-9 flex flex-col rounded-xl border border-line bg-surface overflow-hidden">
+        {/* RIGHT PANE: Unified Notion Editor + Obsidian Graph Inspector */}
+        <section className="lg:col-span-8 xl:col-span-9 flex flex-col rounded-xl border border-[#1D263B] bg-[#0F1420] overflow-hidden vault-print-target">
           {isLoadingNote ? (
             <div className="flex-1 flex items-center justify-center gap-2 text-xs text-zinc-500">
-              <Loader2 className="h-4 w-4 animate-spin text-uit-accent" aria-hidden="true" />
+              <Loader2 className="h-4 w-4 animate-spin text-[#6B9BFF]" aria-hidden="true" />
               <span>Đang mở ghi chú...</span>
             </div>
           ) : (
             <>
               {/* Title + Metadata Bar */}
-              <div className="border-b border-line px-5 pt-4 pb-3 space-y-3">
-                <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="border-b border-[#1D263B] px-5 pt-4 pb-3 space-y-2.5 vault-no-print">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <input
                     type="text"
                     value={title}
@@ -716,13 +711,13 @@ export const VaultDashboard: React.FC = () => {
                     className="min-w-0 flex-1 bg-transparent text-lg font-bold text-zinc-100 placeholder-zinc-600 focus:outline-none"
                   />
 
-                  <div className="flex items-center gap-2 shrink-0">
+                  <div className="flex flex-wrap items-center gap-1.5 shrink-0">
                     <span
                       className={`text-[11px] font-medium px-2 py-0.5 rounded border ${
                         saveState === "saving"
                           ? "border-amber-700/50 bg-amber-950/30 text-amber-300"
                           : saveState === "dirty"
-                          ? "border-line bg-surface-hover text-zinc-300"
+                          ? "border-[#1D263B] bg-[#151C2C] text-zinc-300"
                           : "border-emerald-800/50 bg-emerald-950/30 text-emerald-400"
                       }`}
                     >
@@ -736,55 +731,54 @@ export const VaultDashboard: React.FC = () => {
                     <button
                       type="button"
                       onClick={() => void handleSaveNote()}
-                      className="inline-flex items-center gap-1 rounded-lg border border-line bg-surface-hover hover:border-uit/40 px-2.5 py-1 text-xs font-medium text-zinc-200 transition-colors cursor-pointer"
+                      className="inline-flex items-center gap-1 rounded-lg border border-[#1D263B] bg-[#080B12] hover:bg-[#151C2C] px-2.5 py-1 text-xs font-medium text-zinc-200 transition-colors cursor-pointer"
                     >
                       <Save className="h-3.5 w-3.5 text-emerald-400" aria-hidden="true" />
                       <span>Lưu</span>
                     </button>
 
-                    {/* View mode switcher */}
-                    <div className="flex rounded-lg border border-line bg-canvas p-0.5 text-[11px]">
-                      <button
-                        type="button"
-                        onClick={() => setEditorMode("edit")}
-                        className={`inline-flex items-center gap-1 rounded-md px-2 py-1 transition-colors cursor-pointer ${
-                          editorMode === "edit"
-                            ? "bg-uit/20 text-white font-semibold"
-                            : "text-zinc-400 hover:text-zinc-200"
-                        }`}
-                      >
-                        <Pencil className="h-3 w-3" aria-hidden="true" />
-                        <span>Soạn thảo</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setEditorMode("split")}
-                        className={`inline-flex items-center gap-1 rounded-md px-2 py-1 transition-colors cursor-pointer ${
-                          editorMode === "split"
-                            ? "bg-uit/20 text-white font-semibold"
-                            : "text-zinc-400 hover:text-zinc-200"
-                        }`}
-                      >
-                        <Columns2 className="h-3 w-3" aria-hidden="true" />
-                        <span>Chia đôi</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setEditorMode("preview")}
-                        className={`inline-flex items-center gap-1 rounded-md px-2 py-1 transition-colors cursor-pointer ${
-                          editorMode === "preview"
-                            ? "bg-uit/20 text-white font-semibold"
-                            : "text-zinc-400 hover:text-zinc-200"
-                        }`}
-                      >
-                        <Eye className="h-3 w-3" aria-hidden="true" />
-                        <span>Đọc</span>
-                      </button>
-                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setViewMode((prev) => (prev === "wysiwyg" ? "source" : "wysiwyg"))
+                      }
+                      title="Chuyển giữa giao diện Notion và mã Markdown gốc"
+                      className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer ${
+                        viewMode === "source"
+                          ? "border-[#2F6BFF]/50 bg-[#2F6BFF]/20 text-[#6B9BFF]"
+                          : "border-[#1D263B] bg-[#080B12] text-zinc-300 hover:bg-[#151C2C]"
+                      }`}
+                    >
+                      <Code2 className="h-3.5 w-3.5" />
+                      <span>{viewMode === "source" ? "Trực quan" : "Mã .md"}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowGraphInspector((prev) => !prev)}
+                      title="Bật/tắt bảng mạng liên kết Obsidian"
+                      className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer ${
+                        showGraphInspector
+                          ? "border-[#2F6BFF]/50 bg-[#2F6BFF]/20 text-[#6B9BFF]"
+                          : "border-[#1D263B] bg-[#080B12] text-zinc-300 hover:bg-[#151C2C]"
+                      }`}
+                    >
+                      <GitBranch className="h-3.5 w-3.5" />
+                      <span>Đồ thị</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleExportPdf}
+                      title="In hoặc Xuất PDF"
+                      className="inline-flex items-center gap-1 rounded-lg border border-[#1D263B] bg-[#080B12] hover:bg-[#151C2C] px-2 py-1 text-xs text-zinc-300 transition-colors cursor-pointer"
+                    >
+                      <Printer className="h-3.5 w-3.5" />
+                    </button>
                   </div>
                 </div>
 
-                {/* Folder + Tags row */}
+                {/* Folder + Tags + Shortcut Hint row */}
                 <div className="flex flex-wrap items-center gap-3 text-xs">
                   <div className="flex items-center gap-1.5">
                     <label htmlFor="vault-folder-input" className="text-[11px] text-zinc-500">
@@ -801,13 +795,13 @@ export const VaultDashboard: React.FC = () => {
                         }
                       }}
                       readOnly={Boolean(activeNoteId)}
-                      className={`w-28 rounded border border-line bg-canvas px-2 py-0.5 font-mono text-[11px] text-zinc-300 focus:border-uit focus:outline-none ${
+                      className={`w-36 rounded border border-[#1D263B] bg-[#080B12] px-2 py-0.5 font-mono text-[11px] text-zinc-300 focus:border-[#2F6BFF] focus:outline-none ${
                         activeNoteId ? "opacity-75" : ""
                       }`}
                     />
                   </div>
 
-                  <div className="flex flex-1 min-w-[200px] items-center gap-1.5">
+                  <div className="flex flex-1 min-w-[180px] items-center gap-1.5">
                     <Hash className="h-3.5 w-3.5 text-zinc-500 shrink-0" aria-hidden="true" />
                     <input
                       type="text"
@@ -818,9 +812,15 @@ export const VaultDashboard: React.FC = () => {
                       }}
                       aria-label="Thẻ ghi chú"
                       placeholder="Thẻ: it004, on-thi, thuat-toan..."
-                      className="w-full rounded border border-line bg-canvas px-2 py-0.5 text-[11px] text-zinc-300 placeholder-zinc-600 focus:border-uit focus:outline-none"
+                      className="w-full rounded border border-[#1D263B] bg-[#080B12] px-2 py-0.5 text-[11px] text-zinc-300 placeholder-zinc-600 focus:border-[#2F6BFF] focus:outline-none"
                     />
                   </div>
+
+                  <span className="hidden xl:inline text-[11px] text-zinc-500">
+                    Gõ <code className="rounded bg-[#080B12] px-1 text-zinc-300">/</code> chèn khối ·{" "}
+                    <code className="rounded bg-[#080B12] px-1 text-zinc-300">@</code> hoặc{" "}
+                    <code className="rounded bg-[#080B12] px-1 text-zinc-300">[[</code> nối ghi chú · Chuột phải để tùy chọn
+                  </span>
 
                   {externalUri && (
                     <button
@@ -840,81 +840,6 @@ export const VaultDashboard: React.FC = () => {
                   )}
                 </div>
 
-                {/* Formatting Toolbar */}
-                {editorMode !== "preview" && (
-                  <div className="flex flex-wrap items-center gap-1 pt-1">
-                    <button
-                      type="button"
-                      onClick={() => insertSnippet("# ", "", "Tiêu đề")}
-                      className="rounded border border-zinc-800 bg-zinc-950 px-2 py-0.5 text-[11px] font-semibold text-zinc-300 hover:border-zinc-700 cursor-pointer"
-                    >
-                      H1
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => insertSnippet("## ", "", "Mục nhỏ")}
-                      className="rounded border border-zinc-800 bg-zinc-950 px-2 py-0.5 text-[11px] font-semibold text-zinc-300 hover:border-zinc-700 cursor-pointer"
-                    >
-                      H2
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => insertSnippet("**", "**", "in đậm")}
-                      className="rounded border border-zinc-800 bg-zinc-950 px-2 py-0.5 text-[11px] font-bold text-zinc-300 hover:border-zinc-700 cursor-pointer"
-                    >
-                      Đậm
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => insertSnippet("*", "*", "in nghiêng")}
-                      className="rounded border border-zinc-800 bg-zinc-950 px-2 py-0.5 text-[11px] italic text-zinc-300 hover:border-zinc-700 cursor-pointer"
-                    >
-                      Nghiêng
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => insertSnippet("\n- [ ] ", "", "Việc cần làm")}
-                      className="rounded border border-zinc-800 bg-zinc-950 px-2 py-0.5 text-[11px] text-zinc-300 hover:border-zinc-700 cursor-pointer"
-                    >
-                      Checklist
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => insertSnippet("\n```cpp\n", "\n```\n", "// code")}
-                      className="rounded border border-zinc-800 bg-zinc-950 px-2 py-0.5 text-[11px] font-mono text-zinc-300 hover:border-zinc-700 cursor-pointer"
-                    >
-                      Code
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => insertSnippet("\n> [!note] Lưu ý\n> ", "", "Nội dung cần nhớ")}
-                      className="rounded border border-zinc-800 bg-zinc-950 px-2 py-0.5 text-[11px] text-zinc-300 hover:border-zinc-700 cursor-pointer"
-                    >
-                      Callout
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        insertSnippet(
-                          "\n| Cột 1 | Cột 2 |\n| --- | --- |\n| ",
-                          " | giá trị |\n",
-                          "mục"
-                        )
-                      }
-                      className="rounded border border-zinc-800 bg-zinc-950 px-2 py-0.5 text-[11px] text-zinc-300 hover:border-zinc-700 cursor-pointer"
-                    >
-                      Bảng
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => insertSnippet("[[", "]]", "Tên ghi chú")}
-                      className="rounded border border-zinc-800 bg-zinc-950 px-2 py-0.5 text-[11px] text-emerald-300 hover:border-zinc-700 cursor-pointer"
-                    >
-                      [[Link]]
-                    </button>
-                  </div>
-                )}
-
                 {editorError && (
                   <div className="rounded-lg border border-rose-800/60 bg-rose-950/30 px-3 py-2 text-xs text-rose-300">
                     {editorError}
@@ -922,67 +847,132 @@ export const VaultDashboard: React.FC = () => {
                 )}
               </div>
 
-              {/* Editor + Preview Body */}
-              <div
-                className={`flex-1 min-h-0 grid ${
-                  editorMode === "split" ? "grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-line" : "grid-cols-1"
-                }`}
-              >
-                {editorMode !== "preview" && (
+              {/* Main Single-Pane Workspace + Optional Right Graph Inspector */}
+              <div className="flex-1 min-h-0 flex flex-col xl:flex-row overflow-hidden">
+                {viewMode === "wysiwyg" ? (
+                  <NotionNoteEditor
+                    noteId={activeNoteId}
+                    content={content}
+                    notes={notes}
+                    onChangeMarkdown={(md) => {
+                      setContent(md);
+                      setSaveState("dirty");
+                    }}
+                    onOpenWikilink={(target) => void handleOpenWikilink(target)}
+                    onExportPdf={handleExportPdf}
+                  />
+                ) : (
                   <textarea
-                    ref={textareaRef}
                     value={content}
                     onChange={(e) => {
                       setContent(e.target.value);
                       setSaveState("dirty");
                     }}
-                    aria-label="Nội dung ghi chú Markdown"
-                    placeholder="Viết ghi chú bằng Markdown... Hỗ trợ # tiêu đề, - [ ] checklist, > [!tip] callout, bảng, khối code và [[Liên kết ghi chú]]."
-                    className="h-full min-h-[380px] w-full resize-none bg-canvas/60 p-5 font-mono text-xs leading-relaxed text-zinc-200 placeholder-zinc-600 focus:outline-none"
+                    aria-label="Mã nguồn Markdown"
+                    placeholder="Mã nguồn Markdown (.md)..."
+                    className="flex-1 min-h-[420px] w-full resize-none bg-[#080B12] p-6 font-mono text-xs leading-relaxed text-zinc-200 placeholder-zinc-600 focus:outline-none"
                   />
                 )}
 
-                {editorMode !== "edit" && (
-                  <div className="h-full min-h-[380px] overflow-y-auto p-5 bg-zinc-900/20">
-                    <MarkdownRenderer
-                      content={deferredContent}
-                      onToggleTaskLine={handleToggleTaskLine}
-                      onOpenWikilink={(target) => void handleOpenWikilink(target)}
-                      onOpenExternalUrl={(url) => void openExternalUrl(url)}
-                    />
-                  </div>
-                )}
-              </div>
-
-              {/* Backlinks Footer */}
-              <div className="border-t border-zinc-800 bg-zinc-950/50 px-5 py-2.5">
-                <div className="flex flex-wrap items-center gap-2 text-xs">
-                  <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-zinc-400">
-                    <Link2 className="h-3.5 w-3.5 text-emerald-400" />
-                    <span>Liên kết trỏ tới ({backlinks.length}):</span>
-                  </span>
-                  {backlinks.length === 0 ? (
-                    <span className="text-[11px] text-zinc-600">
-                      Chưa có ghi chú nào nhắc tới trang này qua [[{title || "..."}]].
-                    </span>
-                  ) : (
-                    backlinks.map((bl) => (
+                {showGraphInspector && (
+                  <aside className="xl:w-72 shrink-0 border-t xl:border-t-0 xl:border-l border-[#1D263B] bg-[#080B12] p-3 flex flex-col gap-3 overflow-y-auto vault-no-print">
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <h3 className="text-xs font-semibold text-zinc-200">Mạng liên kết</h3>
+                        <p className="text-[10px] text-zinc-500">
+                          {vaultGraph.nodes.length} nút · {vaultGraph.edges.length} liên kết
+                        </p>
+                      </div>
                       <button
-                        key={bl.id}
                         type="button"
-                        onClick={() => void openNoteById(bl.id)}
-                        className="rounded border border-zinc-700 bg-zinc-800 hover:border-emerald-500/50 hover:text-emerald-300 px-2 py-0.5 text-[11px] text-zinc-300 transition-colors cursor-pointer"
+                        onClick={() => setIsGlobalGraphOpen(true)}
+                        title="Mở toàn bộ đồ thị Vault"
+                        className="inline-flex items-center gap-1 rounded border border-[#1D263B] bg-[#0F1420] hover:bg-[#151C2C] px-2 py-1 text-[11px] text-[#6B9BFF] cursor-pointer"
                       >
-                        {bl.title}
+                        <Maximize2 className="h-3 w-3" />
+                        <span>Toàn đồ thị</span>
                       </button>
-                    ))
-                  )}
-                </div>
+                    </div>
+
+                    <VaultGraphView
+                      graph={vaultGraph}
+                      activeNoteId={activeNoteId}
+                      mode="local"
+                      onSelectNode={handleGraphSelectNode}
+                      className="h-56 w-full"
+                    />
+
+                    <div className="space-y-1.5 border-t border-[#1D263B] pt-2.5">
+                      <div className="flex items-center gap-1.5 text-[11px] font-medium text-zinc-300">
+                        <Link2 className="h-3.5 w-3.5 text-[#6B9BFF]" />
+                        <span>Liên kết trỏ tới ({backlinks.length})</span>
+                      </div>
+                      {backlinks.length === 0 ? (
+                        <p className="text-[11px] text-zinc-500">
+                          Chưa có ghi chú nào nhắc tới [[{title || "..."}]].
+                        </p>
+                      ) : (
+                        <div className="space-y-1">
+                          {backlinks.map((bl) => (
+                            <button
+                              key={bl.id}
+                              type="button"
+                              onClick={() => void openNoteById(bl.id)}
+                              className="w-full truncate rounded-md border border-[#1D263B] bg-[#0F1420] hover:border-[#2F6BFF]/45 hover:text-[#6B9BFF] px-2.5 py-1.5 text-left text-xs text-zinc-300 transition-colors cursor-pointer"
+                            >
+                              {bl.title}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </aside>
+                )}
               </div>
             </>
           )}
         </section>
       </div>
+
+      {isGlobalGraphOpen && (
+        <div
+          onClick={() => setIsGlobalGraphOpen(false)}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-6 backdrop-blur-xs vault-no-print"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="flex h-[80vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-[#2B3957] bg-[#0F1420] shadow-2xl"
+          >
+            <div className="flex items-center justify-between border-b border-[#1D263B] px-5 py-3">
+              <div>
+                <h3 className="text-sm font-semibold text-zinc-100">
+                  Đồ thị tri thức Vault (Obsidian Graph)
+                </h3>
+                <p className="text-[11px] text-zinc-400">
+                  {vaultGraph.nodes.length} ghi chú · {vaultGraph.edges.length} liên kết · Nhấp vào nút để mở hoặc tạo ghi chú
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsGlobalGraphOpen(false)}
+                className="rounded-lg border border-[#1D263B] bg-[#080B12] p-1.5 text-zinc-400 hover:bg-[#151C2C] hover:text-zinc-100 cursor-pointer"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <VaultGraphView
+              graph={vaultGraph}
+              activeNoteId={activeNoteId}
+              mode="global"
+              onSelectNode={(node) => {
+                handleGraphSelectNode(node);
+                setIsGlobalGraphOpen(false);
+              }}
+              className="flex-1 rounded-none border-0"
+            />
+          </div>
+        </div>
+      )}
 
       <QuickCaptureModal
         isOpen={isQuickCaptureOpen}

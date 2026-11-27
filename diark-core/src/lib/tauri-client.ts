@@ -23,6 +23,7 @@ import type {
   CreateStructuredNoteDto,
   SaveVaultNoteDto,
   ScaffoldResultDto,
+  VaultGraphDto,
   VaultNoteDetailDto,
   VaultNoteSummaryDto,
   VaultSearchResultDto,
@@ -1074,6 +1075,21 @@ export async function saveVaultNote(
 
 export async function deleteVaultNote(noteId: string): Promise<void> {
   return invoke<void>("delete_vault_note", { noteId });
+}
+
+export async function saveVaultAsset(filename: string, bytes: number[]): Promise<string> {
+  return invoke<string>("save_vault_asset", { filename, bytes });
+}
+
+export async function readVaultAssetDataUrl(
+  relPath: string,
+  noteId?: string
+): Promise<string> {
+  return invoke<string>("read_vault_asset_data_url", { relPath, noteId });
+}
+
+export async function getVaultGraph(): Promise<VaultGraphDto> {
+  return invoke<VaultGraphDto>("get_vault_graph");
 }
 
 export interface DrlSemesterScore {

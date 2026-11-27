@@ -3,6 +3,7 @@
 //! Provides Tauri IPC commands for scanning, full-text searching, quick capture of
 //! structured notes, and opening OneNote URIs with security validation.
 
+use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
 
 use rusqlite::{params, Connection, OptionalExtension};
@@ -58,6 +59,30 @@ pub struct VaultNoteDetailDto {
     pub external_uri: String,
     pub updated_at: i64,
     pub backlinks: Vec<VaultBacklinkDto>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VaultGraphNodeDto {
+    pub id: String,
+    pub title: String,
+    pub folder: String,
+    pub link_count: usize,
+    pub is_unresolved: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VaultGraphEdgeDto {
+    pub source: String,
+    pub target: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VaultGraphDto {
+    pub nodes: Vec<VaultGraphNodeDto>,
+    pub edges: Vec<VaultGraphEdgeDto>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -791,7 +816,9 @@ pub(crate) fn list_vault_notes_blocking(
     let mut list = Vec::new();
     for r in rows {
         let item = r.map_err(|e| e.to_string())?;
-        if !crate::modules::vault::watcher::is_ignored_rel_path(&item.id, &policy) {
+        if !crate::modules::vault::watcher::is_ignored_rel_path(&item.id, &policy)
+            && vault_root.join(&item.id).exists()
+        {
             list.push(item);
         }
     }
@@ -1107,6 +1134,317 @@ pub(crate) fn delete_vault_note_blocking(
     Ok(())
 }
 
+fn encode_base64(input: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
+    for chunk in input.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };
+        let b2 = if chunk.len() > 2 { chunk[2] as u32 } else { 0 };
+        let triple = (b0 << 16) | (b1 << 8) | b2;
+        out.push(TABLE[((triple >> 18) & 0x3f) as usize] as char);
+        out.push(TABLE[((triple >> 12) & 0x3f) as usize] as char);
+        if chunk.len() > 1 {
+            out.push(TABLE[((triple >> 6) & 0x3f) as usize] as char);
+        } else {
+            out.push('=');
+        }
+        if chunk.len() > 2 {
+            out.push(TABLE[(triple & 0x3f) as usize] as char);
+        } else {
+            out.push('=');
+        }
+    }
+    out
+}
+
+fn image_mime_for_ext(ext: &str) -> Option<&'static str> {
+    match ext.to_ascii_lowercase().as_str() {
+        "png" => Some("image/png"),
+        "jpg" | "jpeg" => Some("image/jpeg"),
+        "gif" => Some("image/gif"),
+        "webp" => Some("image/webp"),
+        "svg" => Some("image/svg+xml"),
+        "bmp" => Some("image/bmp"),
+        _ => None,
+    }
+}
+
+pub(crate) fn save_vault_asset_blocking(
+    conn: &mut Connection,
+    default_dir: &Path,
+    filename: &str,
+    bytes: &[u8],
+) -> Result<String, String> {
+    if bytes.is_empty() {
+        return Err("Tệp hình ảnh trống.".to_string());
+    }
+
+    let vault_root = ensure_vault_path_with_default(conn, default_dir)?;
+    let raw_path = Path::new(filename.trim());
+    let ext = raw_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|s| s.to_ascii_lowercase())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "png".to_string());
+
+    if image_mime_for_ext(&ext).is_none() {
+        return Err(format!("Định dạng ảnh không được hỗ trợ: .{ext}"));
+    }
+
+    let raw_stem = raw_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("image");
+    let clean_stem: String = raw_stem
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let trimmed_stem = clean_stem.trim_matches('-');
+    let safe_stem = if trimmed_stem.is_empty() {
+        "image"
+    } else {
+        trimmed_stem
+    };
+
+    let assets_dir = vault_root.join("_assets");
+    std::fs::create_dir_all(&assets_dir)
+        .map_err(|e| format!("Không thể tạo thư mục ảnh {}: {e}", assets_dir.display()))?;
+
+    let stamp_ms = chrono::Utc::now().timestamp_millis();
+    let mut candidate_name = format!("{stamp_ms}-{safe_stem}.{ext}");
+    let mut counter = 2usize;
+    while assets_dir.join(&candidate_name).exists() {
+        candidate_name = format!("{stamp_ms}-{safe_stem}-{counter}.{ext}");
+        counter += 1;
+    }
+
+    let target_file = assets_dir.join(&candidate_name);
+    std::fs::write(&target_file, bytes)
+        .map_err(|e| format!("Không thể lưu tệp ảnh {}: {e}", target_file.display()))?;
+
+    Ok(format!("_assets/{candidate_name}"))
+}
+
+pub(crate) fn read_vault_asset_data_url_blocking(
+    conn: &mut Connection,
+    default_dir: &Path,
+    rel_path: &str,
+    note_id: Option<&str>,
+) -> Result<String, String> {
+    let vault_root = ensure_vault_path_with_default(conn, default_dir)?;
+    let trimmed = rel_path.trim().trim_start_matches("./").trim_start_matches(".\\");
+    let norm_rel = normalize_relative_note_id(trimmed)?;
+
+    let mut candidates = vec![vault_root.join(&norm_rel)];
+    if let Some(nid) = note_id {
+        if let Ok(norm_nid) = normalize_relative_note_id(nid) {
+            if let Some(parent) = Path::new(&norm_nid).parent() {
+                if !parent.as_os_str().is_empty() {
+                    candidates.push(vault_root.join(parent).join(&norm_rel));
+                }
+            }
+        }
+    }
+    if !norm_rel.contains('/') {
+        candidates.push(vault_root.join("_assets").join(&norm_rel));
+    }
+
+    let found_path = candidates
+        .into_iter()
+        .find(|p| p.is_file())
+        .ok_or_else(|| format!("Không tìm thấy tệp ảnh trong Vault: {norm_rel}"))?;
+
+    let canon_root = vault_root
+        .canonicalize()
+        .map_err(|e| format!("Lỗi đường dẫn gốc Vault: {e}"))?;
+    let canon_file = found_path
+        .canonicalize()
+        .map_err(|e| format!("Lỗi đường dẫn ảnh: {e}"))?;
+    if !canon_file.starts_with(&canon_root) {
+        return Err("Đường dẫn ảnh nằm ngoài thư mục Vault.".to_string());
+    }
+
+    let ext = canon_file
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+    let mime = image_mime_for_ext(ext)
+        .ok_or_else(|| format!("Định dạng ảnh không được hỗ trợ: .{ext}"))?;
+
+    let bytes = std::fs::read(&canon_file)
+        .map_err(|e| format!("Không thể đọc tệp ảnh {}: {e}", canon_file.display()))?;
+
+    Ok(format!("data:{mime};base64,{}", encode_base64(&bytes)))
+}
+
+pub(crate) fn get_vault_graph_blocking(
+    conn: &mut Connection,
+    default_dir: &Path,
+) -> Result<VaultGraphDto, String> {
+    let vault_root = ensure_vault_path_with_default(conn, default_dir)?;
+    let policy = crate::modules::vault::watcher::VaultWatchPolicy::default();
+
+    let mut nodes_map: HashMap<String, VaultGraphNodeDto> = HashMap::new();
+    {
+        let mut stmt = conn
+            .prepare("SELECT id, title FROM vault_notes ORDER BY title ASC")
+            .map_err(|e| format!("Lỗi truy vấn nút đồ thị: {e}"))?;
+        let rows = stmt
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+            .map_err(|e| format!("Lỗi đọc nút đồ thị: {e}"))?;
+
+        for row in rows {
+            let (id, title) = row.map_err(|e| e.to_string())?;
+            if crate::modules::vault::watcher::is_ignored_rel_path(&id, &policy)
+                || !vault_root.join(&id).exists()
+            {
+                continue;
+            }
+            nodes_map.insert(
+                id.clone(),
+                VaultGraphNodeDto {
+                    folder: folder_from_note_id(&id),
+                    id,
+                    title,
+                    link_count: 0,
+                    is_unresolved: false,
+                },
+            );
+        }
+    }
+
+    let mut edge_set: HashSet<(String, String)> = HashSet::new();
+    {
+        let mut stmt = conn
+            .prepare("SELECT source_id, target_id, unresolved_target FROM vault_links")
+            .map_err(|e| format!("Lỗi truy vấn cạnh đồ thị: {e}"))?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, Option<String>>(1)?,
+                    r.get::<_, String>(2)?,
+                ))
+            })
+            .map_err(|e| format!("Lỗi đọc cạnh đồ thị: {e}"))?;
+
+        for row in rows {
+            let (source_id, target_opt, unresolved_target) = row.map_err(|e| e.to_string())?;
+            if !nodes_map.contains_key(&source_id) {
+                continue;
+            }
+
+            let resolved_target_id = match target_opt {
+                Some(t) if nodes_map.contains_key(&t) => Some(t),
+                _ => {
+                    let clean = unresolved_target.trim();
+                    if clean.is_empty() {
+                        None
+                    } else {
+                        let ghost_id = format!("unresolved:{}", clean.to_lowercase());
+                        nodes_map.entry(ghost_id.clone()).or_insert_with(|| VaultGraphNodeDto {
+                            id: ghost_id.clone(),
+                            title: clean.to_string(),
+                            folder: "Chưa tạo".to_string(),
+                            link_count: 0,
+                            is_unresolved: true,
+                        });
+                        Some(ghost_id)
+                    }
+                }
+            };
+
+            if let Some(target_id) = resolved_target_id {
+                if source_id != target_id {
+                    edge_set.insert((source_id, target_id));
+                }
+            }
+        }
+    }
+
+    let mut edges: Vec<VaultGraphEdgeDto> = edge_set
+        .into_iter()
+        .map(|(source, target)| VaultGraphEdgeDto { source, target })
+        .collect();
+    edges.sort_by(|a, b| a.source.cmp(&b.source).then_with(|| a.target.cmp(&b.target)));
+
+    for edge in &edges {
+        if let Some(node) = nodes_map.get_mut(&edge.source) {
+            node.link_count += 1;
+        }
+        if let Some(node) = nodes_map.get_mut(&edge.target) {
+            node.link_count += 1;
+        }
+    }
+
+    let mut nodes: Vec<VaultGraphNodeDto> = nodes_map.into_values().collect();
+    nodes.sort_by(|a, b| {
+        a.is_unresolved
+            .cmp(&b.is_unresolved)
+            .then_with(|| b.link_count.cmp(&a.link_count))
+            .then_with(|| a.title.cmp(&b.title))
+    });
+
+    Ok(VaultGraphDto { nodes, edges })
+}
+
+#[tauri::command]
+pub async fn save_vault_asset(
+    app: tauri::AppHandle,
+    db: tauri::State<'_, SharedDb>,
+    filename: String,
+    bytes: Vec<u8>,
+) -> Result<String, String> {
+    let default_dir = default_vault_dir(&app)?;
+    let db_arc = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut conn = db_arc.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
+        save_vault_asset_blocking(&mut conn, &default_dir, &filename, &bytes)
+    })
+    .await
+    .map_err(|e| format!("Lỗi runtime worker save_vault_asset: {e}"))?
+}
+
+#[tauri::command]
+pub async fn read_vault_asset_data_url(
+    app: tauri::AppHandle,
+    db: tauri::State<'_, SharedDb>,
+    rel_path: String,
+    note_id: Option<String>,
+) -> Result<String, String> {
+    let default_dir = default_vault_dir(&app)?;
+    let db_arc = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut conn = db_arc.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
+        read_vault_asset_data_url_blocking(&mut conn, &default_dir, &rel_path, note_id.as_deref())
+    })
+    .await
+    .map_err(|e| format!("Lỗi runtime worker read_vault_asset_data_url: {e}"))?
+}
+
+#[tauri::command]
+pub async fn get_vault_graph(
+    app: tauri::AppHandle,
+    db: tauri::State<'_, SharedDb>,
+) -> Result<VaultGraphDto, String> {
+    let default_dir = default_vault_dir(&app)?;
+    let db_arc = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut conn = db_arc.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
+        get_vault_graph_blocking(&mut conn, &default_dir)
+    })
+    .await
+    .map_err(|e| format!("Lỗi runtime worker get_vault_graph: {e}"))?
+}
+
 fn default_vault_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     app.path()
         .app_data_dir()
@@ -1325,5 +1663,78 @@ mod tests {
         delete_vault_note_blocking(&mut conn, temp_dir.path(), &note_b.id).expect("delete note B");
         let after_del = list_vault_notes_blocking(&mut conn, temp_dir.path()).expect("list after del");
         assert_eq!(after_del.len(), 1);
+    }
+
+    #[test]
+    fn test_vault_asset_save_and_read_data_url() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let mut conn = Connection::open_in_memory().expect("in-memory sqlite");
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+            [],
+        )
+        .expect("settings table");
+
+        let png_stub = [0x89u8, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+        let rel = save_vault_asset_blocking(&mut conn, temp_dir.path(), "diagram test.png", &png_stub)
+            .expect("save asset");
+        assert!(rel.starts_with("_assets/"));
+        assert!(rel.ends_with("-diagram-test.png"));
+
+        let data_url = read_vault_asset_data_url_blocking(&mut conn, temp_dir.path(), &rel, None)
+            .expect("read asset data url");
+        assert!(data_url.starts_with("data:image/png;base64,"));
+        assert_eq!(data_url, "data:image/png;base64,iVBORw0KGgo=");
+
+        assert!(read_vault_asset_data_url_blocking(&mut conn, temp_dir.path(), "../secret.png", None).is_err());
+    }
+
+    #[test]
+    fn test_vault_graph_nodes_and_unresolved_links() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let mut conn = Connection::open_in_memory().expect("in-memory sqlite");
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+            [],
+        )
+        .expect("settings table");
+        crate::db::vault_schema::init_vault_tables(&conn).expect("vault schema");
+
+        let note_a = save_vault_note_blocking(
+            &mut conn,
+            temp_dir.path(),
+            SaveVaultNoteDto {
+                id: None,
+                folder: Some("notes".to_string()),
+                title: "Graph Theory".to_string(),
+                note_type: "GENERAL".to_string(),
+                tags: vec![],
+                content: "Links to [[Dijkstra]] and [[Missing Note]].".to_string(),
+                external_uri: None,
+            },
+        )
+        .expect("save A");
+
+        let note_b = save_vault_note_blocking(
+            &mut conn,
+            temp_dir.path(),
+            SaveVaultNoteDto {
+                id: None,
+                folder: Some("algo".to_string()),
+                title: "Dijkstra".to_string(),
+                note_type: "GENERAL".to_string(),
+                tags: vec![],
+                content: "Back to [[Graph Theory]].".to_string(),
+                external_uri: None,
+            },
+        )
+        .expect("save B");
+
+        let graph = get_vault_graph_blocking(&mut conn, temp_dir.path()).expect("get graph");
+        assert_eq!(graph.nodes.len(), 3);
+        assert!(graph.nodes.iter().any(|n| n.id == note_a.id && !n.is_unresolved && n.link_count == 3));
+        assert!(graph.nodes.iter().any(|n| n.id == note_b.id && !n.is_unresolved && n.link_count == 2));
+        assert!(graph.nodes.iter().any(|n| n.is_unresolved && n.title == "Missing Note"));
+        assert_eq!(graph.edges.len(), 3);
     }
 }
