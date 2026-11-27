@@ -48,7 +48,7 @@ import type {
 } from "../../types/portal-extra";
 import { formatUitPeriodRange, formatVnd } from "../../utils/scheduleTime";
 
-type AcademicSubTab = "transcript" | "overview" | "finance" | "classes";
+export type AcademicSubTab = "transcript" | "overview" | "finance" | "classes";
 
 interface ClassSlot {
   thu: number;
@@ -59,6 +59,8 @@ interface ClassSlot {
 
 interface AcademicDashboardProps {
   className?: string;
+  initialSubTab?: AcademicSubTab;
+  subTabRequestKey?: number;
 }
 
 const SUB_TABS: Array<{ id: AcademicSubTab; label: string }> = [
@@ -70,6 +72,8 @@ const SUB_TABS: Array<{ id: AcademicSubTab; label: string }> = [
 
 export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
   className = "",
+  initialSubTab,
+  subTabRequestKey,
 }) => {
   const {
     overview,
@@ -84,7 +88,13 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
   const isDemoMode = usePrivacyStore((s) => s.isDemoMode);
   const toggleDemoMode = usePrivacyStore((s) => s.toggleDemoMode);
 
-  const [activeSubTab, setActiveSubTab] = useState<AcademicSubTab>("transcript");
+  const [activeSubTab, setActiveSubTab] = useState<AcademicSubTab>(initialSubTab ?? "transcript");
+
+  useEffect(() => {
+    if (initialSubTab) {
+      setActiveSubTab(initialSubTab);
+    }
+  }, [initialSubTab, subTabRequestKey]);
   const [macroMetrics, setMacroMetrics] = useState<AcademicMacroMetricSSOT[]>([]);
   const [studentProfile, setStudentProfile] = useState<StudentProfilePayload | null>(null);
   const [allCourses, setAllCourses] = useState<AcademicCourseRecord[]>([]);

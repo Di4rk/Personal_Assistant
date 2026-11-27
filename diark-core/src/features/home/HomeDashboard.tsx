@@ -81,8 +81,12 @@ function formatRemainingVietnamese(minutesLeft: number): string {
 }
 
 interface HomeDashboardProps {
-  onNavigateTab: (tab: string) => void;
+  onNavigateTab: (
+    tab: string,
+    subTab?: "transcript" | "overview" | "finance" | "classes"
+  ) => void;
   onSyncPortal: () => void;
+  isCoursesPluginEnabled?: boolean;
 }
 
 function buildDayTimeline(
@@ -229,6 +233,7 @@ function handleKpiMouseMove(e: React.MouseEvent<HTMLElement>): void {
 export const HomeDashboard: React.FC<HomeDashboardProps> = ({
   onNavigateTab,
   onSyncPortal,
+  isCoursesPluginEnabled = true,
 }) => {
   const isPortalSyncing = useSyncOrchestratorStore((s) => s.serviceState.portal.isSyncing);
   const [now, setNow] = useState<Date>(() => new Date());
@@ -583,7 +588,7 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
         />
         <div
           aria-hidden="true"
-          className="uit-hero-logo-glow pointer-events-none absolute -right-4 -top-5 h-40 w-40 select-none"
+          className="uit-hero-logo-glow pointer-events-none absolute right-5 top-1/2 h-16 w-16 -translate-y-1/2 select-none sm:h-20 sm:w-20"
           style={{
             background:
               "linear-gradient(135deg, #8BB2FF 0%, #2F6BFF 55%, #163E9E 100%)",
@@ -598,7 +603,7 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
           }}
         />
 
-        <div className="relative z-10 space-y-1">
+        <div className="relative z-10 space-y-1 pr-24 sm:pr-28">
           <div className="flex items-center gap-2">
             <span className="text-[11px] font-medium uppercase tracking-wider text-[#6B9BFF]">
               Tổng quan học tập
@@ -693,7 +698,7 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
             </div>
             <div className="mt-2.5 h-1.5 w-full overflow-hidden rounded-full bg-[#1D263B]">
               <div
-                className="relative h-full overflow-hidden rounded-full bg-gradient-to-r from-[#2F6BFF] to-[#6B9BFF] transition-all duration-300"
+                className="relative h-full overflow-hidden rounded-full bg-gradient-to-r from-[#2F6BFF] to-[#6B9BFF] transition-colors duration-300"
                 style={{ width: `${creditPct}%` }}
               >
                 {creditPct > 0 && (
@@ -746,7 +751,7 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
         {/* Card 4: Học phí (Red only when debt > 0, Skeleton shimmer while syncing) */}
         <button
           type="button"
-          onClick={() => onNavigateTab("academic")}
+          onClick={() => onNavigateTab("academic", "finance")}
           onMouseMove={handleKpiMouseMove}
           style={animateBoot ? { animationDelay: "150ms" } : undefined}
           className={`group relative overflow-hidden rounded-xl border p-4 text-left backdrop-blur-[2px] transition-colors cursor-pointer ${
@@ -999,7 +1004,7 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
                               left: `${leftPct}%`,
                               width: `${widthPct}%`,
                             }}
-                            className={`absolute top-1.5 bottom-1.5 rounded-sm transition-all duration-150 cursor-pointer ${segColor} ${
+                            className={`absolute top-1.5 bottom-1.5 rounded-sm transition-colors duration-150 cursor-pointer ${segColor} ${
                               isPast && !isHighlighted ? "opacity-40" : ""
                             }`}
                           />
@@ -1230,7 +1235,7 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
                                 <div className="mt-2 space-y-1">
                                   <div className="h-1 w-full overflow-hidden rounded-full bg-[#1D263B]">
                                     <div
-                                      className="relative h-full overflow-hidden rounded-full bg-gradient-to-r from-[#2F6BFF] to-[#6B9BFF] transition-all duration-300"
+                                      className="relative h-full overflow-hidden rounded-full bg-gradient-to-r from-[#2F6BFF] to-[#6B9BFF] transition-colors duration-300"
                                       style={{ width: `${progressPct}%` }}
                                     >
                                       <span
@@ -1301,7 +1306,7 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
               </h2>
               <button
                 type="button"
-                onClick={() => onNavigateTab("academic")}
+                onClick={() => onNavigateTab("academic", "classes")}
                 className="text-[11px] text-zinc-400 hover:text-white cursor-pointer"
               >
                 Chi tiết
@@ -1366,8 +1371,22 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
               </h2>
               <button
                 type="button"
-                onClick={() => onNavigateTab("uit-courses")}
-                className="text-[11px] text-zinc-400 hover:text-white cursor-pointer"
+                disabled={!isCoursesPluginEnabled}
+                onClick={() => {
+                  if (isCoursesPluginEnabled) {
+                    onNavigateTab("uit-courses");
+                  }
+                }}
+                title={
+                  isCoursesPluginEnabled
+                    ? "Mở Moodle Courses"
+                    : "Plugin Moodle Courses đang tắt trong Cài đặt"
+                }
+                className={
+                  isCoursesPluginEnabled
+                    ? "text-[11px] text-zinc-400 hover:text-white cursor-pointer"
+                    : "text-[11px] text-zinc-600 opacity-50 cursor-not-allowed select-none"
+                }
               >
                 Mở Courses
               </button>
@@ -1445,7 +1464,7 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
                 {totalDebt > 0 && (
                   <button
                     type="button"
-                    onClick={() => onNavigateTab("academic")}
+                    onClick={() => onNavigateTab("academic", "finance")}
                     className="flex w-full items-center gap-2.5 border-l-2 border-red-400 bg-red-500/[0.06] px-4 py-2.5 text-left hover:bg-red-500/[0.1] cursor-pointer"
                   >
                     <div className="min-w-0 flex-1 text-xs text-red-200">

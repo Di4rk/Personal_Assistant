@@ -394,18 +394,27 @@ pub fn cleanup_sso_session(
     match &reason {
         CleanupReason::TimedOut => {
             let _ = app.emit("sso-callback-failed", "Quá thời gian đăng nhập (Timeout 120s)");
-            let _ = app.emit_to("main", "portal-sync-failed", "Quá thời gian đăng nhập (Timeout 120s)");
-            let _ = app.emit_to("main", "wecode-sync-failed", "Quá thời gian đăng nhập (Timeout 120s)");
+            if terminal_data.target == SsoTarget::Portal {
+                let _ = app.emit_to("main", "portal-sync-failed", "Quá thời gian đăng nhập (Timeout 120s)");
+            } else if terminal_data.target == SsoTarget::Wecode {
+                let _ = app.emit_to("main", "wecode-sync-failed", "Quá thời gian đăng nhập (Timeout 120s)");
+            }
         }
         CleanupReason::AuthExpired => {
             let _ = app.emit("sso-callback-failed", "Phiên đăng nhập hết hạn (Auth Expired)");
-            let _ = app.emit_to("main", "portal-sync-failed", "AUTH_EXPIRED");
-            let _ = app.emit_to("main", "wecode-sync-failed", "AUTH_EXPIRED");
+            if terminal_data.target == SsoTarget::Portal {
+                let _ = app.emit_to("main", "portal-sync-failed", "AUTH_EXPIRED");
+            } else if terminal_data.target == SsoTarget::Wecode {
+                let _ = app.emit_to("main", "wecode-sync-failed", "AUTH_EXPIRED");
+            }
         }
         CleanupReason::Failed(err) => {
             let _ = app.emit("sso-callback-error", err.clone());
-            let _ = app.emit_to("main", "portal-sync-failed", err.clone());
-            let _ = app.emit_to("main", "wecode-sync-failed", err.clone());
+            if terminal_data.target == SsoTarget::Portal {
+                let _ = app.emit_to("main", "portal-sync-failed", err.clone());
+            } else if terminal_data.target == SsoTarget::Wecode {
+                let _ = app.emit_to("main", "wecode-sync-failed", err.clone());
+            }
         }
         _ => {}
     }

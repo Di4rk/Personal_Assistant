@@ -1917,7 +1917,7 @@ pub async fn launch_portal_silent_sync(app: AppHandle) -> Result<(), String> {
                         || url_str.contains("/dang-nhap")
                         || (url_str.contains("microsoft") && !url_str.contains("diark-sso"))
                     {
-                        if allow_sso_autologin && !url_str.contains("microsoft") && login_hits_nav.fetch_add(1, Ordering::Relaxed) < 2 {
+                        if allow_sso_autologin && !url_str.contains("microsoft") && login_hits_nav.fetch_add(1, Ordering::Relaxed) < 6 {
                             return true;
                         }
                         let _ = cleanup_sso_session(&app_nav, &session_id_for_nav, CleanupReason::AuthExpired);

@@ -15,7 +15,7 @@ let toastIdCounter = 0;
 // Lưu các timer cleanup để tránh memory leak khi toast bị dismiss trước timeout
 const toastTimers = new Map<number, ReturnType<typeof setTimeout>>();
 
-import { AcademicDashboard } from "./features/academic";
+import { AcademicDashboard, type AcademicSubTab } from "./features/academic/AcademicDashboard";
 import { SyncPortalModal } from "./features/academic/components/SyncPortalModal";
 import { useSyncOrchestratorStore } from "./features/academic/stores/syncOrchestratorStore";
 import { HomeDashboard } from "./features/home";
@@ -37,8 +37,7 @@ import { useAppStore } from "./stores/useAppStore";
 import { useAcademicStore } from "./stores/useAcademicStore";
 import { useWecodeStore } from "./stores/useWecodeStore";
 import { usePrivacyStore } from "./stores/usePrivacyStore";
-import { listInstalledPlugins } from "./lib/plugin-sdk";
-import type { PluginMetaDto } from "./types/plugin";
+import { usePluginStore } from "./stores/usePluginStore";
 import {
   Code2,
   GraduationCap,
@@ -77,11 +76,20 @@ type ProfileState =
 export default function App() {
   const [profileState, setProfileState] = useState<ProfileState>({ status: "loading" });
   const [activeTab, setActiveTab] = useState<string>("home");
-  const [plugins, setPlugins] = useState<PluginMetaDto[]>([]);
+  const [academicSubTabReq, setAcademicSubTabReq] = useState<{
+    tab: AcademicSubTab;
+    key: number;
+  }>({ tab: "transcript", key: 0 });
+  const plugins = usePluginStore((s) => s.plugins);
+  const loadPlugins = usePluginStore((s) => s.loadPlugins);
   const [isPluginModalOpen, setIsPluginModalOpen] = useState(false);
   const [isPortalSyncModalOpen, setIsPortalSyncModalOpen] = useState(false);
   const [isSsoLoginOpen, setIsSsoLoginOpen] = useState(false);
   const [ssoStatus, setSsoStatus] = useState<SsoCredentialsStatus | null>(null);
+  const hasSavedSsoRef = useRef(false);
+  useEffect(() => {
+    hasSavedSsoRef.current = Boolean(ssoStatus?.has_password);
+  }, [ssoStatus]);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
     try {
       return window.localStorage.getItem("diark_sidebar_collapsed") === "true";
@@ -214,18 +222,11 @@ export default function App() {
     setProfileState({ status: "needs-onboarding" });
   }, []);
 
-  // Load Plugins on mount
-  const loadPlugins = useCallback(async () => {
-    try {
-      const list = await listInstalledPlugins();
-      setPlugins(list);
-    } catch (err) {
-      console.error("Lỗi đọc installed plugins:", err);
-    }
-  }, []);
-
+  // Load Plugins on mount via shared store
   useEffect(() => {
-    void loadPlugins();
+    void loadPlugins().catch((err: unknown) => {
+      console.error("Lỗi đọc installed plugins:", err);
+    });
   }, [loadPlugins]);
 
   // Báo hiệu cho backend WindowGate rằng UI đã mount và render lần đầu ổn định (anti white-flash)
@@ -452,8 +453,32 @@ export default function App() {
   }>("cf://sync-event", handleLegacySync);
   useTauriEvent<void>("system-genesis-reset", handleResetToGenesis);
   useTauriEvent<string>("portal-sync-failed", () => {
+    if (hasSavedSsoRef.current) {
+      const toastId = ++toastIdCounter;
+      setToasts((prev) => [
+        ...prev,
+        {
+          id: toastId,
+          message: "Đồng bộ Portal tạm gián đoạn, thử nhấn F5 lại sau.",
+          isFirstAc: false,
+        },
+      ]);
+      const timer = setTimeout(() => {
+        setToasts((prev) => prev.filter((t) => t.id !== toastId));
+        toastTimers.delete(toastId);
+      }, 4000);
+      toastTimers.set(toastId, timer);
+      return;
+    }
     setIsPortalSyncModalOpen(true);
   });
+
+  const handleNavigateTab = useCallback((tab: string, subTab?: AcademicSubTab) => {
+    if (tab === "academic" && subTab) {
+      setAcademicSubTabReq((prev) => ({ tab: subTab, key: prev.key + 1 }));
+    }
+    setActiveTab(tab);
+  }, []);
 
   const handleSyncCurrentTab = useCallback(async () => {
     const syncCalendarOnly = async () => {
@@ -607,6 +632,9 @@ export default function App() {
       : plugins.find((p) => p.pluginId === activeTab)?.name || "Tổng quan";
 
   const enabledPlugins = plugins.filter((p) => p.isEnabled);
+  const isCoursesPluginEnabled = plugins.some(
+    (p) => p.pluginId === "uit-courses" && p.isEnabled
+  );
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[#080B12] text-zinc-100">
@@ -912,7 +940,7 @@ export default function App() {
           />
         </div>
 
-        <header className="relative z-10 flex h-12 shrink-0 items-center justify-between border-b border-[#1D263B]/80 bg-[#080B12]/90 px-6 backdrop-blur-sm">
+        <header className="relative z-30 flex h-12 shrink-0 items-center justify-between border-b border-[#1D263B]/80 bg-[#080B12]/90 px-6 backdrop-blur-sm">
           <h1 className="text-sm font-semibold tracking-tight text-zinc-100">{pageTitle}</h1>
 
           <div className="flex items-center gap-2">
@@ -942,13 +970,17 @@ export default function App() {
         <main className="relative z-10 flex-1 overflow-y-auto overflow-x-hidden px-6 py-5">
         {activeTab === "home" ? (
           <HomeDashboard
-            onNavigateTab={(tab) => setActiveTab(tab)}
+            onNavigateTab={handleNavigateTab}
             onSyncPortal={() => void handleSyncCurrentTab()}
+            isCoursesPluginEnabled={isCoursesPluginEnabled}
           />
         ) : activeTab === "schedule" ? (
           <ScheduleDashboard />
         ) : activeTab === "academic" ? (
-          <AcademicDashboard />
+          <AcademicDashboard
+            initialSubTab={academicSubTabReq.tab}
+            subTabRequestKey={academicSubTabReq.key}
+          />
         ) : activeTab === "vault" ? (
           <VaultDashboard />
         ) : activeTab === "cp" || activeTab === "cp-codeforces" ? (
