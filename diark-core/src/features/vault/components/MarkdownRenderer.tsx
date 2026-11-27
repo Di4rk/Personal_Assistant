@@ -1,5 +1,6 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { Check, Copy, ExternalLink, Info, Lightbulb, AlertTriangle, CheckSquare, Square } from "lucide-react";
+import { parseMarkdownBlocks } from "../utils/markdownBlocks";
 
 interface MarkdownRendererProps {
   content: string;
@@ -94,7 +95,7 @@ const CodeBlock: React.FC<{ language: string; code: string }> = ({ language, cod
   );
 };
 
-export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
+export const MarkdownRenderer: React.FC<MarkdownRendererProps> = React.memo(({
   content,
   onToggleTaskLine,
   onOpenWikilink,
@@ -107,6 +108,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
     let match: RegExpExecArray | null = regex.exec(text);
 
     while (match !== null) {
+      if (match[0].length === 0) break;
       if (match.index > lastIndex) {
         parts.push(text.slice(lastIndex, match.index));
       }
@@ -197,272 +199,9 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
     return parts;
   };
 
-  const lines = content.split(/\r?\n/);
-  const blocks: React.ReactNode[] = [];
-  let i = 0;
+  const parsedBlocks = useMemo(() => parseMarkdownBlocks(content), [content]);
 
-  while (i < lines.length) {
-    const line = lines[i];
-    const trimmed = line.trim();
-
-    if (trimmed.length === 0) {
-      i += 1;
-      continue;
-    }
-
-    // Fenced code block
-    if (trimmed.startsWith("```")) {
-      const lang = trimmed.slice(3).trim();
-      const codeLines: string[] = [];
-      const startLine = i;
-      i += 1;
-      while (i < lines.length && !lines[i].trim().startsWith("```")) {
-        codeLines.push(lines[i]);
-        i += 1;
-      }
-      if (i < lines.length) i += 1;
-      blocks.push(<CodeBlock key={`code-${startLine}`} language={lang} code={codeLines.join("\n")} />);
-      continue;
-    }
-
-    // Horizontal rule
-    if (/^(-{3,}|\*{3,})$/.test(trimmed)) {
-      blocks.push(<hr key={`hr-${i}`} className="my-4 border-zinc-800" />);
-      i += 1;
-      continue;
-    }
-
-    // Headings
-    const headingMatch = /^(#{1,4})\s+(.+)$/.exec(trimmed);
-    if (headingMatch) {
-      const level = headingMatch[1].length;
-      const text = headingMatch[2];
-      const headingClass =
-        level === 1
-          ? "mt-5 mb-2 text-lg font-bold text-zinc-100 border-b border-zinc-800/80 pb-1.5"
-          : level === 2
-          ? "mt-4 mb-2 text-base font-semibold text-zinc-100"
-          : level === 3
-          ? "mt-3 mb-1.5 text-sm font-semibold text-zinc-200"
-          : "mt-2 mb-1 text-xs font-semibold uppercase tracking-wide text-zinc-300";
-      blocks.push(
-        <div key={`h-${i}`} className={headingClass}>
-          {renderInline(text, `h-${i}`)}
-        </div>
-      );
-      i += 1;
-      continue;
-    }
-
-    // Callouts & Blockquotes
-    if (trimmed.startsWith(">")) {
-      const startLine = i;
-      const calloutMatch = /^>\s*\[!([a-zA-Z]+)\]\s*(.*)$/.exec(trimmed);
-      const quoteLines: string[] = [];
-      if (calloutMatch) {
-        const kind = calloutMatch[1].toLowerCase();
-        const style = CALLOUT_STYLES[kind] ?? CALLOUT_STYLES.note;
-        const customTitle = calloutMatch[2].trim();
-        i += 1;
-        while (i < lines.length && lines[i].trim().startsWith(">")) {
-          quoteLines.push(lines[i].trim().replace(/^>\s?/, ""));
-          i += 1;
-        }
-        blocks.push(
-          <div
-            key={`callout-${startLine}`}
-            className={`my-3 rounded-lg border px-3.5 py-2.5 ${style.border} ${style.bg}`}
-          >
-            <div className={`flex items-center gap-1.5 text-xs font-semibold ${style.titleColor}`}>
-              {style.icon}
-              <span>{customTitle || style.label}</span>
-            </div>
-            {quoteLines.length > 0 && (
-              <div className="mt-1.5 space-y-1 text-xs leading-relaxed text-zinc-300">
-                {quoteLines.map((ql, idx) => (
-                  <p key={`ql-${idx}`}>{renderInline(ql, `callout-${startLine}-${idx}`)}</p>
-                ))}
-              </div>
-            )}
-          </div>
-        );
-      } else {
-        while (i < lines.length && lines[i].trim().startsWith(">")) {
-          quoteLines.push(lines[i].trim().replace(/^>\s?/, ""));
-          i += 1;
-        }
-        blocks.push(
-          <blockquote
-            key={`quote-${startLine}`}
-            className="my-2.5 border-l-2 border-zinc-700 pl-3 text-xs leading-relaxed text-zinc-300"
-          >
-            {quoteLines.map((ql, idx) => (
-              <p key={`q-${idx}`}>{renderInline(ql, `quote-${startLine}-${idx}`)}</p>
-            ))}
-          </blockquote>
-        );
-      }
-      continue;
-    }
-
-    // Markdown table
-    if (trimmed.startsWith("|") && i + 1 < lines.length && /^\s*\|?[\s:-]+\|/.test(lines[i + 1])) {
-      const startLine = i;
-      const parseRow = (row: string): string[] =>
-        row
-          .trim()
-          .replace(/^\|/, "")
-          .replace(/\|$/, "")
-          .split("|")
-          .map((cell) => cell.trim());
-
-      const headers = parseRow(lines[i]);
-      i += 2; // skip header & separator
-      const rows: string[][] = [];
-      while (i < lines.length && lines[i].trim().startsWith("|")) {
-        rows.push(parseRow(lines[i]));
-        i += 1;
-      }
-
-      blocks.push(
-        <div key={`tbl-${startLine}`} className="my-3 overflow-x-auto rounded-lg border border-zinc-800">
-          <table className="w-full text-left text-xs text-zinc-300">
-            <thead className="border-b border-zinc-800 bg-zinc-900 text-zinc-200">
-              <tr>
-                {headers.map((h, colIdx) => (
-                  <th key={`th-${colIdx}`} className="px-3 py-2 font-semibold">
-                    {renderInline(h, `tbl-${startLine}-th-${colIdx}`)}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-zinc-800/70 bg-zinc-950/60">
-              {rows.map((row, rowIdx) => (
-                <tr key={`tr-${rowIdx}`}>
-                  {headers.map((_, colIdx) => (
-                    <td key={`td-${colIdx}`} className="px-3 py-2">
-                      {renderInline(row[colIdx] ?? "", `tbl-${startLine}-${rowIdx}-${colIdx}`)}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      );
-      continue;
-    }
-
-    // Task checkboxes or bullet list
-    if (/^\s*[-*]\s+/.test(line)) {
-      const startLine = i;
-      const items: Array<{ lineIndex: number; text: string; isTask: boolean; checked: boolean }> = [];
-      while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) {
-        const taskMatch = /^\s*[-*]\s+\[([ xX])\]\s*(.*)$/.exec(lines[i]);
-        if (taskMatch) {
-          items.push({
-            lineIndex: i,
-            text: taskMatch[2],
-            isTask: true,
-            checked: taskMatch[1].toLowerCase() === "x",
-          });
-        } else {
-          items.push({
-            lineIndex: i,
-            text: lines[i].replace(/^\s*[-*]\s+/, ""),
-            isTask: false,
-            checked: false,
-          });
-        }
-        i += 1;
-      }
-
-      blocks.push(
-        <ul key={`ul-${startLine}`} className="my-2 space-y-1.5">
-          {items.map((item) =>
-            item.isTask ? (
-              <li key={`task-${item.lineIndex}`} className="flex items-start gap-2 text-xs leading-relaxed">
-                <button
-                  type="button"
-                  onClick={() => onToggleTaskLine?.(item.lineIndex)}
-                  className="mt-0.5 text-zinc-400 hover:text-emerald-400 transition-colors cursor-pointer"
-                  aria-label="Đánh dấu công việc"
-                >
-                  {item.checked ? (
-                    <CheckSquare className="h-4 w-4 text-emerald-400" />
-                  ) : (
-                    <Square className="h-4 w-4 text-zinc-500" />
-                  )}
-                </button>
-                <span className={item.checked ? "line-through text-zinc-500" : "text-zinc-200"}>
-                  {renderInline(item.text, `task-${item.lineIndex}`)}
-                </span>
-              </li>
-            ) : (
-              <li
-                key={`li-${item.lineIndex}`}
-                className="flex items-start gap-2 pl-1 text-xs leading-relaxed text-zinc-300"
-              >
-                <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-zinc-500" />
-                <span>{renderInline(item.text, `li-${item.lineIndex}`)}</span>
-              </li>
-            )
-          )}
-        </ul>
-      );
-      continue;
-    }
-
-    // Ordered list
-    if (/^\s*\d+\.\s+/.test(line)) {
-      const startLine = i;
-      const items: Array<{ lineIndex: number; num: string; text: string }> = [];
-      while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) {
-        const m = /^\s*(\d+)\.\s+(.*)$/.exec(lines[i]);
-        if (m) {
-          items.push({ lineIndex: i, num: m[1], text: m[2] });
-        }
-        i += 1;
-      }
-      blocks.push(
-        <ol key={`ol-${startLine}`} className="my-2 space-y-1.5 pl-1">
-          {items.map((item) => (
-            <li key={`oli-${item.lineIndex}`} className="flex items-start gap-2 text-xs leading-relaxed text-zinc-300">
-              <span className="font-mono text-[11px] text-zinc-500 mt-0.5">{item.num}.</span>
-              <span>{renderInline(item.text, `oli-${item.lineIndex}`)}</span>
-            </li>
-          ))}
-        </ol>
-      );
-      continue;
-    }
-
-    // Standard paragraph
-    const paraLines: string[] = [];
-    const startLine = i;
-    while (
-      i < lines.length &&
-      lines[i].trim().length > 0 &&
-      !lines[i].trim().startsWith("```") &&
-      !lines[i].trim().startsWith(">") &&
-      !/^(#{1,4})\s+/.test(lines[i].trim()) &&
-      !/^\s*[-*]\s+/.test(lines[i]) &&
-      !/^\s*\d+\.\s+/.test(lines[i]) &&
-      !lines[i].trim().startsWith("|") &&
-      !/^(-{3,}|\*{3,})$/.test(lines[i].trim())
-    ) {
-      paraLines.push(lines[i]);
-      i += 1;
-    }
-
-    blocks.push(
-      <p key={`p-${startLine}`} className="my-2 text-xs leading-relaxed text-zinc-300">
-        {renderInline(paraLines.join(" "), `p-${startLine}`)}
-      </p>
-    );
-  }
-
-  if (blocks.length === 0) {
+  if (parsedBlocks.length === 0) {
     return (
       <p className="text-xs italic text-zinc-500">
         Ghi chú chưa có nội dung. Chuyển sang chế độ Soạn thảo hoặc Chia đôi để bắt đầu viết.
@@ -470,5 +209,151 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
     );
   }
 
-  return <div className="space-y-0.5">{blocks}</div>;
-};
+  return (
+    <div className="space-y-0.5">
+      {parsedBlocks.map((block) => {
+        switch (block.type) {
+          case "code":
+            return <CodeBlock key={`code-${block.startLine}`} language={block.language} code={block.code} />;
+
+          case "hr":
+            return <hr key={`hr-${block.startLine}`} className="my-4 border-zinc-800" />;
+
+          case "heading": {
+            const headingClass =
+              block.level === 1
+                ? "mt-5 mb-2 text-lg font-bold text-zinc-100 border-b border-zinc-800/80 pb-1.5"
+                : block.level === 2
+                ? "mt-4 mb-2 text-base font-semibold text-zinc-100"
+                : block.level === 3
+                ? "mt-3 mb-1.5 text-sm font-semibold text-zinc-200"
+                : "mt-2 mb-1 text-xs font-semibold uppercase tracking-wide text-zinc-300";
+            return (
+              <div key={`h-${block.startLine}`} className={headingClass}>
+                {renderInline(block.text, `h-${block.startLine}`)}
+              </div>
+            );
+          }
+
+          case "callout": {
+            const style = CALLOUT_STYLES[block.kind] ?? CALLOUT_STYLES.note;
+            return (
+              <div
+                key={`callout-${block.startLine}`}
+                className={`my-3 rounded-lg border px-3.5 py-2.5 ${style.border} ${style.bg}`}
+              >
+                <div className={`flex items-center gap-1.5 text-xs font-semibold ${style.titleColor}`}>
+                  {style.icon}
+                  <span>{block.customTitle || style.label}</span>
+                </div>
+                {block.lines.length > 0 && (
+                  <div className="mt-1.5 space-y-1 text-xs leading-relaxed text-zinc-300">
+                    {block.lines.map((ql, idx) => (
+                      <p key={`ql-${idx}`}>{renderInline(ql, `callout-${block.startLine}-${idx}`)}</p>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          }
+
+          case "blockquote":
+            return (
+              <blockquote
+                key={`quote-${block.startLine}`}
+                className="my-2.5 border-l-2 border-zinc-700 pl-3 text-xs leading-relaxed text-zinc-300"
+              >
+                {block.lines.map((ql, idx) => (
+                  <p key={`q-${idx}`}>{renderInline(ql, `quote-${block.startLine}-${idx}`)}</p>
+                ))}
+              </blockquote>
+            );
+
+          case "table":
+            return (
+              <div key={`tbl-${block.startLine}`} className="my-3 overflow-x-auto rounded-lg border border-zinc-800">
+                <table className="w-full text-left text-xs text-zinc-300">
+                  <thead className="border-b border-zinc-800 bg-zinc-900 text-zinc-200">
+                    <tr>
+                      {block.headers.map((h, colIdx) => (
+                        <th key={`th-${colIdx}`} className="px-3 py-2 font-semibold">
+                          {renderInline(h, `tbl-${block.startLine}-th-${colIdx}`)}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-800/70 bg-zinc-950/60">
+                    {block.rows.map((row, rowIdx) => (
+                      <tr key={`tr-${rowIdx}`}>
+                        {block.headers.map((_, colIdx) => (
+                          <td key={`td-${colIdx}`} className="px-3 py-2">
+                            {renderInline(row[colIdx] ?? "", `tbl-${block.startLine}-${rowIdx}-${colIdx}`)}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            );
+
+          case "ul":
+            return (
+              <ul key={`ul-${block.startLine}`} className="my-2 space-y-1.5">
+                {block.items.map((item) =>
+                  item.isTask ? (
+                    <li key={`task-${item.lineIndex}`} className="flex items-start gap-2 text-xs leading-relaxed">
+                      <button
+                        type="button"
+                        onClick={() => onToggleTaskLine?.(item.lineIndex)}
+                        className="mt-0.5 text-zinc-400 hover:text-emerald-400 transition-colors cursor-pointer"
+                        aria-label="Đánh dấu công việc"
+                      >
+                        {item.checked ? (
+                          <CheckSquare className="h-4 w-4 text-emerald-400" />
+                        ) : (
+                          <Square className="h-4 w-4 text-zinc-500" />
+                        )}
+                      </button>
+                      <span className={item.checked ? "line-through text-zinc-500" : "text-zinc-200"}>
+                        {renderInline(item.text, `task-${item.lineIndex}`)}
+                      </span>
+                    </li>
+                  ) : (
+                    <li
+                      key={`li-${item.lineIndex}`}
+                      className="flex items-start gap-2 pl-1 text-xs leading-relaxed text-zinc-300"
+                    >
+                      <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-zinc-500" />
+                      <span>{renderInline(item.text, `li-${item.lineIndex}`)}</span>
+                    </li>
+                  )
+                )}
+              </ul>
+            );
+
+          case "ol":
+            return (
+              <ol key={`ol-${block.startLine}`} className="my-2 space-y-1.5 pl-1">
+                {block.items.map((item) => (
+                  <li key={`oli-${item.lineIndex}`} className="flex items-start gap-2 text-xs leading-relaxed text-zinc-300">
+                    <span className="font-mono text-[11px] text-zinc-500 mt-0.5">{item.num}.</span>
+                    <span>{renderInline(item.text, `oli-${item.lineIndex}`)}</span>
+                  </li>
+                ))}
+              </ol>
+            );
+
+          case "paragraph":
+            return (
+              <p key={`p-${block.startLine}`} className="my-2 text-xs leading-relaxed text-zinc-300">
+                {renderInline(block.text, `p-${block.startLine}`)}
+              </p>
+            );
+        }
+      })}
+    </div>
+  );
+});
+
+MarkdownRenderer.displayName = "MarkdownRenderer";

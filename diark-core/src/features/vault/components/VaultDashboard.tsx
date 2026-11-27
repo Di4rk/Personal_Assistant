@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import React, { useState, useEffect, useCallback, useDeferredValue, useMemo, useRef } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   FileText,
@@ -86,6 +86,7 @@ export const VaultDashboard: React.FC = () => {
   const [noteType, setNoteType] = useState<string>("GENERAL");
   const [externalUri, setExternalUri] = useState<string>("");
   const [content, setContent] = useState<string>("");
+  const deferredContent = useDeferredValue(content);
   const [backlinks, setBacklinks] = useState<VaultBacklinkDto[]>([]);
   const [isLoadingNote, setIsLoadingNote] = useState<boolean>(false);
 
@@ -944,7 +945,7 @@ export const VaultDashboard: React.FC = () => {
                 {editorMode !== "edit" && (
                   <div className="h-full min-h-[380px] overflow-y-auto p-5 bg-zinc-900/20">
                     <MarkdownRenderer
-                      content={content}
+                      content={deferredContent}
                       onToggleTaskLine={handleToggleTaskLine}
                       onOpenWikilink={(target) => void handleOpenWikilink(target)}
                       onOpenExternalUrl={(url) => void openExternalUrl(url)}
