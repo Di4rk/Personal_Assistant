@@ -82,6 +82,7 @@ macro_rules! registered_commands {
             commands::portal_extra::get_portal_tuition,
             commands::portal_extra::get_portal_certificates,
             commands::portal_extra::get_portal_class_activities,
+            commands::portal_extra::preview_exam_excel,
             commands::portal_extra::get_moodle_grades,
             commands::portal_extra::get_moodle_notifications,
             commands::portal_extra::list_google_calendars,

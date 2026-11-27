@@ -63,6 +63,15 @@ function folderLabel(folder: string): string {
   return folder;
 }
 
+function shortenFolderPath(folder: string): string {
+  if (folder === "notes" || folder === "root" || folder === "algo" || folder === "academic" || folder === "onenote") {
+    return folderLabel(folder);
+  }
+  const parts = folder.split(/[/\\]/).filter((p) => p.length > 0);
+  if (parts.length <= 2) return parts.join(" / ") || folder;
+  return parts.slice(-2).join(" / ");
+}
+
 export const VaultDashboard: React.FC = () => {
   const [vaultPath, setVaultPath] = useState<string>("");
   const [notes, setNotes] = useState<VaultNoteSummaryDto[]>([]);
@@ -424,12 +433,25 @@ export const VaultDashboard: React.FC = () => {
     }
   };
 
-  const folders = useMemo(() => {
-    const set = new Set<string>(["notes"]);
+  const folderOptions = useMemo(() => {
+    const counts = new Map<string, number>();
     for (const n of notes) {
-      if (n.folder) set.add(n.folder);
+      const key = n.folder || "notes";
+      counts.set(key, (counts.get(key) ?? 0) + 1);
     }
-    return ["all", ...Array.from(set)];
+    if (!counts.has("notes")) counts.set("notes", 0);
+
+    return Array.from(counts.entries())
+      .map(([key, count]) => ({
+        folder: key,
+        label: shortenFolderPath(key),
+        count,
+      }))
+      .sort((a, b) => {
+        if (a.folder === "notes") return -1;
+        if (b.folder === "notes") return 1;
+        return a.label.localeCompare(b.label, "vi");
+      });
   }, [notes]);
 
   const visibleNotes = useMemo(() => {
@@ -441,8 +463,8 @@ export const VaultDashboard: React.FC = () => {
     <div className="mx-auto max-w-7xl space-y-3">
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 min-h-[calc(100vh-120px)]">
         {/* LEFT PANE: Note Sidebar */}
-        <aside className="lg:col-span-4 xl:col-span-3 flex flex-col rounded-xl border border-zinc-800 bg-zinc-900/70 overflow-hidden">
-          <div className="p-3 border-b border-zinc-800 space-y-2.5">
+        <aside className="lg:col-span-4 xl:col-span-3 flex flex-col rounded-xl border border-[#1D263B] bg-[#0F1420] overflow-hidden">
+          <div className="p-3 border-b border-[#1D263B] space-y-2.5">
             <div className="flex items-center justify-between gap-2">
               <div>
                 <h2 className="text-sm font-semibold text-zinc-100">Ghi chú học tập</h2>
@@ -451,7 +473,7 @@ export const VaultDashboard: React.FC = () => {
               <button
                 type="button"
                 onClick={handleCreateNewNote}
-                className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 px-2.5 py-1.5 text-xs font-semibold text-white transition-colors cursor-pointer"
+                className="inline-flex items-center gap-1 rounded-lg bg-[#2F6BFF] hover:bg-[#2558DB] px-2.5 py-1.5 text-xs font-semibold text-white transition-colors cursor-pointer"
               >
                 <Plus className="h-3.5 w-3.5" />
                 <span>Ghi chú mới</span>
@@ -467,28 +489,25 @@ export const VaultDashboard: React.FC = () => {
                 onChange={(e) => setSearchQuery(e.target.value)}
                 aria-label="Tìm kiếm ghi chú"
                 placeholder="Tìm nhanh tiêu đề, nội dung, code..."
-                className="w-full rounded-lg border border-line bg-canvas pl-8 pr-3 py-1.5 text-xs text-zinc-200 placeholder-zinc-500 focus:border-uit focus:outline-none"
+                className="w-full rounded-lg border border-[#1D263B] bg-[#080B12] pl-8 pr-3 py-1.5 text-xs text-zinc-200 placeholder-zinc-500 focus:border-[#2F6BFF] focus:outline-none"
               />
             </div>
 
-            {/* Folder pills */}
+            {/* Compact Folder Filter Select */}
             {!searchQuery.trim() && (
-              <div className="flex flex-wrap gap-1">
-                {folders.map((f) => (
-                  <button
-                    key={f}
-                    type="button"
-                    onClick={() => setSelectedFolder(f)}
-                    className={`rounded-md px-2 py-0.5 text-[11px] font-medium transition-colors cursor-pointer ${
-                      selectedFolder === f
-                        ? "bg-emerald-600/20 text-emerald-300 border border-emerald-500/40"
-                        : "bg-zinc-950/60 text-zinc-400 border border-zinc-800 hover:text-zinc-200"
-                    }`}
-                  >
-                    {f === "all" ? "Tất cả" : folderLabel(f)}
-                  </button>
+              <select
+                aria-label="Lọc theo thư mục"
+                value={selectedFolder}
+                onChange={(e) => setSelectedFolder(e.target.value)}
+                className="w-full cursor-pointer rounded-lg border border-[#1D263B] bg-[#080B12] px-2.5 py-1.5 text-xs text-zinc-200 focus:border-[#2F6BFF] focus:outline-none"
+              >
+                <option value="all">Tất cả thư mục ({notes.length})</option>
+                {folderOptions.map((opt) => (
+                  <option key={opt.folder} value={opt.folder} title={opt.folder}>
+                    {opt.label} ({opt.count})
+                  </option>
                 ))}
-              </div>
+              </select>
             )}
           </div>
 
@@ -497,7 +516,7 @@ export const VaultDashboard: React.FC = () => {
             {searchQuery.trim() ? (
               isSearching ? (
                 <div className="flex items-center justify-center gap-2 py-8 text-xs text-zinc-500">
-                  <Loader2 className="h-4 w-4 animate-spin text-emerald-400" />
+                  <Loader2 className="h-4 w-4 animate-spin text-[#6B9BFF]" />
                   <span>Đang tìm...</span>
                 </div>
               ) : searchResults.length === 0 ? (
@@ -512,8 +531,8 @@ export const VaultDashboard: React.FC = () => {
                     onClick={() => void openNoteById(res.id)}
                     className={`w-full text-left rounded-lg border p-2.5 transition-colors cursor-pointer ${
                       activeNoteId === res.id
-                        ? "border-emerald-500/40 bg-emerald-950/25"
-                        : "border-zinc-800/80 bg-zinc-950/50 hover:border-zinc-700"
+                        ? "border-[#2F6BFF]/50 bg-[#2F6BFF]/[0.14]"
+                        : "border-[#1D263B]/80 bg-[#080B12] hover:border-[#2F6BFF]/35 hover:bg-[#151C2C]"
                     }`}
                   >
                     <div className="text-xs font-semibold text-zinc-100 truncate">{res.title}</div>
@@ -521,7 +540,7 @@ export const VaultDashboard: React.FC = () => {
                       {renderHighlightedSnippet(
                         res.snippet,
                         res.title,
-                        "rounded bg-emerald-500/20 px-0.5 text-emerald-300"
+                        "rounded bg-[#2F6BFF]/25 px-0.5 text-[#6B9BFF]"
                       )}
                     </div>
                   </button>
@@ -529,7 +548,7 @@ export const VaultDashboard: React.FC = () => {
               )
             ) : isLoadingList ? (
               <div className="flex items-center justify-center gap-2 py-8 text-xs text-zinc-500">
-                <Loader2 className="h-4 w-4 animate-spin text-emerald-400" />
+                <Loader2 className="h-4 w-4 animate-spin text-[#6B9BFF]" />
                 <span>Đang tải ghi chú...</span>
               </div>
             ) : visibleNotes.length === 0 ? (
@@ -546,8 +565,8 @@ export const VaultDashboard: React.FC = () => {
                     key={item.id}
                     className={`group rounded-lg border p-2.5 transition-colors ${
                       isSelected
-                        ? "border-emerald-500/40 bg-emerald-950/25"
-                        : "border-zinc-800/60 bg-zinc-950/40 hover:border-zinc-700"
+                        ? "border-[#2F6BFF]/50 bg-[#2F6BFF]/[0.14]"
+                        : "border-[#1D263B]/70 bg-[#080B12] hover:border-[#2F6BFF]/35 hover:bg-[#151C2C]"
                     }`}
                   >
                     <div className="flex items-start justify-between gap-2">
@@ -557,10 +576,11 @@ export const VaultDashboard: React.FC = () => {
                         className="min-w-0 flex-1 text-left cursor-pointer"
                       >
                         <div className="text-xs font-semibold text-zinc-100 truncate">{item.title}</div>
-                        <div className="mt-1 flex items-center gap-2 text-[10px] text-zinc-500 font-mono">
-                          <span>{folderLabel(item.folder)}</span>
-                          <span>·</span>
-                          <span>{formatRelativeTime(item.updatedAt)}</span>
+                        <div className="mt-1 flex items-center justify-between gap-2 text-[10px] text-zinc-500 font-mono">
+                          <span className="min-w-0 truncate" title={item.folder}>
+                            {shortenFolderPath(item.folder)}
+                          </span>
+                          <span className="shrink-0">{formatRelativeTime(item.updatedAt)}</span>
                         </div>
                       </button>
 
@@ -612,7 +632,7 @@ export const VaultDashboard: React.FC = () => {
           </div>
 
           {/* Bottom Secondary Tools (Vault directory & Obsidian) */}
-          <div className="border-t border-zinc-800 p-2.5">
+          <div className="border-t border-[#1D263B] p-2.5">
             <button
               type="button"
               onClick={() => setShowVaultTools((prev) => !prev)}
@@ -630,13 +650,13 @@ export const VaultDashboard: React.FC = () => {
                 <div className="truncate font-mono text-[10px] text-zinc-500" title={vaultPath}>
                   {vaultPath || "Chưa thiết lập thư mục"}
                 </div>
-                {toolMessage && <div className="text-emerald-400">{toolMessage}</div>}
+                {toolMessage && <div className="text-[#6B9BFF]">{toolMessage}</div>}
                 <div className="flex flex-wrap gap-1.5">
                   <button
                     type="button"
                     onClick={() => void handleSelectVaultDir()}
                     disabled={isSyncing}
-                    className="rounded border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 px-2 py-1 text-zinc-200 cursor-pointer"
+                    className="rounded border border-[#1D263B] bg-[#080B12] hover:bg-[#151C2C] px-2 py-1 text-zinc-200 cursor-pointer"
                   >
                     Đổi thư mục
                   </button>
@@ -644,7 +664,7 @@ export const VaultDashboard: React.FC = () => {
                     type="button"
                     onClick={() => void handleRescan()}
                     disabled={isSyncing}
-                    className="inline-flex items-center gap-1 rounded border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 px-2 py-1 text-zinc-200 cursor-pointer"
+                    className="inline-flex items-center gap-1 rounded border border-[#1D263B] bg-[#080B12] hover:bg-[#151C2C] px-2 py-1 text-zinc-200 cursor-pointer"
                   >
                     <RefreshCw className={`h-3 w-3 ${isSyncing ? "animate-spin" : ""}`} />
                     <span>Quét lại</span>
@@ -653,14 +673,14 @@ export const VaultDashboard: React.FC = () => {
                     type="button"
                     onClick={() => void handleScaffoldFolders()}
                     disabled={isSyncing}
-                    className="rounded border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 px-2 py-1 text-zinc-200 cursor-pointer"
+                    className="rounded border border-[#1D263B] bg-[#080B12] hover:bg-[#151C2C] px-2 py-1 text-zinc-200 cursor-pointer"
                   >
                     Tạo theo môn học
                   </button>
                   <button
                     type="button"
                     onClick={() => setIsQuickCaptureOpen(true)}
-                    className="inline-flex items-center gap-1 rounded border border-emerald-700/60 bg-emerald-950/30 hover:bg-emerald-900/40 px-2 py-1 text-emerald-300 cursor-pointer"
+                    className="inline-flex items-center gap-1 rounded border border-[#2F6BFF]/45 bg-[#2F6BFF]/[0.14] hover:bg-[#2F6BFF]/[0.24] px-2 py-1 text-[#6B9BFF] cursor-pointer"
                   >
                     <Zap className="h-3 w-3" />
                     <span>Lưu nhanh</span>

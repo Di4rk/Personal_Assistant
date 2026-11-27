@@ -313,11 +313,17 @@
                 class_activities: actRes.status === "fulfilled" && Array.isArray(actRes.value?.items) ? actRes.value.items : []
             };
 
-            await fetch(LOCAL_EXTRA_ENDPOINT, {
+            const extraRes = await fetch(LOCAL_EXTRA_ENDPOINT, {
                 method: "POST",
                 headers: LOCAL_JSON_HEADERS,
                 body: JSON.stringify(extraPayload)
-            }).catch(() => {});
+            }).catch((err) => {
+                console.warn("[Diark OS] /api/v1/sync/portal-extra network error:", err);
+                return null;
+            });
+            if (extraRes && !extraRes.ok) {
+                console.warn("[Diark OS] /api/v1/sync/portal-extra failed:", extraRes.status);
+            }
 
             // 4.6. Auto-harvest missing course syllabus PDFs for official grading weights (QT/TH/GK/CK)
             if (Array.isArray(dangKyRes?.rows) && dangKyRes.rows.length > 0) {

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
+import { open } from "@tauri-apps/plugin-dialog";
 import {
   Calendar,
   Clock,
@@ -11,6 +12,7 @@ import {
   Check,
   CheckCircle2,
   AlertCircle,
+  FileSpreadsheet,
   ShieldCheck,
   ChevronDown,
   ChevronUp,
@@ -25,7 +27,9 @@ import {
   updateExamChecklist,
   triggerDailyBriefing,
   getLocalSyncToken,
+  previewExamExcel,
   type DailyBriefingDto,
+  type ExamExcelParsePreview,
 } from "../../../lib/tauri-client";
 import { useWindowVisibility } from "../../../hooks/useWindowVisibility";
 import { PORTAL_EXAM_SCHEDULE_SYNC_SCRIPT, withLocalSyncToken } from "../utils/browserSyncScripts";
@@ -78,7 +82,10 @@ function formatExamFormat(format: string): { label: string; color: string } {
     return { label: "Tự luận", color: "bg-zinc-800 text-zinc-200 border-zinc-700" };
   }
   if (f === "tn" || f === "multiple_choice") {
-    return { label: "Trắc nghiệm", color: "bg-emerald-950/60 text-emerald-300 border-emerald-800/70" };
+    return {
+      label: "Trắc nghiệm",
+      color: "bg-[#2F6BFF]/[0.14] text-[#6B9BFF] border-[#2F6BFF]/35",
+    };
   }
   if (f === "practical" || f === "th") {
     return { label: "Thực hành máy tính", color: "bg-amber-950/60 text-amber-300 border-amber-800/70" };
@@ -111,6 +118,16 @@ export const ExamRadarCard: React.FC<ExamRadarCardProps> = ({
   const [jsonInput, setJsonInput] = useState<string>("");
   const [importStatus, setImportStatus] = useState<string>("");
   const [copiedScript, setCopiedScript] = useState<boolean>(false);
+
+  // Import Excel lịch thi
+  const [excelPreview, setExcelPreview] = useState<ExamExcelParsePreview | null>(null);
+  const [selectedExcelKeys, setSelectedExcelKeys] = useState<Set<string>>(() => new Set());
+  const [isParsingExcel, setIsParsingExcel] = useState<boolean>(false);
+  const [isSavingExcel, setIsSavingExcel] = useState<boolean>(false);
+  const [excelFeedback, setExcelFeedback] = useState<{
+    type: "success" | "error" | "info";
+    text: string;
+  } | null>(null);
 
   // Daily Briefing test state
   const [briefingResult, setBriefingResult] = useState<DailyBriefingDto | null>(null);
@@ -476,6 +493,72 @@ export const ExamRadarCard: React.FC<ExamRadarCardProps> = ({
     }
   };
 
+  const getExcelItemKey = (item: PortalExamItemDto, idx: number): string =>
+    `${item.section_class_code ?? item.subject_code}_${item.date ?? ""}_${item.shift ?? ""}_${idx}`;
+
+  const handlePickExamExcel = async () => {
+    try {
+      const selected = await open({
+        multiple: false,
+        title: "Chọn file Excel lịch thi UIT (.xlsx / .xls)",
+        filters: [{ name: "Bảng tính Excel", extensions: ["xlsx", "xls"] }],
+      });
+      if (!selected || typeof selected !== "string") return;
+
+      setIsParsingExcel(true);
+      setExcelFeedback(null);
+      const preview = await previewExamExcel(selected);
+      const nextKeys = new Set<string>();
+      preview.matched_items.forEach((item, idx) => {
+        nextKeys.add(getExcelItemKey(item, idx));
+      });
+      setSelectedExcelKeys(nextKeys);
+      setExcelPreview(preview);
+    } catch (err) {
+      setExcelFeedback({
+        type: "error",
+        text: `Không thể đọc file Excel: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    } finally {
+      setIsParsingExcel(false);
+    }
+  };
+
+  const handleToggleExcelRow = (key: string) => {
+    setSelectedExcelKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const handleConfirmExcelImport = async () => {
+    if (!excelPreview) return;
+    const chosen = excelPreview.matched_items.filter((item, idx) =>
+      selectedExcelKeys.has(getExcelItemKey(item, idx))
+    );
+    if (chosen.length === 0) return;
+
+    setIsSavingExcel(true);
+    try {
+      const savedCount = await syncExamSchedules({ items: chosen });
+      await loadExams();
+      setExcelPreview(null);
+      setExcelFeedback({
+        type: "success",
+        text: `Đã nạp ${savedCount} ca thi từ ${excelPreview.file_name} vào Lịch thi.`,
+      });
+    } catch (err) {
+      setExcelFeedback({
+        type: "error",
+        text: `Lỗi khi lưu lịch thi từ Excel: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    } finally {
+      setIsSavingExcel(false);
+    }
+  };
+
   return (
     <div
       className={`bg-[#0F1420] border border-[#1D263B] rounded-xl p-5 text-slate-200 transition-colors ${className}`}
@@ -491,13 +574,24 @@ export const ExamRadarCard: React.FC<ExamRadarCardProps> = ({
               Lịch Thi &amp; Đếm Ngược
             </h2>
             <p className="text-xs text-[#71717A]">
-              Tự động cập nhật khi đồng bộ Portal UIT · Đếm ngược ca thi, phòng thi &amp; checklist
+              Tự động cập nhật khi đồng bộ Portal UIT hoặc nhập trực tiếp từ file Excel thông báo
             </p>
           </div>
         </div>
 
         {/* Action Buttons */}
         <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => void handlePickExamExcel()}
+            disabled={isParsingExcel}
+            className="flex h-8 items-center gap-1.5 px-3 text-xs font-medium rounded-lg border border-[#2F6BFF]/45 bg-[#2F6BFF]/[0.16] hover:bg-[#2F6BFF]/[0.24] text-[#6B9BFF] transition-colors cursor-pointer disabled:opacity-50"
+            title="Chọn file Excel lịch thi UIT để tự động lọc đúng các lớp bạn đang học"
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5" />
+            <span>{isParsingExcel ? "Đang quét Excel..." : "Nhập Excel lịch thi"}</span>
+          </button>
+
           <button
             type="button"
             onClick={handleTriggerBriefing}
@@ -519,6 +613,20 @@ export const ExamRadarCard: React.FC<ExamRadarCardProps> = ({
           </button>
         </div>
       </div>
+
+      {excelFeedback && (
+        <div
+          className={`mt-3 rounded-lg border px-3 py-2 text-xs ${
+            excelFeedback.type === "error"
+              ? "border-rose-800/60 bg-rose-950/35 text-rose-300"
+              : excelFeedback.type === "success"
+              ? "border-emerald-800/50 bg-emerald-950/30 text-emerald-300"
+              : "border-[#1D263B] bg-[#080B12] text-zinc-300"
+          }`}
+        >
+          {excelFeedback.text}
+        </div>
+      )}
 
       {showManualTools && (
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[#1D263B] bg-[#080B12] px-3 py-2 text-xs">
@@ -755,9 +863,20 @@ export const ExamRadarCard: React.FC<ExamRadarCardProps> = ({
           <span className="text-[11px] text-[#71717A]">Nhấn F5 hoặc nút đồng bộ khi có lịch thi kỳ mới</span>
         </div>
       ) : (
-        /* Compact Empty State without duplicate button */
-        <div className="mt-4 rounded-lg border border-[#1D263B] bg-[#080B12] px-4 py-5 text-center text-xs text-zinc-400">
-          Chưa có lịch thi nào. Nhấn nút đồng bộ phía trên hoặc F5 để tải từ Portal UIT.
+        /* Compact Empty State with Excel Import shortcut */
+        <div className="mt-4 flex flex-col items-center gap-3 rounded-lg border border-[#1D263B] bg-[#080B12] px-4 py-6 text-center text-xs text-zinc-400">
+          <p>
+            Chưa có lịch thi nào trên API Portal. Bạn có thể bấm F5 để đồng bộ hoặc thả file Excel thông báo của P.ĐT để app tự lọc lớp đang học.
+          </p>
+          <button
+            type="button"
+            onClick={() => void handlePickExamExcel()}
+            disabled={isParsingExcel}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-[#2F6BFF]/45 bg-[#2F6BFF]/[0.16] hover:bg-[#2F6BFF]/[0.24] px-3 py-1.5 text-xs font-semibold text-[#6B9BFF] transition-colors cursor-pointer disabled:opacity-50"
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5" />
+            <span>{isParsingExcel ? "Đang quét Excel..." : "Chọn file Excel lịch thi (.xlsx)"}</span>
+          </button>
         </div>
       )}
 
@@ -989,6 +1108,121 @@ export const ExamRadarCard: React.FC<ExamRadarCardProps> = ({
                   Lưu lịch thi
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 5. Modal xem trước kết quả lọc từ file Excel */}
+      {excelPreview && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4">
+          <div className="w-full max-w-2xl space-y-4 rounded-xl border border-[#1D263B] bg-[#0F1420] p-5 shadow-2xl">
+            <div className="flex items-start justify-between gap-3 border-b border-[#1D263B] pb-3">
+              <div>
+                <h3 className="text-sm font-bold text-zinc-100">
+                  Xem trước lịch thi từ Excel
+                </h3>
+                <p className="mt-0.5 font-mono text-[11px] text-zinc-400">
+                  {excelPreview.file_name} · Đã quét {excelPreview.sheets_scanned} sheet ({excelPreview.total_rows_scanned} dòng)
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setExcelPreview(null)}
+                className="cursor-pointer rounded px-2 py-1 text-xs text-zinc-400 hover:bg-[#151C2C] hover:text-white"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[#1D263B] bg-[#080B12] px-3 py-2 text-xs">
+              <span className="text-zinc-300">
+                {excelPreview.matched_by === "class"
+                  ? "Khớp chính xác theo mã lớp học phần đang đăng ký"
+                  : excelPreview.matched_by === "subject"
+                  ? "Khớp theo mã môn học đang theo học (dự phòng khi khác mã lớp)"
+                  : "Không tìm thấy dòng nào khớp với các lớp/môn đang học"}
+              </span>
+              <span className="font-mono text-[11px] text-[#6B9BFF]">
+                {excelPreview.matched_items.length} ca thi khớp ({excelPreview.enrolled_classes_count} lớp đang theo dõi)
+              </span>
+            </div>
+
+            {excelPreview.matched_items.length === 0 ? (
+              <div className="rounded-lg border border-[#1D263B] bg-[#080B12] p-5 text-center text-xs text-zinc-400 space-y-1.5">
+                <p>Không tìm thấy ca thi nào trùng với các lớp bạn đang học trong file này.</p>
+                <p className="text-[11px] text-zinc-500">
+                  Hãy đảm bảo bạn đã đồng bộ Portal (để lấy danh sách lớp học phần) hoặc kiểm tra đúng file thông báo của học kỳ hiện tại.
+                </p>
+              </div>
+            ) : (
+              <div className="max-h-72 space-y-1.5 overflow-y-auto pr-1">
+                {excelPreview.matched_items.map((item, idx) => {
+                  const key = getExcelItemKey(item, idx);
+                  const checked = selectedExcelKeys.has(key);
+                  return (
+                    <label
+                      key={key}
+                      className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 text-xs transition-colors ${
+                        checked
+                          ? "border-[#2F6BFF]/45 bg-[#2F6BFF]/[0.08]"
+                          : "border-[#1D263B] bg-[#080B12] opacity-65"
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => handleToggleExcelRow(key)}
+                        className="mt-0.5 accent-[#2F6BFF]"
+                      />
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="font-semibold text-zinc-100">
+                            {item.section_class_code || item.subject_code} · {item.subject_name}
+                          </span>
+                          <span className="font-mono text-[11px] text-[#6B9BFF]">
+                            {item.weekday}, {item.date}
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2 font-mono text-[11px] text-zinc-400">
+                          <span>
+                            Ca {item.shift} ({item.start_time}-{item.end_time})
+                          </span>
+                          <span>·</span>
+                          <span className="text-zinc-200">Phòng: {item.room || "Chưa rõ"}</span>
+                          <span>·</span>
+                          <span>{formatExamTerm(item.examination || "midterm")}</span>
+                        </div>
+                        {item.note && (
+                          <div className="text-[11px] text-amber-300/90">{item.note}</div>
+                        )}
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-2 border-t border-[#1D263B] pt-3">
+              <button
+                type="button"
+                onClick={() => setExcelPreview(null)}
+                className="cursor-pointer rounded-lg border border-[#1D263B] bg-[#080B12] px-3 py-1.5 text-xs font-medium text-zinc-300 hover:bg-[#151C2C]"
+              >
+                Đóng
+              </button>
+              {excelPreview.matched_items.length > 0 && (
+                <button
+                  type="button"
+                  disabled={selectedExcelKeys.size === 0 || isSavingExcel}
+                  onClick={() => void handleConfirmExcelImport()}
+                  className="cursor-pointer rounded-lg bg-[#2F6BFF] hover:bg-[#2558DB] px-4 py-1.5 text-xs font-semibold text-white disabled:opacity-45"
+                >
+                  {isSavingExcel
+                    ? "Đang lưu..."
+                    : `Lưu ${selectedExcelKeys.size} lịch thi`}
+                </button>
+              )}
             </div>
           </div>
         </div>

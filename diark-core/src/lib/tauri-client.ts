@@ -821,6 +821,22 @@ export async function triggerDailyBriefing(): Promise<DailyBriefingDto> {
   return invoke<DailyBriefingDto>("trigger_daily_briefing");
 }
 
+export interface ExamExcelParsePreview {
+  file_name: string;
+  sheets_scanned: number;
+  total_rows_scanned: number;
+  matched_by: "class" | "subject" | "none" | string;
+  enrolled_classes_count: number;
+  matched_items: PortalExamItemDto[];
+}
+
+/**
+ * Đọc file Excel lịch thi UIT (.xlsx/.xls) và lọc theo lớp/môn đang học của sinh viên.
+ */
+export async function previewExamExcel(filePath: string): Promise<ExamExcelParsePreview> {
+  return invoke<ExamExcelParsePreview>("preview_exam_excel", { filePath });
+}
+
 // ============================================================
 //  Gemini AI Copilot (v1.0.0 — BYOK, Socratic Debugger & Task Extractor)
 // ============================================================

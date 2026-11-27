@@ -72,6 +72,59 @@ pub fn get_portal_class_activities(
 }
 
 #[tauri::command]
+pub fn preview_exam_excel(
+    file_path: String,
+    db: State<'_, SharedDb>,
+) -> Result<crate::services::exam_excel_parser::ExamExcelParsePreview, String> {
+    let clean_path = file_path.trim();
+    if clean_path.is_empty() {
+        return Err("Đường dẫn file Excel không được để trống.".to_string());
+    }
+    let path = std::path::PathBuf::from(clean_path);
+    if !path.exists() {
+        return Err(format!("Không tìm thấy file: {}", path.display()));
+    }
+
+    let conn = db.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
+    let registered = get_registered_classes(&conn)
+        .map_err(|e| format!("Lỗi đọc danh sách lớp đăng ký: {e}"))?;
+
+    let mut class_codes: Vec<String> = Vec::new();
+    let mut subject_codes: Vec<String> = Vec::new();
+    for rc in registered {
+        if !rc.code.trim().is_empty() {
+            class_codes.push(rc.code.trim().to_string());
+        }
+        if !rc.subject_code.trim().is_empty() {
+            subject_codes.push(rc.subject_code.trim().to_string());
+        }
+    }
+
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT DISTINCT course_code FROM academic_courses WHERE summary_score_10 IS NULL AND course_code != ''",
+    ) {
+        if let Ok(rows) = stmt.query_map([], |r| r.get::<_, String>(0)) {
+            for code in rows.flatten() {
+                let trimmed = code.trim();
+                if !trimmed.is_empty()
+                    && !subject_codes
+                        .iter()
+                        .any(|existing| existing.eq_ignore_ascii_case(trimmed))
+                {
+                    subject_codes.push(trimmed.to_string());
+                }
+            }
+        }
+    }
+
+    crate::services::exam_excel_parser::parse_exam_excel_for_student(
+        &path,
+        &class_codes,
+        &subject_codes,
+    )
+}
+
+#[tauri::command]
 pub fn get_moodle_grades(db: State<'_, SharedDb>) -> Result<Vec<MoodleGradeRecord>, String> {
     let conn = db.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
     db_get_moodle_grades(&conn).map_err(|e| format!("Lỗi đọc điểm Moodle: {e}"))

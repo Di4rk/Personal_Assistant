@@ -787,9 +787,13 @@ pub(crate) fn list_vault_notes_blocking(
         })
         .map_err(|e| format!("Lỗi đọc dòng ghi chú: {e}"))?;
 
+    let policy = crate::modules::vault::watcher::VaultWatchPolicy::default();
     let mut list = Vec::new();
     for r in rows {
-        list.push(r.map_err(|e| e.to_string())?);
+        let item = r.map_err(|e| e.to_string())?;
+        if !crate::modules::vault::watcher::is_ignored_rel_path(&item.id, &policy) {
+            list.push(item);
+        }
     }
     Ok(list)
 }

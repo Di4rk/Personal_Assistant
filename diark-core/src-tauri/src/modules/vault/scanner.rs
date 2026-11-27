@@ -358,9 +358,10 @@ pub fn scan_and_sync_vault(conn: &mut Connection, root_path: &Path) -> AppResult
             if e.depth() == 0 {
                 return true;
             }
-            let file_name = e.file_name();
-            // Skip ignored directories by exact component match
-            !policy.ignored_dir_names.contains(file_name)
+            if e.file_type().is_dir() {
+                return !crate::modules::vault::watcher::is_ignored_dir_name(e.file_name(), &policy);
+            }
+            true
         })
     {
         let entry = match entry {

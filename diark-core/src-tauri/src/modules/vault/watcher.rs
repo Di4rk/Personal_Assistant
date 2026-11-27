@@ -36,10 +36,26 @@ pub struct VaultWatchPolicy {
 impl Default for VaultWatchPolicy {
     fn default() -> Self {
         let mut ignored_dir_names = HashSet::new();
-        ignored_dir_names.insert(OsString::from(".obsidian"));
-        ignored_dir_names.insert(OsString::from(".git"));
-        ignored_dir_names.insert(OsString::from("node_modules"));
-        ignored_dir_names.insert(OsString::from(".trash"));
+        for name in [
+            ".obsidian",
+            ".git",
+            "node_modules",
+            ".trash",
+            ".venv",
+            "venv",
+            "site-packages",
+            "__pycache__",
+            ".ipynb_checkpoints",
+            "target",
+            "dist",
+            "build",
+            ".next",
+            ".cache",
+            ".vscode",
+            ".idea",
+        ] {
+            ignored_dir_names.insert(OsString::from(name));
+        }
 
         let mut ignored_extensions = HashSet::new();
         ignored_extensions.insert(OsString::from("tmp"));
@@ -54,6 +70,29 @@ impl Default for VaultWatchPolicy {
             max_pending_paths: 128,
         }
     }
+}
+
+/// Kiểm tra một tên thư mục có nằm trong danh sách loại trừ khỏi Vault hay không.
+pub fn is_ignored_dir_name(name: &std::ffi::OsStr, policy: &VaultWatchPolicy) -> bool {
+    if policy.ignored_dir_names.contains(name) {
+        return true;
+    }
+    let s = name.to_string_lossy();
+    s.starts_with('.') || s.ends_with(".dist-info") || s.ends_with(".egg-info")
+}
+
+/// Kiểm tra đường dẫn tương đối `rel_path` (VD: `course/.venv/Lib/README.md`) có đi qua thư mục rác hay không.
+pub fn is_ignored_rel_path(rel_path: &str, policy: &VaultWatchPolicy) -> bool {
+    let mut parts = rel_path.split(['/', '\\']).peekable();
+    while let Some(part) = parts.next() {
+        if parts.peek().is_none() {
+            break;
+        }
+        if !part.is_empty() && is_ignored_dir_name(std::ffi::OsStr::new(part), policy) {
+            return true;
+        }
+    }
+    false
 }
 
 /// Signals communicated across watcher threads and background tasks.
@@ -294,12 +333,12 @@ pub fn is_indexable_md_file(root: &Path, path: &Path, policy: &VaultWatchPolicy)
         if let std::path::Component::Normal(os_name) = comp {
             // Check if this component is an intermediate directory (not the last element in path)
             if components.peek().is_some() {
-                if policy.ignored_dir_names.contains(os_name) {
+                if is_ignored_dir_name(os_name, policy) {
                     return false;
                 }
             } else {
                 // Leaf component (file name)
-                if policy.ignored_dir_names.contains(os_name) {
+                if is_ignored_dir_name(os_name, policy) {
                     return false;
                 }
 

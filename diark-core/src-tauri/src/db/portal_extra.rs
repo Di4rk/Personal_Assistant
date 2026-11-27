@@ -246,18 +246,14 @@ pub struct PortalTuitionInput {
     pub tuition_status: String,
     #[serde(default, deserialize_with = "de_flexible_string")]
     pub tuition_status_label: String,
-    #[serde(
-        default,
-        alias = "period_1_due_date_formatted",
-        deserialize_with = "de_flexible_string"
-    )]
+    #[serde(default, deserialize_with = "de_flexible_string")]
     pub period_1_due_date: String,
-    #[serde(
-        default,
-        alias = "period_2_due_date_formatted",
-        deserialize_with = "de_flexible_string"
-    )]
+    #[serde(default, deserialize_with = "de_flexible_string")]
+    pub period_1_due_date_formatted: String,
+    #[serde(default, deserialize_with = "de_flexible_string")]
     pub period_2_due_date: String,
+    #[serde(default, deserialize_with = "de_flexible_string")]
+    pub period_2_due_date_formatted: String,
     #[serde(default, deserialize_with = "de_flexible_string")]
     pub paid_time_formatted: String,
     #[serde(default)]
@@ -732,6 +728,16 @@ pub fn commit_portal_extra_payload(
         for rec in &payload.tuition_records {
             let details_json =
                 serde_json::to_string(&rec.detail_ids).unwrap_or_else(|_| "[]".to_string());
+            let due_1 = if !rec.period_1_due_date_formatted.trim().is_empty() {
+                rec.period_1_due_date_formatted.trim()
+            } else {
+                rec.period_1_due_date.trim()
+            };
+            let due_2 = if !rec.period_2_due_date_formatted.trim().is_empty() {
+                rec.period_2_due_date_formatted.trim()
+            } else {
+                rec.period_2_due_date.trim()
+            };
             stmt.execute(params![
                 rec.id,
                 rec.period.trim(),
@@ -746,8 +752,8 @@ pub fn commit_portal_extra_payload(
                 rec.payment_status_label.trim(),
                 rec.tuition_status.trim(),
                 rec.tuition_status_label.trim(),
-                rec.period_1_due_date.trim(),
-                rec.period_2_due_date.trim(),
+                due_1,
+                due_2,
                 rec.paid_time_formatted.trim(),
                 details_json,
                 now_ts,
@@ -1820,5 +1826,55 @@ mod tests {
         let remaining = list_google_calendars(&conn).unwrap();
         assert_eq!(remaining.len(), 1);
         assert_eq!(remaining[0].id, "ics-1");
+    }
+
+    #[test]
+    fn test_deserialize_real_uit_tuition_payload_with_duplicate_due_fields() {
+        let raw = r#"{
+            "tuition_records": [
+                {
+                    "index": 1,
+                    "id": 99123,
+                    "period": "Học kỳ 1/2026-2027",
+                    "semester": "semester_1",
+                    "year_id": [12],
+                    "year_id_name": "2026-2027",
+                    "subject_codes": "IT004, IT007",
+                    "tuition_amount": "16500000",
+                    "must_be_paid": "16500000",
+                    "paid": "16500000",
+                    "remaining": "0",
+                    "payment_status": "fully_paid",
+                    "payment_status_label": "Đã đóng đủ",
+                    "tuition_status": "extended",
+                    "tuition_status_label": "Gia hạn",
+                    "period_1_due_date": "2026-09-30 17:00:00",
+                    "period_1_due_date_formatted": "30/09/2026",
+                    "period_2_due_date": false,
+                    "period_2_due_date_formatted": false,
+                    "paid_time_formatted": "28/09/2026 10:15",
+                    "qr_code": false,
+                    "note": false,
+                    "detail_ids": [{ "subject_code": "IT004", "amount": "4000000" }],
+                    "payment_ids": []
+                }
+            ]
+        }"#;
+
+        let parsed: PortalExtraSyncPayload = serde_json::from_str(raw).unwrap();
+        assert_eq!(parsed.tuition_records.len(), 1);
+        assert_eq!(parsed.tuition_records[0].must_be_paid, 16_500_000);
+        assert_eq!(parsed.tuition_records[0].period_1_due_date_formatted, "30/09/2026");
+        assert_eq!(parsed.tuition_records[0].period_2_due_date_formatted, "");
+
+        let mut conn = Connection::open_in_memory().unwrap();
+        ensure_portal_extra_schema(&conn).unwrap();
+        let stats = commit_portal_extra_payload(&mut conn, &parsed).unwrap();
+        assert_eq!(stats.tuition_count, 1);
+
+        let saved = get_tuition_records(&conn).unwrap();
+        assert_eq!(saved.len(), 1);
+        assert_eq!(saved[0].period_1_due_date, "30/09/2026");
+        assert_eq!(saved[0].period_2_due_date, "");
     }
 }
