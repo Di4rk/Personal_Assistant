@@ -1,5 +1,9 @@
 import React, { useMemo, useState } from "react";
-import { evaluateUitWorkload } from "../utils/forecastEngine";
+import {
+  buildDynamicTermPresets,
+  evaluateUitWorkload,
+  getRecommendedTerms,
+} from "../utils/forecastEngine";
 import { SemesterGpaSimulator } from "./SemesterGpaSimulator";
 import type { AcademicCourseRecord } from "../types";
 
@@ -39,7 +43,16 @@ export const GpaSimulatorCard: React.FC<GpaSimulatorCardProps> = ({
   const [targetGpa10, setTargetGpa10] = useState<number>(8.5);
 
   const completedTerms = Math.max(0, completedTermsCount);
-  const [selectedTerms, setSelectedTerms] = useState<number>(5);
+  const recommendedTerms = useMemo(
+    () => getRecommendedTerms(remainingCredits, completedTerms),
+    [remainingCredits, completedTerms]
+  );
+  const [customTerms, setCustomTerms] = useState<number | null>(null);
+  const selectedTerms = customTerms ?? recommendedTerms;
+  const updateSelectedTerms = (next: number) => {
+    if (!Number.isFinite(next)) return;
+    setCustomTerms(Math.max(1, Math.min(16, Math.round(next))));
+  };
   const [creditsPerTerm, setCreditsPerTerm] = useState<number>(21);
 
   const { effectiveTerms, effectiveCreditsPerTerm } = useMemo(() => {
@@ -101,18 +114,10 @@ export const GpaSimulatorCard: React.FC<GpaSimulatorCardProps> = ({
     return { label: "Trung bình", color: "text-zinc-400 border-[#1D263B] bg-[#080B12]" };
   }, [targetGpa10]);
 
-  const timePresets = useMemo(() => {
-    return [4, 5, 6, 7].map((terms) => {
-      const pace = remainingCredits > 0 ? Math.ceil(remainingCredits / terms) : 0;
-      const workload = evaluateUitWorkload(pace);
-      return {
-        terms,
-        label: `${terms} kỳ nữa`,
-        pace,
-        workload,
-      };
-    });
-  }, [remainingCredits]);
+  const timePresets = useMemo(
+    () => buildDynamicTermPresets(remainingCredits, completedTerms),
+    [remainingCredits, completedTerms]
+  );
 
   return (
     <div
@@ -258,38 +263,81 @@ export const GpaSimulatorCard: React.FC<GpaSimulatorCardProps> = ({
               </div>
 
               {mode === "time" ? (
-                <div className="space-y-2">
-                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                    {timePresets.map((preset) => {
-                      const isSelected = selectedTerms === preset.terms;
-                      return (
-                        <button
-                          key={preset.terms}
-                          type="button"
-                          onClick={() => setSelectedTerms(preset.terms)}
-                          className={`flex min-h-[74px] cursor-pointer flex-col items-center justify-between rounded-lg border px-2 py-2 text-center text-xs font-medium transition-colors ${
-                            isSelected
-                              ? "border-[#2F6BFF] bg-[#2F6BFF]/[0.16] text-[#6B9BFF] ring-1 ring-[#2F6BFF]/30"
-                              : "border-[#1D263B] bg-[#080B12] text-zinc-400 hover:border-[#2F6BFF]/35 hover:bg-[#151C2C] hover:text-zinc-200"
-                          }`}
-                        >
-                          <div className="text-sm font-bold text-zinc-100">{preset.label}</div>
-                          <div className="mt-0.5 font-mono text-[11px] text-zinc-400">
-                            ~{preset.pace} TC/kỳ
-                          </div>
-                          <div
-                            className={`mt-1 rounded border px-1.5 py-0.5 text-[10px] font-semibold leading-tight whitespace-nowrap ${preset.workload.badgeColor}`}
+                remainingCredits > 0 ? (
+                  <div className="space-y-2">
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                      {timePresets.map((preset) => {
+                        const isSelected = selectedTerms === preset.terms;
+                        return (
+                          <button
+                            key={preset.terms}
+                            type="button"
+                            onClick={() => updateSelectedTerms(preset.terms)}
+                            className={`flex min-h-[74px] cursor-pointer flex-col items-center justify-between rounded-lg border px-2 py-2 text-center text-xs font-medium transition-colors ${
+                              isSelected
+                                ? "border-[#2F6BFF] bg-[#2F6BFF]/[0.16] text-[#6B9BFF] ring-1 ring-[#2F6BFF]/30"
+                                : "border-[#1D263B] bg-[#080B12] text-zinc-400 hover:border-[#2F6BFF]/35 hover:bg-[#151C2C] hover:text-zinc-200"
+                            }`}
                           >
-                            {preset.workload.label}
-                          </div>
-                        </button>
-                      );
-                    })}
+                            <div className="text-sm font-bold text-zinc-100">{preset.label}</div>
+                            <div className="mt-0.5 font-mono text-[11px] text-zinc-400">
+                              ~{preset.pace} TC/kỳ • ~{preset.estimatedYears} năm
+                            </div>
+                            <div
+                              className={`mt-1 rounded border px-1.5 py-0.5 text-[10px] font-semibold leading-tight whitespace-nowrap ${preset.workload.badgeColor}`}
+                            >
+                              {preset.workload.label}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[#1D263B] bg-[#080B12] px-3 py-2 text-xs">
+                      <div className="flex items-center gap-2">
+                        <span className="text-zinc-400">Số kỳ tùy chỉnh:</span>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            disabled={selectedTerms <= 1}
+                            onClick={() => updateSelectedTerms(selectedTerms - 1)}
+                            aria-label="Giảm số kỳ"
+                            className="flex h-6 w-6 cursor-pointer items-center justify-center rounded border border-[#1D263B] bg-[#0F1420] font-mono text-xs text-zinc-300 transition-colors hover:border-[#2F6BFF]/50 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            -
+                          </button>
+                          <input
+                            type="number"
+                            min={1}
+                            max={16}
+                            value={selectedTerms}
+                            onChange={(e) => {
+                              const parsed = parseInt(e.target.value, 10);
+                              if (!Number.isNaN(parsed)) {
+                                updateSelectedTerms(parsed);
+                              }
+                            }}
+                            aria-label="Số kỳ tùy chỉnh"
+                            className="h-6 w-12 rounded border border-[#1D263B] bg-[#0F1420] text-center font-mono text-xs font-semibold text-zinc-100 focus:border-[#2F6BFF] focus:outline-none"
+                          />
+                          <button
+                            type="button"
+                            disabled={selectedTerms >= 16}
+                            onClick={() => updateSelectedTerms(selectedTerms + 1)}
+                            aria-label="Tăng số kỳ"
+                            className="flex h-6 w-6 cursor-pointer items-center justify-center rounded border border-[#1D263B] bg-[#0F1420] font-mono text-xs text-zinc-300 transition-colors hover:border-[#2F6BFF]/50 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            +
+                          </button>
+                        </div>
+                        <span className="text-zinc-400">kỳ</span>
+                      </div>
+                      <span className="font-mono text-[11px] text-zinc-400">
+                        ~{effectiveCreditsPerTerm} TC/kỳ • Tổng {completedTerms + effectiveTerms} kỳ (~
+                        {estimatedGraduationYears} năm)
+                      </span>
+                    </div>
                   </div>
-                  <p className="text-right font-mono text-[11px] italic text-zinc-500">
-                    Cần hoàn thành trung bình ~{effectiveCreditsPerTerm} TC/kỳ
-                  </p>
-                </div>
+                ) : null
               ) : (
                 <div
                   className={`space-y-2.5 rounded-lg border bg-[#080B12] p-3 transition-colors ${

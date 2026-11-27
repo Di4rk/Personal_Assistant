@@ -158,6 +158,65 @@ export function evaluateUitWorkload(creditsPerTerm: number): UitWorkloadEvaluati
   };
 }
 
+export interface DynamicTermPreset {
+  terms: number;
+  label: string;
+  pace: number;
+  estimatedYears: string;
+  workload: UitWorkloadEvaluation;
+}
+
+/**
+ * Tạo danh sách mốc học kỳ gợi ý dựa trên số tín chỉ còn lại và số kỳ đã hoàn thành.
+ * Bắt đầu từ số kỳ tối thiểu khả thi theo trần 30 TC/kỳ của UIT.
+ */
+export function buildDynamicTermPresets(
+  remainingCredits: number,
+  completedTerms: number,
+  count = 4
+): DynamicTermPreset[] {
+  if (remainingCredits <= 0) {
+    return [];
+  }
+
+  const safeCompleted = Math.max(0, completedTerms);
+  const minFeasibleTerms = Math.max(1, Math.ceil(remainingCredits / 30));
+  const maxTerms = Math.max(
+    minFeasibleTerms,
+    Math.min(minFeasibleTerms + Math.max(1, count) - 1, remainingCredits)
+  );
+
+  const presets: DynamicTermPreset[] = [];
+  for (let terms = minFeasibleTerms; terms <= maxTerms; terms += 1) {
+    const pace = Math.ceil(remainingCredits / terms);
+    presets.push({
+      terms,
+      label: `${terms} kỳ nữa`,
+      pace,
+      estimatedYears: ((safeCompleted + terms) / 2).toFixed(1),
+      workload: evaluateUitWorkload(pace),
+    });
+  }
+
+  return presets;
+}
+
+/**
+ * Gợi ý số kỳ mặc định phù hợp với mức tải tối ưu (<= 20 TC/kỳ).
+ */
+export function getRecommendedTerms(remainingCredits: number, completedTerms = 0): number {
+  if (remainingCredits <= 0) {
+    return 0;
+  }
+
+  const presets = buildDynamicTermPresets(remainingCredits, completedTerms);
+  const optimalPreset = presets.find((preset) => preset.pace <= 20);
+  if (optimalPreset) {
+    return optimalPreset.terms;
+  }
+  return presets[presets.length - 1]?.terms ?? 1;
+}
+
 // ============================================================
 //  UIT Knowledge Category Classification & Stats
 // ============================================================
