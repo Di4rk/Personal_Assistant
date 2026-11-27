@@ -588,10 +588,10 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
         />
         <div
           aria-hidden="true"
-          className="uit-hero-logo-glow pointer-events-none absolute right-5 top-1/2 h-16 w-16 -translate-y-1/2 select-none sm:h-20 sm:w-20"
+          className="uit-hero-logo-glow pointer-events-none absolute -right-8 top-1/2 h-56 w-56 -translate-y-1/2 select-none opacity-45"
           style={{
             background:
-              "linear-gradient(135deg, #8BB2FF 0%, #2F6BFF 55%, #163E9E 100%)",
+              "linear-gradient(145deg, rgba(139,178,255,0.95) 0%, rgba(47,107,255,0.72) 52%, rgba(22,62,158,0.16) 100%)",
             WebkitMaskImage: `url(${uitLogoMono})`,
             maskImage: `url(${uitLogoMono})`,
             WebkitMaskRepeat: "no-repeat",
@@ -603,7 +603,7 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
           }}
         />
 
-        <div className="relative z-10 space-y-1 pr-24 sm:pr-28">
+        <div className="relative z-10 space-y-1 pr-36 sm:pr-44">
           <div className="flex items-center gap-2">
             <span className="text-[11px] font-medium uppercase tracking-wider text-[#6B9BFF]">
               Tổng quan học tập
