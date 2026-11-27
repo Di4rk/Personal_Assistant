@@ -23,6 +23,8 @@ pub struct AuditCourseItem {
     pub semester_id: String,
     pub is_compulsory: bool,
     pub knowledge_block: String,
+    #[serde(default)]
+    pub is_in_progress: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -35,6 +37,8 @@ pub struct BlockAuditResult {
     pub is_fulfilled: bool,
     pub compulsory_fulfilled: bool,
     pub missing_compulsory_codes: Vec<String>,
+    #[serde(default)]
+    pub missing_compulsory_courses: Vec<AuditCourseItem>,
     pub passed_courses: Vec<AuditCourseItem>,
     #[serde(default)]
     pub remaining_electives: Vec<AuditCourseItem>,
@@ -126,6 +130,14 @@ fn resolve_rule_key_for_block(raw_block: &str, rule_keys: &[String]) -> String {
         .find(|k| get_block_display_name(k) == target_display)
     {
         return existing.clone();
+    }
+    if target_display == "Tốt nghiệp" {
+        if let Some(existing) = rule_keys.iter().find(|k| {
+            let norm = crate::services::curriculum_harvester::normalize_major_name(k);
+            norm.contains("tot nghiep") || norm.contains("khoa luan")
+        }) {
+            return existing.clone();
+        }
     }
     raw_block.to_string()
 }
@@ -421,6 +433,7 @@ pub fn run_degree_audit(conn: &Connection, preferred_slug: Option<&str>) -> AppR
                     is_fulfilled: false,
                     compulsory_fulfilled: true,
                     missing_compulsory_codes: Vec::new(),
+                    missing_compulsory_courses: Vec::new(),
                     passed_courses: Vec::new(),
                     remaining_electives: Vec::new(),
                     overflow_credits: 0.0,
@@ -450,6 +463,7 @@ pub fn run_degree_audit(conn: &Connection, preferred_slug: Option<&str>) -> AppR
                     is_fulfilled: false,
                     compulsory_fulfilled: true,
                     missing_compulsory_codes: Vec::new(),
+                    missing_compulsory_courses: Vec::new(),
                     passed_courses: Vec::new(),
                     remaining_electives: Vec::new(),
                     overflow_credits: 0.0,
@@ -648,15 +662,39 @@ pub fn run_degree_audit(conn: &Connection, preferred_slug: Option<&str>) -> AppR
                             semester_id: student_course.semester_id,
                             is_compulsory: true,
                             knowledge_block: block_key.clone(),
+                            is_in_progress: false,
                         });
                     } else {
-                        // Chưa đạt môn bắt buộc
+                        // Chưa đạt môn bắt buộc (phân biệt đang học vs chưa học)
                         block_result.compulsory_fulfilled = false;
                         block_result.missing_compulsory_codes.push(c.course_code.clone());
+                        let is_in_prog = in_progress_codes.contains(&c.course_code);
+                        block_result.missing_compulsory_courses.push(AuditCourseItem {
+                            course_code: c.course_code.clone(),
+                            course_name: c.course_name.clone(),
+                            credits: c.credits,
+                            grade_10: None,
+                            grade_char: None,
+                            semester_id: if is_in_prog {
+                                "Đang học".to_string()
+                            } else {
+                                c.recommended_semester
+                                    .map(|s| format!("HK{s}"))
+                                    .unwrap_or_else(|| "Chưa học".to_string())
+                            },
+                            is_compulsory: true,
+                            knowledge_block: block_key.clone(),
+                            is_in_progress: is_in_prog,
+                        });
                     }
                 }
             }
         }
+        block_result.missing_compulsory_courses.sort_by(|a, b| {
+            b.is_in_progress
+                .cmp(&a.is_in_progress)
+                .then(a.course_code.cmp(&b.course_code))
+        });
     }
 
     // BƯỚC 6.2: Khớp các môn Tự chọn theo đúng khối kiến thức
@@ -686,6 +724,7 @@ pub fn run_degree_audit(conn: &Connection, preferred_slug: Option<&str>) -> AppR
                         semester_id: student_course.semester_id,
                         is_compulsory: false,
                         knowledge_block: target_block.clone(),
+                        is_in_progress: false,
                     });
                     continue;
                 }
@@ -708,6 +747,7 @@ pub fn run_degree_audit(conn: &Connection, preferred_slug: Option<&str>) -> AppR
                 semester_id: student_course.semester_id.clone(),
                 is_compulsory: false,
                 knowledge_block: tu_do_key.clone(),
+                is_in_progress: false,
             };
 
             if tu_do_block.completed_credits < tu_do_block.required_credits {
@@ -725,15 +765,23 @@ pub fn run_degree_audit(conn: &Connection, preferred_slug: Option<&str>) -> AppR
         if let Some(courses_in_block) = curr_courses_by_block.get(block_key) {
             for c in courses_in_block {
                 if !c.is_compulsory && !deduplicated_passed_courses.contains_key(&c.course_code) {
+                    let is_in_prog = in_progress_codes.contains(&c.course_code);
                     block_result.remaining_electives.push(AuditCourseItem {
                         course_code: c.course_code.clone(),
                         course_name: c.course_name.clone(),
                         credits: c.credits,
                         grade_10: None,
                         grade_char: None,
-                        semester_id: c.recommended_semester.map(|s| format!("HK{}", s)).unwrap_or_else(|| "Tự chọn".to_string()),
+                        semester_id: if is_in_prog {
+                            "Đang học".to_string()
+                        } else {
+                            c.recommended_semester
+                                .map(|s| format!("HK{}", s))
+                                .unwrap_or_else(|| "Tự chọn".to_string())
+                        },
                         is_compulsory: false,
                         knowledge_block: block_key.clone(),
+                        is_in_progress: is_in_prog,
                     });
                 }
             }
@@ -1612,6 +1660,13 @@ mod tests {
         assert_eq!(find_blk("Chuyên ngành").required_credits, 16.0);
         assert_eq!(find_blk("Tự chọn tự do").required_credits, 10.0);
         assert_eq!(find_blk("Tốt nghiệp").required_credits, 10.0);
+
+        let cs115_missing = find_blk("Cơ sở ngành")
+            .missing_compulsory_courses
+            .iter()
+            .find(|c| c.course_code == "CS115")
+            .expect("CS115 must be in missing_compulsory_courses");
+        assert!(cs115_missing.is_in_progress, "CS115 đang học phải đánh dấu is_in_progress = true");
     }
 
     #[test]

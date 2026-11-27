@@ -5,7 +5,7 @@ use scraper::{ElementRef, Html, Selector};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-pub const CURRICULUM_PARSER_VERSION: &str = "3";
+pub const CURRICULUM_PARSER_VERSION: &str = "4";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct CurriculumRule {
@@ -480,6 +480,11 @@ pub fn parse_curriculum_stream(rsc_content: &str, slug: &str) -> AppResult<Parse
                         "ĐC".to_string()
                     } else if inner_norm.contains("nhom") && inner_norm.contains("co so nganh") {
                         inner_raw.to_string()
+                    } else if (labels.len() >= 2 && outer_norm.contains("tot nghiep"))
+                        || inner_norm.contains("hinh thuc")
+                        || inner_norm == "kltn"
+                    {
+                        "KLTN".to_string()
                     } else if inner_norm.contains("do an tot nghiep tai doanh nghiep") {
                         "Đồ án tốt nghiệp tại doanh nghiệp".to_string()
                     } else if inner_norm.contains("co so nganh") || inner_norm == "csn" {
@@ -488,7 +493,7 @@ pub fn parse_curriculum_stream(rsc_content: &str, slug: &str) -> AppResult<Parse
                         "CN".to_string()
                     } else if inner_norm.contains("tu do") || inner_norm.contains("tu chon tu do") {
                         "Tự chọn tự do".to_string()
-                    } else if inner_norm.contains("khoa luan") || inner_norm.contains("tot nghiep") || inner_norm == "kltn" {
+                    } else if inner_norm.contains("tot nghiep") {
                         "KLTN".to_string()
                     } else if outer_norm.contains("dai cuong") || inner_norm == "dc" {
                         "ĐC".to_string()
@@ -1341,7 +1346,7 @@ mod tests {
                 <tr><td rowspan="3">Khối kiến thức giáo dục chuyên nghiệp (71 TC)</td><td>Cơ sở ngành</td><td>≥ 45</td></tr>
                 <tr><td>Chuyên ngành</td><td>≥ 16</td></tr>
                 <tr><td>Môn học tự chọn tự do</td><td>≥ 10</td></tr>
-                <tr><td>Tốt nghiệp (10 TC)</td><td>Sinh viên chọn 1 trong 3 hình thức</td><td>≥ 10</td></tr>
+                <tr><td>Tốt nghiệp (10 TC)</td><td>Sinh viên chọn 1 trong 3 hình thức - Khóa luận tốt nghiệp - Đồ án tốt nghiệp tại doanh nghiệp - Đồ án tốt nghiệp + Môn chuyên đề</td><td>≥ 10</td></tr>
                 <tr><td colspan="2">Tổng số tín chỉ tích lũy tối thiểu toàn khóa</td><td>≥ 126</td></tr>
             </tbody></table>
             <h3>5.2 Khối kiến thức giáo dục đại cương</h3>
@@ -1391,6 +1396,15 @@ mod tests {
 
         let parsed = parse_curriculum_stream(html, "cu-nhan-nganh-khoa-hoc-may-tinh-khoa-20-2025").unwrap();
         assert_eq!(parsed.rules.len(), 5, "Phải có đúng 5 khối chuẩn, không chứa dòng Tổng số tín chỉ");
+        assert!(
+            parsed.rules.iter().any(|r| r.knowledge_block == "KLTN" && r.required_credits == 10.0),
+            "Khối tốt nghiệp tổng hợp phải chuẩn hóa về KLTN 10 TC, nhận được: {:?}",
+            parsed.rules
+        );
+        assert!(
+            !parsed.rules.iter().any(|r| r.knowledge_block == "Đồ án tốt nghiệp tại doanh nghiệp"),
+            "Không được đặt tên khối KLTN thành 1 trong 3 hình thức"
+        );
         assert_eq!(parsed.total_credits, 126.0);
         assert!(!parsed.courses.iter().any(|c| c.course_code.contains("VÀ CÁC")));
         assert!(!parsed.courses.iter().any(|c| c.course_code.contains("TOÁN")));

@@ -645,6 +645,62 @@ export const GraduationAuditCard: React.FC<GraduationAuditCardProps> = ({
                 {/* Expanded Course List & Remaining Electives */}
                 {isExpanded && (
                   <div className="space-y-3 border-t border-[#1D263B] bg-[#0F1420] p-3.5">
+                    {/* Compact Grid 2 cột: Môn bắt buộc chưa tích lũy (Đang học / Chưa học) */}
+                    {block.missingCompulsoryCourses && block.missingCompulsoryCourses.length > 0 && (
+                      <div>
+                        <div className="mb-2 flex items-center justify-between text-[11px] font-medium text-zinc-400">
+                          <span>Môn bắt buộc chưa tích lũy ({block.missingCompulsoryCourses.length} môn):</span>
+                        </div>
+                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                          {block.missingCompulsoryCourses.map((c) => (
+                            <div
+                              key={c.courseCode}
+                              className="flex items-center justify-between rounded-lg border border-[#1D263B] bg-[#080B12] p-2 text-xs transition-colors hover:bg-[#151C2C]"
+                            >
+                              <div className="flex min-w-0 items-center gap-2 pr-2">
+                                <span
+                                  className={`shrink-0 rounded border px-1.5 py-0.5 font-mono text-[11px] font-semibold ${
+                                    c.isInProgress
+                                      ? "border-[#2F6BFF]/35 bg-[#2F6BFF]/[0.14] text-[#6B9BFF]"
+                                      : "border-[#1D263B] bg-[#151C2C] text-zinc-300"
+                                  }`}
+                                >
+                                  {c.courseCode}
+                                </span>
+                                <div className="min-w-0">
+                                  <div
+                                    className="truncate text-[12px] font-medium text-zinc-200"
+                                    title={c.courseName}
+                                  >
+                                    {c.courseName || c.courseCode}
+                                  </div>
+                                  <div className="flex items-center gap-1.5 text-[10px] text-zinc-500">
+                                    <span className="font-medium text-zinc-400">{c.credits} TC</span>
+                                    {!c.isInProgress && c.semesterId && c.semesterId !== "Chưa học" && (
+                                      <>
+                                        <span>•</span>
+                                        <span>Gợi ý {c.semesterId}</span>
+                                      </>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <span
+                                className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium ${
+                                  c.isInProgress
+                                    ? "border-[#2F6BFF]/35 bg-[#2F6BFF]/[0.14] text-[#6B9BFF]"
+                                    : "border-[#1D263B] bg-[#151C2C] text-zinc-400"
+                                }`}
+                              >
+                                {c.isInProgress ? "Đang học" : "Chưa học"}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
                     {/* Compact Grid 2 cột: Môn đã hoàn thành */}
                     {block.passedCourses.length === 0 ? (
                       <div className="text-zinc-500 text-center py-2.5 text-xs italic">
@@ -707,7 +763,13 @@ export const GraduationAuditCard: React.FC<GraduationAuditCardProps> = ({
                     )}
 
                     {/* Môn tự chọn chưa học - Collapsible View */}
-                    {block.remainingElectives && block.remainingElectives.length > 0 && (
+                    {block.remainingElectives && block.remainingElectives.length > 0 && (() => {
+                      const defaultOpen =
+                        block.passedCourses.length === 0 &&
+                        (!block.missingCompulsoryCourses || block.missingCompulsoryCourses.length === 0);
+                      const isElectivesOpen = openElectiveBlocks[block.knowledgeBlock] ?? defaultOpen;
+                      const isGradBlock = block.blockNameDisplay === "Tốt nghiệp";
+                      return (
                       <div className="border-t border-[#1D263B] pt-2">
                         <button
                           type="button"
@@ -717,17 +779,19 @@ export const GraduationAuditCard: React.FC<GraduationAuditCardProps> = ({
                           <div className="flex items-center gap-1.5">
                             <BookOpen className="h-3.5 w-3.5 text-[#6B9BFF]" />
                             <span className="font-medium">
-                              Môn tự chọn chưa học ({block.remainingElectives.length} môn)
+                              {isGradBlock
+                                ? `Lựa chọn tốt nghiệp & môn chuyên đề (${block.remainingElectives.length} học phần)`
+                                : `Môn tự chọn chưa học (${block.remainingElectives.length} môn)`}
                             </span>
                           </div>
-                          {openElectiveBlocks[block.knowledgeBlock] ? (
+                          {isElectivesOpen ? (
                             <ChevronUp className="h-3.5 w-3.5 text-zinc-400" />
                           ) : (
                             <ChevronDown className="h-3.5 w-3.5 text-zinc-400" />
                           )}
                         </button>
 
-                        {openElectiveBlocks[block.knowledgeBlock] && (
+                        {isElectivesOpen && (
                           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5 mt-2 pt-1">
                             {block.remainingElectives.map((e) => (
                               <div
@@ -742,15 +806,23 @@ export const GraduationAuditCard: React.FC<GraduationAuditCardProps> = ({
                                     {e.courseName}
                                   </span>
                                 </div>
-                                <span className="text-[10px] text-zinc-500 shrink-0 font-medium ml-1">
-                                  {e.credits} TC
-                                </span>
+                                <div className="flex shrink-0 items-center gap-1.5 ml-1">
+                                  {e.isInProgress && (
+                                    <span className="rounded border border-[#2F6BFF]/35 bg-[#2F6BFF]/[0.14] px-1 py-0.2 text-[9px] font-medium text-[#6B9BFF]">
+                                      Đang học
+                                    </span>
+                                  )}
+                                  <span className="text-[10px] text-zinc-500 font-medium">
+                                    {e.credits} TC
+                                  </span>
+                                </div>
                               </div>
                             ))}
                           </div>
                         )}
                       </div>
-                    )}
+                      );
+                    })()}
                   </div>
                 )}
               </div>

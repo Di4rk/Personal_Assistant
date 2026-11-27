@@ -292,6 +292,7 @@ export interface AuditCourseItem {
   semesterId: string;
   isCompulsory: boolean;
   knowledgeBlock: string;
+  isInProgress?: boolean;
 }
 
 export interface BlockAuditResult {
@@ -302,6 +303,7 @@ export interface BlockAuditResult {
   isFulfilled: boolean;
   compulsoryFulfilled: boolean;
   missingCompulsoryCodes: string[];
+  missingCompulsoryCourses?: AuditCourseItem[];
   passedCourses: AuditCourseItem[];
   remainingElectives?: AuditCourseItem[];
   overflowCredits: number;
