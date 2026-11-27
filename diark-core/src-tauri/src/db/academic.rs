@@ -1017,6 +1017,50 @@ pub fn update_drl_from_portal(
     Ok(updated_count)
 }
 
+/// Cập nhật điểm rèn luyện live từ `https://drl.uit.edu.vn/` vào cả `academic_macro_metrics`
+/// và `academic_drl`. Dùng điểm đã chuẩn hóa tối đa 100 (`capped_score`).
+pub fn upsert_drl_from_site(
+    conn: &mut Connection,
+    entries: &[crate::modules::academic::drl_scraper::DrlSemesterScore],
+) -> SqlResult<usize> {
+    let tx = conn.transaction()?;
+    tx.execute(
+        "CREATE TABLE IF NOT EXISTS academic_drl (
+            semester TEXT PRIMARY KEY,
+            score INTEGER NOT NULL,
+            grade_text TEXT NOT NULL DEFAULT '',
+            updated_at INTEGER NOT NULL
+        )",
+        [],
+    )?;
+
+    let now = chrono::Utc::now().timestamp();
+    let mut updated = 0usize;
+
+    for entry in entries {
+        let rows = tx.execute(
+            "UPDATE academic_macro_metrics
+             SET drl_score = ?1, drl = ?1, updated_at = ?2
+             WHERE semester_id = ?3",
+            params![entry.capped_score, now, entry.semester_id],
+        )?;
+        updated += rows;
+
+        tx.execute(
+            "INSERT INTO academic_drl (semester, score, grade_text, updated_at)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(semester) DO UPDATE SET
+               score = excluded.score,
+               grade_text = excluded.grade_text,
+               updated_at = excluded.updated_at",
+            params![entry.semester_id, entry.capped_score, entry.grade_text, now],
+        )?;
+    }
+
+    tx.commit()?;
+    Ok(updated)
+}
+
 /// Xóa sổ toàn bộ mock courses cũ trong SQLite và nạp bộ dữ liệu chuẩn xác 100%
 /// theo đặc tả của UIT (HK1: 6 môn - 18 TC, HK2: 7 môn - 24 TC).
 pub fn purge_and_seed_canonical_data(conn: &mut Connection) -> Result<(), rusqlite::Error> {

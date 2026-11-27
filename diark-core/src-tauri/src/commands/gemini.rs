@@ -16,15 +16,20 @@ pub fn save_gemini_config(
     db: State<'_, SharedDb>,
     api_key: String,
     model: String,
+    base_url: Option<String>,
 ) -> Result<(), String> {
     let mut conn = db.lock().map_err(|e| format!("DB lock error: {e}"))?;
-    gemini::update_gemini_config(&mut conn, &api_key, &model)
+    gemini::update_gemini_config(&mut conn, &api_key, &model, base_url.as_deref().unwrap_or(""))
         .map_err(|e| format!("Save gemini config error: {e}"))
 }
 
 #[tauri::command]
-pub async fn test_gemini_key(api_key: String, model: String) -> Result<String, String> {
-    gemini::test_gemini_api_key(&api_key, &model).await
+pub async fn test_gemini_key(
+    api_key: String,
+    model: String,
+    base_url: Option<String>,
+) -> Result<String, String> {
+    gemini::test_gemini_api_key(&api_key, &model, base_url.as_deref().unwrap_or("")).await
 }
 
 #[tauri::command]
@@ -36,11 +41,11 @@ pub async fn trigger_socratic_debug(
     let config = {
         let conn = db.lock().map_err(|e| format!("DB lock error: {e}"))?;
         gemini::query_gemini_config(&conn)
-            .map_err(|e| format!("Không thể đọc cấu hình Gemini: {e}"))?
+            .map_err(|e| format!("Không thể đọc cấu hình AI: {e}"))?
     };
 
-    if config.api_key.trim().is_empty() {
-        return Err("Chưa cấu hình Gemini API Key. Vui lòng nhập API Key cá nhân trong phần Cài đặt.".to_string());
+    if config.api_key.trim().is_empty() && !gemini::is_local_endpoint(&config.base_url) {
+        return Err("Chưa cấu hình AI API Key. Vui lòng nhập API Key trong phần Cài đặt.".to_string());
     }
 
     let prompt = gemini::build_socratic_prompt(&req);
@@ -48,6 +53,7 @@ pub async fn trigger_socratic_debug(
         app,
         config.api_key,
         config.model,
+        config.base_url,
         req.session_id,
         prompt,
     )
@@ -62,16 +68,17 @@ pub async fn extract_moodle_tasks(
     let config = {
         let conn = db.lock().map_err(|e| format!("DB lock error: {e}"))?;
         gemini::query_gemini_config(&conn)
-            .map_err(|e| format!("Không thể đọc cấu hình Gemini: {e}"))?
+            .map_err(|e| format!("Không thể đọc cấu hình AI: {e}"))?
     };
 
-    if config.api_key.trim().is_empty() {
-        return Err("Chưa cấu hình Gemini API Key. Vui lòng nhập API Key trong phần Cài đặt để bóc tách bài viết.".to_string());
+    if config.api_key.trim().is_empty() && !gemini::is_local_endpoint(&config.base_url) {
+        return Err("Chưa cấu hình AI API Key. Vui lòng nhập API Key trong phần Cài đặt để bóc tách bài viết.".to_string());
     }
 
     gemini::extract_tasks_with_gemini(
         &config.api_key,
         &config.model,
+        &config.base_url,
         &req.prose_text,
         req.course_hint.as_deref(),
     )
@@ -120,15 +127,23 @@ mod tests {
         // 1. Initial query: defaults
         let cfg = gemini::query_gemini_config(&conn).unwrap();
         assert_eq!(cfg.api_key, "");
-        assert_eq!(cfg.model, "gemini-1.5-flash");
+        assert_eq!(cfg.model, "gemini-2.5-flash");
+        assert_eq!(cfg.base_url, "");
 
         // 2. Save config
-        gemini::update_gemini_config(&mut conn, "AIzaSyFakeKey123", "gemini-1.5-pro").unwrap();
+        gemini::update_gemini_config(
+            &mut conn,
+            "AIzaSyFakeKey123",
+            "gpt-4o-mini",
+            "https://api.openai.com/v1",
+        )
+        .unwrap();
 
         // 3. Query updated
         let updated = gemini::query_gemini_config(&conn).unwrap();
         assert_eq!(updated.api_key, "AIzaSyFakeKey123");
-        assert_eq!(updated.model, "gemini-1.5-pro");
+        assert_eq!(updated.model, "gpt-4o-mini");
+        assert_eq!(updated.base_url, "https://api.openai.com/v1");
     }
 
     #[test]

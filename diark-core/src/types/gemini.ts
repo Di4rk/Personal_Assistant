@@ -3,6 +3,7 @@
 export interface GeminiConfig {
   api_key: string;
   model: string;
+  base_url?: string;
 }
 
 export interface GeminiStreamChunk {

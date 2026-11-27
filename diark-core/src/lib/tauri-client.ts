@@ -843,15 +843,23 @@ export async function getGeminiConfig(): Promise<GeminiConfig> {
 /**
  * Lưu API Key và Model của Gemini vào SQLite settings.
  */
-export async function saveGeminiConfig(apiKey: string, model: string): Promise<void> {
-  return invoke<void>("save_gemini_config", { apiKey, model });
+export async function saveGeminiConfig(
+  apiKey: string,
+  model: string,
+  baseUrl = ""
+): Promise<void> {
+  return invoke<void>("save_gemini_config", { apiKey, model, baseUrl });
 }
 
 /**
- * Ping test Gemini API key với một câu hỏi siêu ngắn để kiểm tra xác thực.
+ * Ping test API key và endpoint AI với một câu hỏi siêu ngắn để kiểm tra xác thực.
  */
-export async function testGeminiKey(apiKey: string, model: string): Promise<string> {
-  return invoke<string>("test_gemini_key", { apiKey, model });
+export async function testGeminiKey(
+  apiKey: string,
+  model: string,
+  baseUrl = ""
+): Promise<string> {
+  return invoke<string>("test_gemini_key", { apiKey, model, baseUrl });
 }
 
 /**
@@ -1064,5 +1072,18 @@ export async function saveVaultNote(
 
 export async function deleteVaultNote(noteId: string): Promise<void> {
   return invoke<void>("delete_vault_note", { noteId });
+}
+
+export interface DrlSemesterScore {
+  semester_id: string;
+  semester_label: string;
+  option_value: string;
+  raw_score: number;
+  capped_score: number;
+  grade_text: string;
+}
+
+export async function syncDrlFromUit(): Promise<DrlSemesterScore[]> {
+  return invoke<DrlSemesterScore[]>("sync_drl_from_uit");
 }
 

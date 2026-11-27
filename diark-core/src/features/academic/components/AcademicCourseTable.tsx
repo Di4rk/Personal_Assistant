@@ -18,6 +18,7 @@ export interface AcademicCourseTableProps {
   currentMacro?: AcademicMacroMetricSSOT | null;
   currentSemester?: AcademicOverviewDto | null;
   onArchiveClick?: () => void;
+  semesterKey?: string;
   className?: string;
 }
 
@@ -59,8 +60,8 @@ export function resolveCourseBlockBadge(categoryRaw?: string | null, courseCode?
   if (norm === "csn" || norm.includes("co so") || norm === "co_so_nganh") {
     return {
       label: "Cơ sở ngành",
-      badgeClass: "bg-sky-950/60 text-sky-400 border border-sky-800/40",
-      dotClass: "bg-sky-400",
+      badgeClass: "bg-[#2F6BFF]/[0.16] text-[#6B9BFF] border border-[#2F6BFF]/30",
+      dotClass: "bg-[#6B9BFF]",
     };
   }
 
@@ -68,7 +69,7 @@ export function resolveCourseBlockBadge(categoryRaw?: string | null, courseCode?
   if (norm === "cn" || norm.includes("chuyen") || norm === "chuyen_nganh") {
     return {
       label: "Chuyên ngành",
-      badgeClass: "bg-zinc-800 text-zinc-200 border border-zinc-700",
+      badgeClass: "bg-[#151C2C] text-zinc-200 border border-[#1D263B]",
       dotClass: "bg-zinc-200",
     };
   }
@@ -86,7 +87,7 @@ export function resolveCourseBlockBadge(categoryRaw?: string | null, courseCode?
   if (norm.includes("tu do") || norm.includes("tu_do")) {
     return {
       label: "Tự chọn tự do",
-      badgeClass: "bg-zinc-800/80 text-zinc-300 border border-zinc-700/60",
+      badgeClass: "bg-[#151C2C] text-zinc-300 border border-[#1D263B]",
       dotClass: "bg-zinc-400",
     };
   }
@@ -96,14 +97,14 @@ export function resolveCourseBlockBadge(categoryRaw?: string | null, courseCode?
   if (fallbackCat === "foundational") {
     return {
       label: "Cơ sở ngành",
-      badgeClass: "bg-sky-950/60 text-sky-400 border border-sky-800/40",
-      dotClass: "bg-sky-400",
+      badgeClass: "bg-[#2F6BFF]/[0.16] text-[#6B9BFF] border border-[#2F6BFF]/30",
+      dotClass: "bg-[#6B9BFF]",
     };
   }
   if (fallbackCat === "specialized") {
     return {
       label: "Chuyên ngành",
-      badgeClass: "bg-zinc-800 text-zinc-200 border border-zinc-700",
+      badgeClass: "bg-[#151C2C] text-zinc-200 border border-[#1D263B]",
       dotClass: "bg-zinc-200",
     };
   }
@@ -127,6 +128,7 @@ export const AcademicCourseTable: React.FC<AcademicCourseTableProps> = ({
   currentMacro = null,
   currentSemester = null,
   onArchiveClick,
+  semesterKey,
   className = "",
 }) => {
   const formatScore = (val: number | null | undefined): string => {
@@ -181,10 +183,10 @@ export const AcademicCourseTable: React.FC<AcademicCourseTableProps> = ({
 
   return (
     <div
-      className={`rounded-xl bg-zinc-900 border border-zinc-800 p-4 overflow-hidden ${className}`}
+      className={`overflow-hidden rounded-xl border border-[#1D263B] bg-[#0F1420] p-4 ${className}`}
     >
       {/* Table Header with Semester Metrics */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800 pb-3 mb-3">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3 border-b border-[#1D263B] pb-3">
         <div>
           <h3 className="text-sm font-semibold text-zinc-200">
             {currentMacro
@@ -194,59 +196,67 @@ export const AcademicCourseTable: React.FC<AcademicCourseTableProps> = ({
               : "Chi Tiết Môn Học"}
           </h3>
           {isOngoingSemester ? (
-            <p className="text-xs text-zinc-400 mt-1">
-              <span className="font-semibold text-amber-400">Đang học</span>
+            <p className="text-xs text-[#71717A] mt-1">
+              <span className="font-semibold text-[#6B9BFF]">Đang học</span>
               {" · "}
-              <span className="font-mono text-zinc-300 font-bold">
+              <span className="font-mono text-[#F4F4F5] font-bold">
                 {currentMacro && currentMacro.termCredits > 0
                   ? currentMacro.termCredits
                   : totalCreditsInTable}{" "}
                 TC
               </span>
+              {currentMacro && currentMacro.drlScore > 0 && (
+                <>
+                  {" · ĐRL tạm tính: "}
+                  <span className="font-mono text-[#F4F4F5] font-bold">
+                    {currentMacro.drlScore}
+                  </span>
+                </>
+              )}
               {" · "}
-              <span className="text-zinc-500">Chưa có điểm tổng kết cuối kỳ</span>
+              <span className="text-[#71717A]">Chưa có điểm tổng kết cuối kỳ</span>
             </p>
           ) : currentMacro ? (
-            <p className="text-xs text-zinc-400 mt-1">
+            <p className="text-xs text-[#71717A] mt-1">
               GPA:{" "}
-              <span className="font-mono text-emerald-400 font-bold">
+              <span className="font-mono text-[#F4F4F5] font-bold">
                 {currentMacro.termGpa.toFixed(2)}
               </span>{" "}
-              <span className="text-zinc-400">({gpaClassification})</span>{" "}
+              <span className="text-[#71717A]">({gpaClassification})</span>{" "}
               · ĐRL:{" "}
-              <span className="font-mono text-amber-400 font-bold">
+              <span className="font-mono text-[#F4F4F5] font-bold">
                 {currentMacro.drlScore > 0 ? currentMacro.drlScore : "Chưa có ĐRL"}
               </span>{" "}
               · Thi đua:{" "}
-              <span className="font-semibold text-emerald-400">
+              <span className="font-semibold text-[#F4F4F5]">
                 {compositeReward}
               </span>{" "}
               · Tín chỉ:{" "}
-              <span className="font-mono text-zinc-300 font-bold">
+              <span className="font-mono text-[#F4F4F5] font-bold">
                 {currentMacro.termCredits} TC
               </span>
             </p>
           ) : currentSemester ? (
-            <p className="text-xs text-zinc-400 mt-1">
+            <p className="text-xs text-[#71717A] mt-1">
               GPA:{" "}
-              <span className="font-mono text-emerald-400 font-bold">
+              <span className="font-mono text-[#F4F4F5] font-bold">
                 {currentSemester.actualGpa10
                   ? currentSemester.actualGpa10.toFixed(2)
                   : "—"}
               </span>{" "}
               {currentSemester.actualGpa10 && (
-                <span className="text-zinc-400">({gpaClassification})</span>
+                <span className="text-[#71717A]">({gpaClassification})</span>
               )}{" "}
               · ĐRL:{" "}
-              <span className="font-mono text-amber-400 font-bold">
+              <span className="font-mono text-[#F4F4F5] font-bold">
                 {currentSemester.actualDrl > 0 ? currentSemester.actualDrl : "Chưa có ĐRL"}
               </span>{" "}
               · Thi đua:{" "}
-              <span className="font-semibold text-emerald-400">
+              <span className="font-semibold text-[#F4F4F5]">
                 {compositeReward}
               </span>{" "}
               · Tín chỉ:{" "}
-              <span className="font-mono text-zinc-300 font-bold">
+              <span className="font-mono text-[#F4F4F5] font-bold">
                 {currentSemester.passedCredits} / {currentSemester.totalCredits} TC
               </span>
             </p>
@@ -257,18 +267,14 @@ export const AcademicCourseTable: React.FC<AcademicCourseTableProps> = ({
             <button
               type="button"
               onClick={onArchiveClick}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all cursor-pointer ${
-                currentSemester?.isCompleted
-                  ? "bg-zinc-800/80 hover:bg-zinc-800 text-zinc-300 border-zinc-700"
-                  : "bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border-amber-500/30 shadow-sm"
-              }`}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-[#1D263B] bg-[#080B12] hover:bg-[#151C2C] text-zinc-300 hover:text-zinc-100 transition-colors cursor-pointer"
               title={
                 currentSemester?.isCompleted
                   ? "Học kỳ này đã được chốt. Bấm để xem lại."
                   : "Lưu kết quả học kỳ này vào kho lưu trữ và chốt điểm tổng kết"
               }
             >
-              <FolderArchive className="w-3.5 h-3.5 text-amber-400" />
+              <FolderArchive className="w-3.5 h-3.5 text-zinc-400" />
               <span>
                 {currentSemester?.isCompleted
                   ? "Đã đóng kỳ (Xem)"
@@ -292,9 +298,12 @@ export const AcademicCourseTable: React.FC<AcademicCourseTableProps> = ({
           Học kỳ này chưa có môn học nào hoặc chưa được chọn.
         </div>
       ) : (
-        <div className="overflow-x-auto -mx-4 px-4">
+        <div
+          key={semesterKey ?? currentMacro?.semesterId ?? "default"}
+          className="uit-table-fade-in overflow-x-auto -mx-4 px-4"
+        >
           <table className="w-full text-left text-xs text-zinc-300">
-            <thead className="border-b border-zinc-800 bg-zinc-950/80 text-[11px] font-medium text-zinc-400">
+            <thead className="border-b border-[#1D263B] bg-[#080B12] text-[11px] font-medium text-zinc-400">
               <tr>
                 <th className="py-2.5 pr-3 pl-2">Môn học</th>
                 <th className="py-2.5 px-2 text-right w-12">TC</th>
@@ -306,7 +315,7 @@ export const AcademicCourseTable: React.FC<AcademicCourseTableProps> = ({
                 <th className="py-2.5 pl-2 pr-2 text-center w-20">Kết quả</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-zinc-800/60 font-sans">
+            <tbody className="divide-y divide-[#1D263B]/60 font-sans">
               {courses.map((course) => {
                 const blockInfo = resolveCourseBlockBadge(course.category, course.courseCode);
 
@@ -349,18 +358,13 @@ export const AcademicCourseTable: React.FC<AcademicCourseTableProps> = ({
                 return (
                   <tr
                     key={course.id}
-                    className="hover:bg-zinc-800/40 transition-colors"
+                    className="group transition-colors duration-[120ms] hover:bg-[#151C2C]"
                   >
                     <td className="py-2.5 pr-3 pl-2 min-w-0">
                       <div className="font-medium text-zinc-100 leading-snug">
                         {course.courseName}
                       </div>
                       <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-zinc-500">
-                        <span
-                          className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${blockInfo.dotClass}`}
-                          title={blockInfo.label}
-                          aria-label={blockInfo.label}
-                        />
                         <span className="font-mono">{course.courseCode}</span>
                         <span className="text-zinc-600">·</span>
                         <span>{blockInfo.label}</span>
@@ -386,7 +390,7 @@ export const AcademicCourseTable: React.FC<AcademicCourseTableProps> = ({
                         <span className="font-semibold text-zinc-500">—</span>
                       ) : (
                         <>
-                          <span className="font-semibold text-zinc-100">
+                          <span className="font-semibold text-zinc-200 transition-colors duration-[120ms] group-hover:text-white">
                             {formatScore(tk10)}
                           </span>
                           {(gradeChar !== "—" || (he4 !== null && he4 !== undefined && !isNaN(he4))) && (
@@ -399,20 +403,20 @@ export const AcademicCourseTable: React.FC<AcademicCourseTableProps> = ({
                     </td>
                     <td className="py-2.5 pl-2 pr-2 text-center whitespace-nowrap">
                       {isExempt ? (
-                        <span className="inline-flex items-center rounded border border-zinc-700 bg-zinc-800 px-2 py-0.5 text-[11px] font-medium text-zinc-300">
+                        <span className="text-[11px] font-medium text-zinc-400">
                           Miễn
                         </span>
                       ) : isUngraded ? (
-                        <span className="inline-flex items-center rounded border border-zinc-700 bg-zinc-800 px-2 py-0.5 text-[11px] font-medium text-zinc-300">
+                        <span className="text-[11px] font-medium text-[#6B9BFF]">
                           Đang học
                         </span>
                       ) : isPassed ? (
-                        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-400 bg-emerald-950/40 px-2 py-0.5 rounded border border-emerald-800/40">
+                        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-400/75">
                           <CheckCircle2 className="w-3 h-3" />
                           Đạt
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-rose-400 bg-rose-950/40 px-2 py-0.5 rounded border border-rose-800/40">
+                        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-rose-400/90">
                           <XCircle className="w-3 h-3" />
                           Nợ
                         </span>

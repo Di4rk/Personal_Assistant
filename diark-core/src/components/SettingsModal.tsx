@@ -1,28 +1,34 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useSettingsStore } from '../stores/useSettingsStore';
 import { usePrivacyStore } from '../stores/usePrivacyStore';
 import {
-  getUserProfile,
-  saveUserProfile,
+  addGoogleCalendar,
+  connectGoogleCalendarOAuth,
+  disconnectGoogleCalendarOAuth,
   getCfHandle,
-  setCfHandle,
+  getGeminiConfig,
+  getGoogleOAuthStatus,
+  getSsoCredentialsStatus,
   getStudentProfile,
   getSystemStorageStats,
-  launchPortalSsoSync,
-  launchWecodeSsoSync,
-  getGeminiConfig,
-  saveGeminiConfig,
-  testGeminiKey,
+  getUserProfile,
+  listGoogleCalendars,
   openExternalUrl,
-  getSsoCredentialsStatus,
-  saveSsoCredentials,
-  clearSsoCredentials,
+  removeGoogleCalendar,
+  saveGeminiConfig,
+  saveGoogleOAuthClientConfig,
+  saveUserProfile,
+  setCfHandle,
+  syncGoogleCalendars,
+  testGeminiKey,
+  toggleGoogleCalendar,
   StudentProfilePayload,
   SystemStorageStats,
 } from '../lib/tauri-client';
-import { listInstalledPlugins, togglePlugin } from '../lib/plugin-sdk';
-import { PluginMetaDto } from '../types/plugin';
+import type { GoogleCalendarConfig, GoogleOAuthStatus } from '../types/portal-extra';
+import type { UpdateInfo, UpdateStatus } from '../hooks/useAutoUpdater';
 import { APP_VERSION } from '../constants/app';
+import { formatTimeHm } from '../utils/scheduleTime';
 import {
   User,
   Blocks,
@@ -32,8 +38,6 @@ import {
   Shield,
   Check,
   Loader2,
-  GraduationCap,
-  Code,
   ExternalLink,
   Key,
   Eye,
@@ -45,6 +49,14 @@ import {
   Keyboard,
   RotateCcw,
   AlertTriangle,
+  Calendar,
+  ChevronDown,
+  Lock,
+  LogIn,
+  LogOut,
+  Plus,
+  Settings2,
+  Trash2,
 } from 'lucide-react';
 import { listen } from '@tauri-apps/api/event';
 import {
@@ -57,23 +69,93 @@ import { ShortcutRecorder } from './ShortcutRecorder';
 
 interface SettingsModalProps {
   onResetGenesis?: () => void;
+  onOpenSsoLogin?: () => void;
+  onLogout?: () => void;
+  updateStatus?: UpdateStatus;
+  updateInfo?: UpdateInfo | null;
+  updateError?: string | null;
+  isCheckingUpdate?: boolean;
+  autoCheckUpdates?: boolean;
+  lastCheckedAt?: number | null;
+  onToggleAutoCheckUpdates?: (enabled: boolean) => void;
+  onCheckUpdates?: () => void;
+  onInstallUpdate?: () => void;
 }
 
-export const PRESET_GEMINI_MODELS = [
-  { id: "gemini-2.5-flash", name: "gemini-2.5-flash (Khuyên dùng — Thế hệ mới, cực nhanh & thông minh)" },
-  { id: "gemini-2.5-pro", name: "gemini-2.5-pro (Mạnh mẽ — Suy luận chuyên sâu, giải thuật khó)" },
-  { id: "gemini-2.5-flash-lite", name: "gemini-2.5-flash-lite (Hạn mức cao 10 RPM / 250K TPM)" },
-  { id: "gemini-2.0-flash", name: "gemini-2.0-flash (Thế hệ 2.0 chuẩn)" },
-  { id: "gemini-3-flash", name: "gemini-3-flash (Thế hệ 3 Preview)" },
-  { id: "gemini-3.1-flash-lite", name: "gemini-3.1-flash-lite (Hạn mức cao 15 RPM / 500 RPD)" },
-  { id: "gemini-3.5-flash", name: "gemini-3.5-flash (Thế hệ 3.5 Flash)" },
-  { id: "gemini-3.7-flash", name: "gemini-3.7-flash (Thế hệ 3.7 Thinking)" },
-  { id: "gemini-3.8-flash", name: "gemini-3.8-flash (Thế hệ 3.8 Flash)" },
-  { id: "gemini-1.5-flash", name: "gemini-1.5-flash (Legacy — Ổn định, hạn mức cao)" },
-  { id: "gemini-1.5-pro", name: "gemini-1.5-pro (Legacy Pro — Phân tích chi tiết)" },
-];
+const CALENDAR_PALETTE = ['#2F6BFF', '#6B9BFF', '#94a3b8', '#f87171', '#e4e4e7'];
 
-export const SettingsModal: React.FC<SettingsModalProps> = () => {
+const AI_PROVIDER_PRESETS = [
+  { id: 'gemini', label: 'Google Gemini', baseUrl: '', model: 'gemini-2.5-flash' },
+  { id: 'openai', label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
+  { id: 'openrouter', label: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', model: 'google/gemini-2.5-flash' },
+  { id: 'deepseek', label: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-chat' },
+  { id: 'groq', label: 'Groq', baseUrl: 'https://api.groq.com/openai/v1', model: 'llama-3.3-70b-versatile' },
+  { id: 'ollama', label: 'Ollama Local', baseUrl: 'http://localhost:11434/v1', model: 'llama3.2' },
+] as const;
+
+interface UitToggleProps {
+  checked: boolean;
+  onChange: () => void;
+  disabled?: boolean;
+  loading?: boolean;
+  ariaLabel: string;
+}
+
+const UitToggle: React.FC<UitToggleProps> = ({
+  checked,
+  onChange,
+  disabled = false,
+  loading = false,
+  ariaLabel,
+}) => (
+  <button
+    type="button"
+    role="switch"
+    aria-checked={checked}
+    aria-label={ariaLabel}
+    onClick={onChange}
+    disabled={disabled || loading}
+    className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors duration-150 ${
+      disabled ? 'cursor-not-allowed opacity-40' : 'cursor-pointer'
+    } ${checked ? 'bg-[#2F6BFF]' : 'bg-[#1D263B]'}`}
+  >
+    <span
+      className={`inline-flex h-3.5 w-3.5 items-center justify-center rounded-full bg-white transition-transform duration-150 ${
+        checked ? 'translate-x-[18px]' : 'translate-x-[3px]'
+      }`}
+    >
+      {loading && <Loader2 className="h-2.5 w-2.5 animate-spin text-[#080B12]" />}
+    </span>
+  </button>
+);
+
+function isLocalBaseUrl(url: string): boolean {
+  const lower = url.trim().toLowerCase();
+  return lower.includes('localhost') || lower.includes('127.0.0.1') || lower.includes('0.0.0.0');
+}
+
+function formatLastCheckedTime(ts: number): string {
+  const d = new Date(ts);
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mo = String(d.getMonth() + 1).padStart(2, '0');
+  return `${hh}:${mm} ${dd}/${mo}`;
+}
+
+export const SettingsModal: React.FC<SettingsModalProps> = ({
+  onOpenSsoLogin,
+  onLogout,
+  updateStatus = 'idle',
+  updateInfo = null,
+  updateError = null,
+  isCheckingUpdate = false,
+  autoCheckUpdates = true,
+  lastCheckedAt = null,
+  onToggleAutoCheckUpdates,
+  onCheckUpdates,
+  onInstallUpdate,
+}) => {
   const { isOpen, activeTab, closeSettings, setActiveTab } = useSettingsStore();
   const { isDemoMode, toggleDemoMode } = usePrivacyStore();
 
@@ -86,32 +168,38 @@ export const SettingsModal: React.FC<SettingsModalProps> = () => {
   const [cfSavedSuccess, setCfSavedSuccess] = useState(false);
   const [studentProfile, setStudentProfile] = useState<StudentProfilePayload | null>(null);
 
-  // Tab: Plugins state
-  const [plugins, setPlugins] = useState<PluginMetaDto[]>([]);
-  const [loadingPlugins, setLoadingPlugins] = useState(false);
+  // Logout 2-step confirm state
+  const [confirmLogout, setConfirmLogout] = useState(false);
 
-  // Tab: Services state
-  const [syncingPortal, setSyncingPortal] = useState(false);
-  const [syncingWecode, setSyncingWecode] = useState(false);
+  // Tab: Kết nối & Đồng bộ state
   const [ssoUsername, setSsoUsername] = useState('');
-  const [ssoPassword, setSsoPassword] = useState('');
   const [ssoHasPassword, setSsoHasPassword] = useState(false);
-  const [ssoAutoLogin, setSsoAutoLogin] = useState(true);
-  const [isSavingSso, setIsSavingSso] = useState(false);
-  const [ssoFeedback, setSsoFeedback] = useState<string | null>(null);
+  const [calendars, setCalendars] = useState<GoogleCalendarConfig[]>([]);
+  const [oauthStatus, setOauthStatus] = useState<GoogleOAuthStatus | null>(null);
+  const [isConnectingOAuth, setIsConnectingOAuth] = useState(false);
+  const [showOAuthSetup, setShowOAuthSetup] = useState(false);
+  const [oauthClientId, setOauthClientId] = useState('');
+  const [oauthClientSecret, setOauthClientSecret] = useState('');
+  const [isSavingOAuthConfig, setIsSavingOAuthConfig] = useState(false);
+  const [showIcsAdvanced, setShowIcsAdvanced] = useState(false);
+  const [newIcsName, setNewIcsName] = useState('');
+  const [newIcsUrl, setNewIcsUrl] = useState('');
+  const [newIcsColor, setNewIcsColor] = useState(CALENDAR_PALETTE[0]);
+  const [isAddingIcs, setIsAddingIcs] = useState(false);
+  const [calendarFeedback, setCalendarFeedback] = useState<{ ok: boolean; text: string } | null>(null);
 
   // Tab: System stats state
   const [storageStats, setStorageStats] = useState<SystemStorageStats | null>(null);
   const [loadingStats, setLoadingStats] = useState(false);
 
-  // Tab: AI Copilot (BYOK) state
-  const [geminiApiKey, setGeminiApiKey] = useState('');
-  const [geminiModel, setGeminiModel] = useState('gemini-2.5-flash');
-  const [isCustomModel, setIsCustomModel] = useState(false);
-  const [isSavingGemini, setIsSavingGemini] = useState(false);
-  const [geminiSavedSuccess, setGeminiSavedSuccess] = useState(false);
-  const [isTestingGemini, setIsTestingGemini] = useState(false);
-  const [testGeminiResult, setTestGeminiResult] = useState<{ success: boolean; message: string } | null>(null);
+  // Tab: AI API Config (Universal BYOK) state
+  const [aiBaseUrl, setAiBaseUrl] = useState('');
+  const [aiApiKey, setAiApiKey] = useState('');
+  const [aiModel, setAiModel] = useState('gemini-2.5-flash');
+  const [isSavingAi, setIsSavingAi] = useState(false);
+  const [aiSavedSuccess, setAiSavedSuccess] = useState(false);
+  const [isTestingAi, setIsTestingAi] = useState(false);
+  const [testAiResult, setTestAiResult] = useState<{ success: boolean; message: string } | null>(null);
   const [showApiKey, setShowApiKey] = useState(false);
 
   // Tab: System preferences (Dynamic Hotkey & Autostart)
@@ -124,7 +212,30 @@ export const SettingsModal: React.FC<SettingsModalProps> = () => {
   const [isResettingShortcut, setIsResettingShortcut] = useState<boolean>(false);
   const [systemPrefError, setSystemPrefError] = useState<string | null>(null);
 
-  // Listen to Escape key to close
+  const loadCalendarConnections = useCallback(async () => {
+    const [calsRes, oauthRes] = await Promise.allSettled([
+      listGoogleCalendars(),
+      getGoogleOAuthStatus(),
+    ]);
+    if (calsRes.status === 'fulfilled') setCalendars(calsRes.value);
+    if (oauthRes.status === 'fulfilled') setOauthStatus(oauthRes.value);
+  }, []);
+
+  const refreshSsoSummary = useCallback(() => {
+    getSsoCredentialsStatus()
+      .then((status) => {
+        setSsoUsername(status.username || '');
+        setSsoHasPassword(status.has_password);
+      })
+      .catch((e) => console.error('Failed to get SSO status:', e));
+  }, []);
+
+  useEffect(() => {
+    if (isOpen && activeTab === 'plugins') {
+      setActiveTab('profile');
+    }
+  }, [isOpen, activeTab, setActiveTab]);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && isOpen) {
@@ -135,11 +246,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, closeSettings]);
 
-  // Load data when modal opens or tab changes
   useEffect(() => {
     if (!isOpen) return;
 
-    // Load basic profile
+    setConfirmLogout(false);
+    setCalendarFeedback(null);
+    void loadCalendarConnections();
+    refreshSsoSummary();
+
     getUserProfile()
       .then((p) => setNickname(p.nickname || 'Diark'))
       .catch((e) => console.error('Failed to get user profile:', e));
@@ -152,32 +266,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = () => {
       .then((sp) => setStudentProfile(sp))
       .catch((e) => console.error('Failed to get student profile:', e));
 
-    // Load plugins
-    setLoadingPlugins(true);
-    listInstalledPlugins()
-      .then((pl) => setPlugins(pl))
-      .catch((e) => console.error('Failed to list plugins:', e))
-      .finally(() => setLoadingPlugins(false));
-
-    // Load system storage stats
     setLoadingStats(true);
     getSystemStorageStats()
       .then((s) => setStorageStats(s))
       .catch((e) => console.error('Failed to get storage stats:', e))
       .finally(() => setLoadingStats(false));
 
-    // Load Gemini Copilot config
     getGeminiConfig()
       .then((cfg) => {
-        setGeminiApiKey(cfg.api_key || '');
-        const targetModel = cfg.model || 'gemini-2.5-flash';
-        setGeminiModel(targetModel);
-        const isPreset = PRESET_GEMINI_MODELS.some((m) => m.id === targetModel);
-        setIsCustomModel(!isPreset);
+        setAiBaseUrl(cfg.base_url || '');
+        setAiApiKey(cfg.api_key || '');
+        setAiModel(cfg.model || 'gemini-2.5-flash');
       })
-      .catch((e) => console.error('Failed to get Gemini config:', e));
+      .catch((e) => console.error('Failed to get AI config:', e));
 
-    // Load System Preferences (Autostart & Hotkey)
     getSystemPreferences()
       .then((prefs) => {
         setAutostartEnabled(prefs.autostartEnabled);
@@ -186,25 +288,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = () => {
         setHotkeyActive(prefs.hotkeyActive);
       })
       .catch((e) => console.error('Failed to get system preferences:', e));
+  }, [isOpen, loadCalendarConnections, refreshSsoSummary]);
 
-    getSsoCredentialsStatus()
-      .then((status) => {
-        setSsoUsername(status.username || '');
-        setSsoHasPassword(status.has_password);
-        setSsoAutoLogin(status.auto_login);
-        setSsoPassword('');
-        setSsoFeedback(null);
-      })
-      .catch((e) => console.error('Failed to get SSO status:', e));
-  }, [isOpen]);
+  useEffect(() => {
+    window.addEventListener('sso-credentials-updated', refreshSsoSummary);
+    return () => window.removeEventListener('sso-credentials-updated', refreshSsoSummary);
+  }, [refreshSsoSummary]);
 
-  // Listen to hotkey-registration-failed event from backend
   useEffect(() => {
     const unlistenPromise = listen<{ code: string; message: string }>(
       'hotkey-registration-failed',
       (event) => {
         setHotkeyActive(false);
-        setSystemPrefError(`Cảnh báo phím tắt: ${event.payload.message || 'Không thể đăng ký phím tắt với hệ thống.'}`);
+        setSystemPrefError(
+          `Cảnh báo phím tắt: ${event.payload.message || 'Không thể đăng ký phím tắt với hệ thống.'}`
+        );
       }
     );
     return () => {
@@ -221,7 +319,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = () => {
     try {
       await updateAutostartSetting(nextVal);
     } catch (err: unknown) {
-      setAutostartEnabled(!nextVal); // rollback
+      setAutostartEnabled(!nextVal);
       const error = err as { message?: string };
       setSystemPrefError(error.message || 'Thao tác cấu hình khởi động cùng hệ thống thất bại.');
     } finally {
@@ -238,7 +336,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = () => {
     try {
       await updateStartMinimizedSetting(nextVal);
     } catch (err: unknown) {
-      setStartMinimized(!nextVal); // rollback
+      setStartMinimized(!nextVal);
       const error = err as { message?: string };
       setSystemPrefError(error.message || 'Thao tác cấu hình khởi động thu nhỏ thất bại.');
     } finally {
@@ -263,6 +361,113 @@ export const SettingsModal: React.FC<SettingsModalProps> = () => {
   };
 
   if (!isOpen) return null;
+
+  const oauthCalendars = calendars.filter((c) => c.source === 'oauth');
+  const icsCalendars = calendars.filter((c) => c.source !== 'oauth');
+
+  const notifyCalendarChanged = () => {
+    window.dispatchEvent(new Event('calendar-settings-updated'));
+  };
+
+  const handleConnectGoogleOAuth = async () => {
+    setIsConnectingOAuth(true);
+    setCalendarFeedback(null);
+    try {
+      const res = await connectGoogleCalendarOAuth();
+      await loadCalendarConnections();
+      notifyCalendarChanged();
+      if (res.errors.length > 0) {
+        setCalendarFeedback({
+          ok: false,
+          text: `Đã kết nối Google nhưng có lỗi tải lịch: ${res.errors.join('; ')}`,
+        });
+      } else {
+        setCalendarFeedback({
+          ok: true,
+          text: `Đã kết nối Google và kéo về ${res.total_events} sự kiện từ ${res.synced_calendars} lịch.`,
+        });
+      }
+    } catch (err) {
+      const msg = String(err);
+      if (msg.includes('OAuth Client ID')) {
+        setShowOAuthSetup(true);
+      }
+      setCalendarFeedback({ ok: false, text: msg });
+    } finally {
+      setIsConnectingOAuth(false);
+    }
+  };
+
+  const handleDisconnectGoogleOAuth = async () => {
+    setCalendarFeedback(null);
+    try {
+      await disconnectGoogleCalendarOAuth();
+      await loadCalendarConnections();
+      notifyCalendarChanged();
+      setCalendarFeedback({ ok: true, text: 'Đã ngắt kết nối tài khoản Google Calendar.' });
+    } catch (err) {
+      setCalendarFeedback({ ok: false, text: String(err) });
+    }
+  };
+
+  const handleSaveOAuthConfig = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!oauthClientId.trim()) return;
+    setIsSavingOAuthConfig(true);
+    setCalendarFeedback(null);
+    try {
+      await saveGoogleOAuthClientConfig(oauthClientId.trim(), oauthClientSecret.trim());
+      setOauthClientSecret('');
+      setShowOAuthSetup(false);
+      await loadCalendarConnections();
+      setCalendarFeedback({
+        ok: true,
+        text: 'Đã lưu cấu hình OAuth Client. Giờ bạn có thể bấm Đăng nhập bằng Google.',
+      });
+    } catch (err) {
+      setCalendarFeedback({ ok: false, text: String(err) });
+    } finally {
+      setIsSavingOAuthConfig(false);
+    }
+  };
+
+  const handleAddIcsCalendar = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newIcsName.trim() || !newIcsUrl.trim()) return;
+    setIsAddingIcs(true);
+    setCalendarFeedback(null);
+    try {
+      await addGoogleCalendar(newIcsName.trim(), newIcsUrl.trim(), newIcsColor);
+      setNewIcsName('');
+      setNewIcsUrl('');
+      const res = await syncGoogleCalendars();
+      await loadCalendarConnections();
+      notifyCalendarChanged();
+      setCalendarFeedback({
+        ok: res.errors.length === 0,
+        text:
+          res.errors.length > 0
+            ? res.errors.join('; ')
+            : `Đã thêm và tải ${res.total_events} sự kiện.`,
+      });
+    } catch (err) {
+      setCalendarFeedback({ ok: false, text: String(err) });
+    } finally {
+      setIsAddingIcs(false);
+    }
+  };
+
+  const handleToggleCalendar = async (id: string, current: boolean) => {
+    await toggleGoogleCalendar(id, !current);
+    await loadCalendarConnections();
+    notifyCalendarChanged();
+  };
+
+  const handleDeleteCalendar = async (id: string) => {
+    await removeGoogleCalendar(id);
+    await loadCalendarConnections();
+    notifyCalendarChanged();
+  };
 
   const handleSaveNickname = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -297,74 +502,54 @@ export const SettingsModal: React.FC<SettingsModalProps> = () => {
     }
   };
 
-  const handleTogglePlugin = async (pluginId: string, currentEnabled: boolean) => {
-    try {
-      await togglePlugin(pluginId, !currentEnabled);
-      setPlugins((prev) =>
-        prev.map((p) => (p.pluginId === pluginId ? { ...p, isEnabled: !currentEnabled } : p))
-      );
-    } catch (err) {
-      console.error('Lỗi khi chuyển trạng thái plugin:', err);
-    }
-  };
-
-  const handleTriggerPortalSync = async () => {
-    setSyncingPortal(true);
-    try {
-      await launchPortalSsoSync();
-    } catch (err) {
-      console.error('Lỗi mở SSO Portal:', err);
-    } finally {
-      setSyncingPortal(false);
-    }
-  };
-
-  const handleTriggerWecodeSync = async () => {
-    setSyncingWecode(true);
-    try {
-      await launchWecodeSsoSync();
-    } catch (err) {
-      console.error('Lỗi mở SSO Wecode:', err);
-    } finally {
-      setSyncingWecode(false);
-    }
-  };
-
-  const handleSaveGeminiConfig = async (e: React.FormEvent) => {
+  const handleSaveAiConfig = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (isSavingGemini) return;
-    setIsSavingGemini(true);
-    setGeminiSavedSuccess(false);
-    setTestGeminiResult(null);
+    if (isSavingAi) return;
+    setIsSavingAi(true);
+    setAiSavedSuccess(false);
+    setTestAiResult(null);
     try {
-      await saveGeminiConfig(geminiApiKey.trim(), geminiModel);
-      setGeminiSavedSuccess(true);
-      setTimeout(() => setGeminiSavedSuccess(false), 2500);
+      await saveGeminiConfig(
+        aiApiKey.trim(),
+        aiModel.trim() || 'gemini-2.5-flash',
+        aiBaseUrl.trim()
+      );
+      setAiSavedSuccess(true);
+      setTimeout(() => setAiSavedSuccess(false), 2500);
     } catch (err) {
-      console.error('Lỗi khi lưu cấu hình Gemini:', err);
+      console.error('Lỗi khi lưu cấu hình AI:', err);
     } finally {
-      setIsSavingGemini(false);
+      setIsSavingAi(false);
     }
   };
 
-  const handleTestGeminiKey = async () => {
-    const key = geminiApiKey.trim();
-    if (!key || isTestingGemini) return;
-    setIsTestingGemini(true);
-    setTestGeminiResult(null);
+  const handleTestAiConnection = async () => {
+    const key = aiApiKey.trim();
+    const url = aiBaseUrl.trim();
+    if (!key && !isLocalBaseUrl(url)) return;
+    if (isTestingAi) return;
+    setIsTestingAi(true);
+    setTestAiResult(null);
     try {
-      const pingResponse = await testGeminiKey(key, geminiModel);
-      setTestGeminiResult({
+      const pingResponse = await testGeminiKey(
+        key,
+        aiModel.trim() || 'gemini-2.5-flash',
+        url
+      );
+      setTestAiResult({
         success: true,
-        message: `Xác thực thành công! Phản hồi từ Gemini: "${pingResponse.slice(0, 80)}..."`,
+        message: pingResponse,
       });
     } catch (err) {
-      setTestGeminiResult({
+      setTestAiResult({
         success: false,
-        message: typeof err === 'string' ? err : 'Kiểm tra thất bại. Vui lòng kiểm tra lại API Key.',
+        message:
+          typeof err === 'string'
+            ? err
+            : 'Kiểm tra thất bại. Vui lòng kiểm tra lại API Base URL, Key và Model.',
       });
     } finally {
-      setIsTestingGemini(false);
+      setIsTestingAi(false);
     }
   };
 
@@ -376,125 +561,137 @@ export const SettingsModal: React.FC<SettingsModalProps> = () => {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
+  const primaryBtnCls =
+    'flex items-center justify-center gap-1.5 rounded-lg bg-[#2F6BFF] px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-[#255CE6] disabled:opacity-50 cursor-pointer';
+  const secondaryBtnCls =
+    'flex items-center gap-1.5 rounded-lg border border-[#1D263B] bg-[#151C2C] px-3.5 py-2 text-xs font-medium text-zinc-200 transition-colors hover:border-[#2F6BFF]/50 hover:text-white disabled:opacity-50 cursor-pointer';
+  const inputCls =
+    'w-full rounded-lg border border-[#1D263B] bg-[#080B12] px-3 py-2 font-mono text-xs text-zinc-100 placeholder-zinc-500 outline-none transition-colors focus:border-[#2F6BFF]/60';
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-4">
-      <div className="flex h-[560px] w-full max-w-3xl overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900 shadow-2xl text-zinc-100">
-        {/* Left Column: Tab Navigation */}
-        <div className="w-56 border-r border-zinc-800 bg-zinc-950/70 p-4 flex flex-col justify-between">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(4,7,15,0.7)] p-4"
+      onClick={closeSettings}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Cài đặt DIARK OS"
+        onClick={(e) => e.stopPropagation()}
+        className="uit-modal-in flex h-[590px] w-full max-w-3xl overflow-hidden rounded-xl border border-[#1D263B] bg-[#0F1420] text-zinc-100 shadow-2xl"
+      >
+        {/* Left Column: UIT Dark Tab Navigation */}
+        <div className="flex w-56 shrink-0 flex-col justify-between border-r border-[#1D263B] bg-[#0A0F1A] p-4">
           <div>
-            <div className="mb-6 px-2 flex items-center gap-3">
+            <div className="mb-6 flex items-center gap-3 px-2">
               <img
                 src="/app-icon.png"
                 alt="DIARK // OS Logo"
-                className="w-9 h-9 rounded-lg border border-zinc-700 object-cover"
+                className="h-9 w-9 rounded-lg border border-[#1D263B] object-cover"
               />
               <div>
-                <p className="font-mono text-[10px] uppercase tracking-widest text-emerald-400">Cài đặt</p>
-                <h2 className="font-mono text-sm font-bold tracking-wider text-zinc-100">DIARK OS</h2>
+                <p className="font-mono text-[10px] font-semibold uppercase tracking-widest text-[#6B9BFF]">
+                  CÀI ĐẶT
+                </p>
+                <h2 className="font-mono text-sm font-bold tracking-wider text-zinc-100">
+                  DIARK OS
+                </h2>
               </div>
             </div>
 
             <nav className="space-y-1">
-              <button
-                type="button"
-                onClick={() => setActiveTab('profile')}
-                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-xs font-medium transition cursor-pointer ${
-                  activeTab === 'profile'
-                    ? 'bg-zinc-800 text-zinc-100 border border-zinc-700'
-                    : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50 border border-transparent'
-                }`}
-              >
-                <User className="w-4 h-4" />
-                <span>Hồ sơ</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setActiveTab('plugins')}
-                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-xs font-medium transition cursor-pointer ${
-                  activeTab === 'plugins'
-                    ? 'bg-zinc-800 text-zinc-100 border border-zinc-700'
-                    : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50 border border-transparent'
-                }`}
-              >
-                <Blocks className="w-4 h-4" />
-                <span>Tiện ích mở rộng</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setActiveTab('services')}
-                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-xs font-medium transition cursor-pointer ${
-                  activeTab === 'services'
-                    ? 'bg-zinc-800 text-zinc-100 border border-zinc-700'
-                    : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50 border border-transparent'
-                }`}
-              >
-                <RefreshCw className="w-4 h-4" />
-                <span>Dịch vụ Học vụ</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setActiveTab('copilot')}
-                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-xs font-medium transition cursor-pointer ${
-                  activeTab === 'copilot'
-                    ? 'bg-zinc-800 text-zinc-100 border border-zinc-700'
-                    : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50 border border-transparent'
-                }`}
-              >
-                <Key className="w-4 h-4 text-emerald-400" />
-                <span>Trợ lý Gemini</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setActiveTab('system')}
-                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-xs font-medium transition cursor-pointer ${
-                  activeTab === 'system'
-                    ? 'bg-zinc-800 text-zinc-100 border border-zinc-700'
-                    : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50 border border-transparent'
-                }`}
-              >
-                <Database className="w-4 h-4" />
-                <span>Hệ thống</span>
-              </button>
+              {(
+                [
+                  { id: 'profile', label: 'Hồ sơ', Icon: User, locked: false },
+                  { id: 'plugins', label: 'Tiện ích mở rộng', Icon: Blocks, locked: true },
+                  { id: 'services', label: 'Kết nối & Đồng bộ', Icon: RefreshCw, locked: false },
+                  { id: 'copilot', label: 'Cấu hình AI (API)', Icon: Key, locked: false },
+                  { id: 'system', label: 'Hệ thống', Icon: Database, locked: false },
+                ] as const
+              ).map(({ id, label, Icon, locked }) => {
+                const isActive = activeTab === id && !locked;
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    disabled={locked}
+                    onClick={() => {
+                      if (!locked) setActiveTab(id);
+                    }}
+                    title={locked ? 'Tạm khóa — đang hoàn thiện' : undefined}
+                    className={`flex w-full items-center gap-2.5 rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${
+                      locked
+                        ? 'cursor-not-allowed border-transparent text-zinc-500 opacity-50'
+                        : isActive
+                        ? 'cursor-pointer border-[#2F6BFF]/35 bg-[#2F6BFF]/[0.14] text-white'
+                        : 'cursor-pointer border-transparent text-zinc-400 hover:bg-[#151C2C] hover:text-zinc-200'
+                    }`}
+                  >
+                    <Icon className={`h-4 w-4 shrink-0 ${isActive ? 'text-[#6B9BFF]' : ''}`} />
+                    <span className="truncate">{label}</span>
+                    {locked && <Lock className="ml-auto h-3 w-3 shrink-0 text-zinc-500" />}
+                  </button>
+                );
+              })}
             </nav>
           </div>
 
-          <div className="px-2 pt-4 border-t border-slate-800/80 font-mono text-[10px] text-slate-500">
-            DIARK // OS {APP_VERSION}
+          <div>
+            {onLogout && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (!confirmLogout) {
+                    setConfirmLogout(true);
+                    return;
+                  }
+                  setConfirmLogout(false);
+                  onLogout();
+                }}
+                className={`mb-3 flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-xs font-medium transition-colors cursor-pointer ${
+                  confirmLogout
+                    ? 'border-red-500/40 bg-red-500/15 text-red-300'
+                    : 'border-[#1D263B] bg-[#080B12] text-red-400 hover:border-red-500/35 hover:bg-red-500/10'
+                }`}
+              >
+                <LogOut className="h-3.5 w-3.5 shrink-0" />
+                <span>{confirmLogout ? 'Xác nhận đăng xuất' : 'Đăng xuất'}</span>
+              </button>
+            )}
+            <div className="border-t border-[#1D263B]/80 px-2 pt-3 font-mono text-[10px] text-zinc-500">
+              DIARK // OS {APP_VERSION}
+            </div>
           </div>
         </div>
 
         {/* Right Column: Tab Content */}
-        <div className="flex-1 flex flex-col min-w-0 bg-slate-900/60">
-          {/* Header Bar with Close Button */}
-          <div className="flex items-center justify-between border-b border-slate-800 px-6 py-3.5">
-            <h3 className="font-mono text-sm font-bold uppercase tracking-wider text-slate-200">
+        <div className="flex min-w-0 flex-1 flex-col bg-[#0F1420]">
+          {/* Header Bar */}
+          <div className="flex items-center justify-between border-b border-[#1D263B] px-6 py-3.5">
+            <h3 className="font-mono text-sm font-bold uppercase tracking-wider text-zinc-100">
               {activeTab === 'profile' && 'Cấu hình Định danh & Hồ sơ'}
-              {activeTab === 'plugins' && 'Quản lý Phân hệ & Plugins'}
-              {activeTab === 'services' && 'Cổng Đồng bộ Dịch vụ Ngoài'}
-              {activeTab === 'copilot' && 'Trợ lý AI Copilot (BYOK)'}
+              {activeTab === 'services' && 'Kết nối & Đồng bộ'}
+              {activeTab === 'copilot' && 'Cấu hình AI (API)'}
               {activeTab === 'system' && 'Thông số & Bảo mật Hệ thống'}
             </h3>
             <button
               type="button"
               onClick={closeSettings}
-              className="rounded p-1 text-slate-400 hover:bg-slate-800 hover:text-slate-100 transition cursor-pointer"
+              className="rounded-md p-1 text-zinc-400 transition-colors hover:bg-[#151C2C] hover:text-white cursor-pointer"
               title="Đóng (Escape)"
+              aria-label="Đóng"
             >
-              <X className="w-4 h-4" />
+              <X className="h-4 w-4" />
             </button>
           </div>
 
           {/* Content Body */}
-          <div className="flex-1 overflow-y-auto p-6 space-y-6">
+          <div className="flex-1 space-y-5 overflow-y-auto p-6">
             {/* TAB 1: PROFILE */}
             {activeTab === 'profile' && (
               <div className="space-y-6">
-                <form onSubmit={handleSaveNickname} className="space-y-3">
-                  <label className="block font-mono text-xs uppercase tracking-wider text-slate-300">
+                <form onSubmit={handleSaveNickname} className="space-y-2.5">
+                  <label className="block font-mono text-xs uppercase tracking-wider text-zinc-300">
                     Signature Handle / Nickname
                   </label>
                   <div className="flex gap-2">
@@ -502,27 +699,32 @@ export const SettingsModal: React.FC<SettingsModalProps> = () => {
                       type="text"
                       value={nickname}
                       onChange={(e) => setNickname(e.target.value)}
-                      className="flex-1 rounded-lg border border-slate-700 bg-slate-800/80 px-3 py-2 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500"
+                      className={`${inputCls} flex-1 text-sm`}
                       placeholder="Nhập tên gọi của bạn..."
                       required
                     />
                     <button
                       type="submit"
                       disabled={isSavingNick || !nickname.trim()}
-                      className="flex items-center gap-1.5 rounded-lg bg-cyan-600 px-4 py-2 font-mono text-xs font-bold uppercase text-slate-950 hover:bg-cyan-500 transition disabled:opacity-50 cursor-pointer"
+                      className={primaryBtnCls}
                     >
-                      {isSavingNick ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                      {isSavingNick ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Check className="h-3.5 w-3.5" />
+                      )}
                       <span>Lưu</span>
                     </button>
                   </div>
                   {nickSavedSuccess && (
-                    <p className="font-mono text-xs text-emerald-400">✓ Đã cập nhật chữ ký định danh thành công.</p>
+                    <p className="font-mono text-xs text-emerald-400">
+                      ✓ Đã cập nhật chữ ký định danh thành công.
+                    </p>
                   )}
                 </form>
 
-                {/* Codeforces Handle Config */}
-                <form onSubmit={handleSaveCfHandle} className="space-y-3">
-                  <label className="block font-mono text-xs uppercase tracking-wider text-slate-300">
+                <form onSubmit={handleSaveCfHandle} className="space-y-2.5">
+                  <label className="block font-mono text-xs uppercase tracking-wider text-zinc-300">
                     Codeforces Handle
                   </label>
                   <div className="flex gap-2">
@@ -530,54 +732,66 @@ export const SettingsModal: React.FC<SettingsModalProps> = () => {
                       type="text"
                       value={cfHandle}
                       onChange={(e) => setCfHandleState(e.target.value)}
-                      className="flex-1 rounded-lg border border-slate-700 bg-slate-800/80 px-3 py-2 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500"
+                      className={`${inputCls} flex-1 text-sm`}
                       placeholder="Nhập handle Codeforces (ví dụ: tourist)..."
                     />
                     <button
                       type="submit"
                       disabled={isSavingCf || !cfHandle.trim()}
-                      className="flex items-center gap-1.5 rounded-lg bg-cyan-600 px-4 py-2 font-mono text-xs font-bold uppercase text-slate-950 hover:bg-cyan-500 transition disabled:opacity-50 cursor-pointer"
+                      className={primaryBtnCls}
                     >
-                      {isSavingCf ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                      {isSavingCf ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Check className="h-3.5 w-3.5" />
+                      )}
                       <span>Lưu</span>
                     </button>
                   </div>
                   {cfSavedSuccess && (
-                    <p className="font-mono text-xs text-emerald-400">✓ Đã cập nhật Codeforces handle thành công.</p>
+                    <p className="font-mono text-xs text-emerald-400">
+                      ✓ Đã cập nhật Codeforces handle thành công.
+                    </p>
                   )}
                 </form>
 
                 <div className="space-y-3">
-                  <p className="font-mono text-xs uppercase tracking-wider text-slate-400">
+                  <p className="font-mono text-xs uppercase tracking-wider text-zinc-400">
                     Dữ liệu sinh viên UIT (Đồng bộ tự động từ Portal)
                   </p>
 
                   <div className="grid grid-cols-2 gap-3">
-                    <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
-                      <p className="font-mono text-[10px] text-slate-500 uppercase">Mã số sinh viên (MSSV)</p>
-                      <p className="font-mono text-sm font-semibold text-slate-200 mt-0.5">
+                    <div className="rounded-xl border border-[#1D263B] bg-[#080B12] p-3">
+                      <p className="font-mono text-[10px] uppercase text-zinc-500">
+                        Mã số sinh viên (MSSV)
+                      </p>
+                      <p className="mt-0.5 font-mono text-sm font-semibold text-zinc-200">
                         {studentProfile?.student_id || 'Chưa đồng bộ'}
                       </p>
                     </div>
 
-                    <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
-                      <p className="font-mono text-[10px] text-slate-500 uppercase">Họ và tên</p>
-                      <p className="font-mono text-sm font-semibold text-slate-200 mt-0.5">
+                    <div className="rounded-xl border border-[#1D263B] bg-[#080B12] p-3">
+                      <p className="font-mono text-[10px] uppercase text-zinc-500">Họ và tên</p>
+                      <p className="mt-0.5 font-mono text-sm font-semibold text-zinc-200">
                         {studentProfile?.full_name || 'Chưa đồng bộ'}
                       </p>
                     </div>
 
-                    <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
-                      <p className="font-mono text-[10px] text-slate-500 uppercase">Lớp sinh hoạt</p>
-                      <p className="font-mono text-sm font-semibold text-slate-200 mt-0.5">
+                    <div className="rounded-xl border border-[#1D263B] bg-[#080B12] p-3">
+                      <p className="font-mono text-[10px] uppercase text-zinc-500">Lớp sinh hoạt</p>
+                      <p className="mt-0.5 font-mono text-sm font-semibold text-zinc-200">
                         {studentProfile?.student_class || 'Chưa đồng bộ'}
                       </p>
                     </div>
 
-                    <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
-                      <p className="font-mono text-[10px] text-slate-500 uppercase">Ngành / Chuyên ngành</p>
-                      <p className="font-mono text-sm font-semibold text-slate-200 mt-0.5 truncate">
-                        {studentProfile?.specialization || studentProfile?.major_code || 'Chưa đồng bộ'}
+                    <div className="rounded-xl border border-[#1D263B] bg-[#080B12] p-3">
+                      <p className="font-mono text-[10px] uppercase text-zinc-500">
+                        Ngành / Chuyên ngành
+                      </p>
+                      <p className="mt-0.5 truncate font-mono text-sm font-semibold text-zinc-200">
+                        {studentProfile?.specialization ||
+                          studentProfile?.major_code ||
+                          'Chưa đồng bộ'}
                       </p>
                     </div>
                   </div>
@@ -585,396 +799,529 @@ export const SettingsModal: React.FC<SettingsModalProps> = () => {
               </div>
             )}
 
-            {/* TAB 2: PLUGINS */}
-            {activeTab === 'plugins' && (
-              <div className="space-y-4">
-                <p className="text-xs text-slate-400">
-                  Kích hoạt hoặc vô hiệu hóa các phân hệ chức năng trong không gian làm việc.
-                </p>
-
-                {loadingPlugins ? (
-                  <div className="flex items-center justify-center p-8 text-slate-400">
-                    <Loader2 className="w-5 h-5 animate-spin" />
-                  </div>
-                ) : (
-                  <div className="space-y-2.5">
-                    {plugins.map((plugin) => (
-                      <div
-                        key={plugin.pluginId}
-                        className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-950/40 p-3.5 hover:border-slate-700/80 transition"
-                      >
-                        <div className="min-w-0 pr-4">
-                          <div className="flex items-center gap-2">
-                            <p className="font-semibold text-sm text-slate-200">{plugin.name}</p>
-                            <span className="font-mono text-[10px] text-slate-500 uppercase">
-                              v{plugin.version}
-                            </span>
-                            {plugin.trustTier === 'first_party' ? (
-                              <span className="rounded bg-cyan-500/10 px-1.5 py-0.5 font-mono text-[10px] text-cyan-400">
-                                Native
-                              </span>
-                            ) : (
-                              <span className="rounded bg-amber-500/10 px-1.5 py-0.5 font-mono text-[10px] text-amber-400">
-                                Sandboxed
-                              </span>
-                            )}
-                          </div>
-                          <p className="font-mono text-xs text-slate-400 mt-0.5 truncate">{plugin.pluginId}</p>
-                        </div>
-
-                        <label className="relative inline-flex items-center cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={plugin.isEnabled}
-                            onChange={() => handleTogglePlugin(plugin.pluginId, plugin.isEnabled)}
-                            className="sr-only peer"
-                          />
-                          <div className="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-cyan-500"></div>
-                        </label>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* TAB 3: SERVICES */}
+            {/* TAB 2: KẾT NỐI & ĐỒNG BỘ */}
             {activeTab === 'services' && (
               <div className="space-y-4">
-                <p className="text-xs text-slate-400">
-                  Đồng bộ dữ liệu học vụ định danh từ các cổng thông tin UIT.
-                </p>
-
-                <div className="space-y-3">
-                  {/* Portal UIT Card */}
-                  <div className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-950/40 p-4">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <GraduationCap className="w-4 h-4 text-cyan-400" />
-                        <h4 className="font-semibold text-slate-200 text-sm">Cổng Thông Tin Đào Tạo (Portal UIT)</h4>
-                      </div>
-                      <p className="text-xs text-slate-400 mt-1">
-                        Bóc tách hồ sơ sinh viên, bảng điểm chi tiết và điểm rèn luyện theo học kỳ.
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={handleTriggerPortalSync}
-                      disabled={syncingPortal}
-                      className="flex items-center gap-1.5 rounded-lg border border-cyan-500/40 bg-cyan-500/10 px-3.5 py-2 font-mono text-xs font-bold text-cyan-300 hover:bg-cyan-500/20 transition disabled:opacity-50 cursor-pointer"
-                    >
-                      {syncingPortal ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-                      <span>Đồng bộ Portal</span>
-                    </button>
-                  </div>
-
-                  {/* Wecode UIT Card */}
-                  <div className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-950/40 p-4">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <Code className="w-4 h-4 text-blue-400" />
-                        <h4 className="font-semibold text-slate-200 text-sm">Hệ thống Nộp bài Thực hành (Wecode UIT)</h4>
-                      </div>
-                      <p className="text-xs text-slate-400 mt-1">
-                        Đồng bộ bài nộp, trạng thái điểm số First-AC và danh sách bài tập thực hành.
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={handleTriggerWecodeSync}
-                      disabled={syncingWecode}
-                      className="flex items-center gap-1.5 rounded-lg border border-blue-500/40 bg-blue-500/10 px-3.5 py-2 font-mono text-xs font-bold text-blue-300 hover:bg-blue-500/20 transition disabled:opacity-50 cursor-pointer"
-                    >
-                      {syncingWecode ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-                      <span>Đồng bộ Wecode</span>
-                    </button>
-                  </div>
-
-                  {/* Moodle UIT Card */}
-                  <div className="flex items-center justify-between rounded-xl border border-zinc-800 bg-zinc-950/40 p-4">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <ExternalLink className="w-4 h-4 text-emerald-400" />
-                        <h4 className="font-semibold text-zinc-200 text-sm">Học tập Trực tuyến (Moodle / Courses)</h4>
-                      </div>
-                      <p className="text-xs text-zinc-400 mt-1">
-                        Đồng bộ môn học, hạn nộp bài tập, tài liệu và điểm quá trình từ Courses UIT.
-                      </p>
-                    </div>
-                    <span className="font-mono text-xs text-zinc-500">Đồng bộ tự động</span>
-                  </div>
-
-                  {/* Tự động đăng nhập SSO UIT */}
-                  <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-4 space-y-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <h4 className="text-sm font-semibold text-zinc-100">Tự động đăng nhập SSO UIT</h4>
-                        <p className="text-xs text-zinc-400 mt-0.5">
-                          Lưu tài khoản và mật khẩu ngay trên máy của bạn để tự điền mỗi khi phiên đăng nhập hết hạn.
-                        </p>
-                      </div>
-                      <label className="flex items-center gap-2 text-xs text-zinc-300 shrink-0 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={ssoAutoLogin}
-                          onChange={(e) => setSsoAutoLogin(e.target.checked)}
-                          className="h-3.5 w-3.5 accent-emerald-500"
-                        />
-                        <span>Tự động vào</span>
-                      </label>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                      <input
-                        type="text"
-                        value={ssoUsername}
-                        onChange={(e) => setSsoUsername(e.target.value)}
-                        placeholder="MSSV (vd: 25520458)"
-                        className="rounded-md border border-zinc-800 bg-zinc-900 px-3 py-1.5 font-mono text-xs text-zinc-100 placeholder-zinc-600 focus:border-zinc-600 focus:outline-none"
-                      />
-                      <input
-                        type="password"
-                        value={ssoPassword}
-                        onChange={(e) => setSsoPassword(e.target.value)}
-                        placeholder={ssoHasPassword ? "•••••••• (đã lưu, nhập để đổi)" : "Mật khẩu SSO"}
-                        className="rounded-md border border-zinc-800 bg-zinc-900 px-3 py-1.5 font-mono text-xs text-zinc-100 placeholder-zinc-600 focus:border-zinc-600 focus:outline-none"
-                      />
-                    </div>
-
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-[11px] font-mono text-zinc-500">
-                        {ssoFeedback || (ssoHasPassword ? `Đã lưu cục bộ cho ${ssoUsername}` : "Chưa lưu mật khẩu")}
+                {/* Compact UIT SSO Account Status Row */}
+                <div className="flex items-center justify-between gap-3 rounded-xl border border-[#1D263B] bg-[#080B12] px-4 py-3">
+                  <div className="flex min-w-0 items-center gap-2.5 text-xs">
+                    <span
+                      className={`h-2 w-2 shrink-0 rounded-full ${
+                        ssoHasPassword ? 'bg-emerald-400' : 'bg-zinc-600'
+                      }`}
+                    />
+                    <div className="flex flex-wrap items-center gap-1.5 truncate">
+                      <span className="font-semibold text-zinc-100">Tài khoản UIT SSO</span>
+                      <span className="text-zinc-600">·</span>
+                      <span className="font-mono text-zinc-300">
+                        MSSV: {ssoUsername || 'Chưa thiết lập'}
                       </span>
-                      <div className="flex items-center gap-2">
-                        {ssoHasPassword && (
+                      <span className="text-zinc-600">·</span>
+                      <span className={ssoHasPassword ? 'font-medium text-emerald-400' : 'text-zinc-500'}>
+                        {ssoHasPassword ? 'Đã lưu' : 'Chưa lưu'}
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => onOpenSsoLogin?.()}
+                    className={`${secondaryBtnCls} shrink-0 py-1.5 px-3`}
+                  >
+                    Đổi tài khoản
+                  </button>
+                </div>
+
+                {calendarFeedback && (
+                  <div
+                    className={`rounded-lg border px-3 py-2 text-xs ${
+                      calendarFeedback.ok
+                        ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+                        : 'border-red-500/30 bg-red-500/10 text-red-300'
+                    }`}
+                  >
+                    {calendarFeedback.text}
+                  </div>
+                )}
+
+                {/* Google Calendar (2 chiều) */}
+                <div className="space-y-3 rounded-xl border border-[#1D263B] bg-[#080B12] p-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <Calendar className="h-4 w-4 text-[#6B9BFF]" aria-hidden="true" />
+                      <h4 className="text-sm font-semibold text-zinc-100">
+                        Google Calendar (2 chiều)
+                      </h4>
+                    </div>
+                    {oauthStatus?.connected && (
+                      <button
+                        type="button"
+                        onClick={() => void handleDisconnectGoogleOAuth()}
+                        className="flex items-center gap-1 rounded-md border border-[#1D263B] bg-[#0F1420] px-2.5 py-1 text-[11px] font-medium text-zinc-400 transition-colors hover:border-red-500/30 hover:text-red-300 cursor-pointer"
+                      >
+                        <LogOut className="h-3 w-3" aria-hidden="true" />
+                        <span>Ngắt kết nối</span>
+                      </button>
+                    )}
+                  </div>
+
+                  {!oauthStatus?.connected ? (
+                    <div className="space-y-3">
+                      <p className="text-xs leading-relaxed text-zinc-400">
+                        Đăng nhập bằng tài khoản Google để tự động lấy toàn bộ lịch, tạo sự kiện mới và đồng bộ TKB UIT lên điện thoại.
+                      </p>
+
+                      <button
+                        type="button"
+                        onClick={() => void handleConnectGoogleOAuth()}
+                        disabled={isConnectingOAuth}
+                        className={`${primaryBtnCls} h-9 w-full`}
+                      >
+                        <LogIn className="h-3.5 w-3.5" aria-hidden="true" />
+                        <span>
+                          {isConnectingOAuth
+                            ? 'Đang chờ xác nhận trên trình duyệt...'
+                            : 'Đăng nhập bằng Google'}
+                        </span>
+                      </button>
+
+                      {oauthStatus && !oauthStatus.is_embedded_config && (
+                        <div className="border-t border-[#1D263B]/80 pt-2.5">
                           <button
                             type="button"
-                            onClick={() => {
-                              setIsSavingSso(true);
-                              void clearSsoCredentials()
-                                .then(() => {
-                                  setSsoUsername('');
-                                  setSsoPassword('');
-                                  setSsoHasPassword(false);
-                                  setSsoAutoLogin(false);
-                                  setSsoFeedback('Đã xóa thông tin đăng nhập đã lưu.');
-                                })
-                                .catch((e) => setSsoFeedback(String(e)))
-                                .finally(() => setIsSavingSso(false));
-                            }}
-                            disabled={isSavingSso}
-                            className="rounded-md border border-zinc-800 bg-zinc-900 px-2.5 py-1 text-xs text-rose-400 hover:bg-zinc-800 cursor-pointer"
+                            onClick={() => setShowOAuthSetup((v) => !v)}
+                            className="flex w-full items-center justify-between text-[11px] text-zinc-400 hover:text-zinc-200 cursor-pointer"
                           >
-                            Xóa đã lưu
+                            <span className="flex items-center gap-1.5">
+                              <Settings2 className="h-3 w-3" aria-hidden="true" />
+                              <span>
+                                {oauthStatus.is_configured
+                                  ? 'Đổi OAuth Client ID (bản dev)'
+                                  : 'Cấu hình OAuth (dành cho bản dev)'}
+                              </span>
+                            </span>
+                            <ChevronDown
+                              className={`h-3.5 w-3.5 transition-transform duration-150 ${
+                                showOAuthSetup ? 'rotate-180' : ''
+                              }`}
+                            />
                           </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setIsSavingSso(true);
-                            void saveSsoCredentials(
-                              ssoUsername,
-                              ssoPassword.length > 0 ? ssoPassword : null,
-                              ssoAutoLogin
-                            )
-                              .then(() => {
-                                if (ssoPassword.length > 0) setSsoHasPassword(true);
-                                setSsoPassword('');
-                                setSsoFeedback('Đã lưu cấu hình SSO cục bộ.');
-                              })
-                              .catch((e) => setSsoFeedback(String(e)))
-                              .finally(() => setIsSavingSso(false));
-                          }}
-                          disabled={isSavingSso || !ssoUsername.trim()}
-                          className="rounded-md bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-950 hover:bg-zinc-200 disabled:opacity-40 cursor-pointer"
+
+                          {showOAuthSetup && (
+                            <form
+                              onSubmit={(e) => void handleSaveOAuthConfig(e)}
+                              className="mt-2.5 space-y-2"
+                            >
+                              <p className="text-[11px] text-zinc-500">
+                                Dán Desktop OAuth Client ID &amp; Secret từ Google Cloud Console.
+                              </p>
+                              <input
+                                type="text"
+                                value={oauthClientId}
+                                onChange={(e) => setOauthClientId(e.target.value)}
+                                placeholder="Google OAuth Client ID"
+                                className={inputCls}
+                              />
+                              <input
+                                type="password"
+                                value={oauthClientSecret}
+                                onChange={(e) => setOauthClientSecret(e.target.value)}
+                                placeholder="Client Secret (tùy chọn)"
+                                className={inputCls}
+                              />
+                              <button
+                                type="submit"
+                                disabled={isSavingOAuthConfig || !oauthClientId.trim()}
+                                className={`${primaryBtnCls} h-8 w-full`}
+                              >
+                                {isSavingOAuthConfig ? 'Đang lưu...' : 'Lưu cấu hình OAuth'}
+                              </button>
+                            </form>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="space-y-2.5">
+                      <div className="flex items-center gap-2 rounded-lg border border-[#1D263B] bg-[#0F1420] px-3 py-2">
+                        <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-400" />
+                        <span className="truncate font-mono text-xs text-zinc-200">
+                          {oauthStatus.email || 'Đã đăng nhập Google'}
+                        </span>
+                      </div>
+
+                      {oauthCalendars.length > 0 && (
+                        <div className="divide-y divide-[#1D263B]/70 border-t border-[#1D263B]/80">
+                          {oauthCalendars.map((cal) => (
+                            <label
+                              key={cal.id}
+                              className="flex items-center justify-between gap-2 py-2 cursor-pointer"
+                            >
+                              <div className="flex min-w-0 items-center gap-2">
+                                <input
+                                  type="checkbox"
+                                  checked={cal.is_enabled}
+                                  onChange={() =>
+                                    void handleToggleCalendar(cal.id, cal.is_enabled)
+                                  }
+                                  className="h-3.5 w-3.5 rounded border-[#1D263B] bg-[#080B12] accent-[#2F6BFF]"
+                                />
+                                <span
+                                  className="h-2.5 w-2.5 shrink-0 rounded-full"
+                                  style={{ backgroundColor: cal.color }}
+                                />
+                                <span className="truncate text-xs font-medium text-zinc-200">
+                                  {cal.name}
+                                </span>
+                              </div>
+                              <span className="shrink-0 font-mono text-[10px] text-zinc-500">
+                                {cal.can_write ? '2 chiều' : 'Chỉ đọc'}
+                              </span>
+                            </label>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Collapsible ICS Calendar Feed Manager */}
+                <div className="rounded-xl border border-[#1D263B] bg-[#080B12] p-4">
+                  <button
+                    type="button"
+                    onClick={() => setShowIcsAdvanced((v) => !v)}
+                    aria-expanded={showIcsAdvanced}
+                    className="flex w-full items-center justify-between gap-2 text-left cursor-pointer"
+                  >
+                    <span className="text-xs font-semibold text-zinc-300">
+                      Nâng cao: Thêm lịch bằng link .ics ({icsCalendars.length})
+                    </span>
+                    <ChevronDown
+                      className={`h-4 w-4 text-zinc-500 transition-transform duration-200 ${
+                        showIcsAdvanced ? 'rotate-180' : ''
+                      }`}
+                    />
+                  </button>
+
+                  <div
+                    className={`grid transition-[grid-template-rows] duration-200 ease-out ${
+                      showIcsAdvanced ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
+                    }`}
+                  >
+                    <div className="overflow-hidden">
+                      <div className="mt-3 space-y-3 border-t border-[#1D263B]/75 pt-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[11px] font-medium text-zinc-400">
+                            Nguồn iCalendar công khai / bí mật
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              void openExternalUrl(
+                                'https://calendar.google.com/calendar/r/settings'
+                              )
+                            }
+                            className="flex items-center gap-1 rounded border border-[#1D263B] bg-[#151C2C] px-2 py-1 text-[11px] font-medium text-[#6B9BFF] transition-colors hover:border-[#2F6BFF]/50 cursor-pointer"
+                          >
+                            <span>Mở Google Calendar</span>
+                            <ExternalLink className="h-3 w-3" aria-hidden="true" />
+                          </button>
+                        </div>
+
+                        <form
+                          onSubmit={(e) => void handleAddIcsCalendar(e)}
+                          className="space-y-2.5"
                         >
-                          Lưu SSO
-                        </button>
+                          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                            <input
+                              type="text"
+                              value={newIcsName}
+                              onChange={(e) => setNewIcsName(e.target.value)}
+                              placeholder="Tên lịch (vd: Cá nhân, CLB)"
+                              className={inputCls}
+                            />
+                            <input
+                              type="url"
+                              value={newIcsUrl}
+                              onChange={(e) => setNewIcsUrl(e.target.value)}
+                              placeholder="https://calendar.google.com/calendar/ical/..."
+                              className={inputCls}
+                            />
+                          </div>
+                          <div className="flex items-center justify-between pt-0.5">
+                            <div className="flex items-center gap-1.5">
+                              {CALENDAR_PALETTE.map((hex) => (
+                                <button
+                                  key={hex}
+                                  type="button"
+                                  onClick={() => setNewIcsColor(hex)}
+                                  aria-label={`Chọn màu ${hex}`}
+                                  className={`h-4 w-4 rounded-full transition-transform duration-100 cursor-pointer ${
+                                    newIcsColor === hex
+                                      ? 'ring-2 ring-zinc-200 ring-offset-2 ring-offset-[#080B12]'
+                                      : ''
+                                  }`}
+                                  style={{ backgroundColor: hex }}
+                                />
+                              ))}
+                            </div>
+                            <button
+                              type="submit"
+                              disabled={isAddingIcs || !newIcsName.trim() || !newIcsUrl.trim()}
+                              className={`${primaryBtnCls} h-7 px-3`}
+                            >
+                              <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+                              <span>{isAddingIcs ? 'Đang thêm...' : 'Thêm lịch'}</span>
+                            </button>
+                          </div>
+                        </form>
+
+                        <div className="divide-y divide-[#1D263B]/70 border-t border-[#1D263B]/80">
+                          {icsCalendars.length === 0 ? (
+                            <div className="py-3 text-center text-xs text-zinc-500">
+                              Chưa gắn lịch .ics nào.
+                            </div>
+                          ) : (
+                            icsCalendars.map((cal) => (
+                              <div
+                                key={cal.id}
+                                className="flex items-center justify-between gap-2 py-2"
+                              >
+                                <label className="flex min-w-0 flex-1 items-center gap-2.5 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={cal.is_enabled}
+                                    onChange={() =>
+                                      void handleToggleCalendar(cal.id, cal.is_enabled)
+                                    }
+                                    className="h-3.5 w-3.5 rounded border-[#1D263B] bg-[#080B12] accent-[#2F6BFF]"
+                                  />
+                                  <span
+                                    className="h-2.5 w-2.5 shrink-0 rounded-full"
+                                    style={{ backgroundColor: cal.color }}
+                                  />
+                                  <div className="min-w-0">
+                                    <div className="truncate text-xs font-medium text-zinc-200">
+                                      {cal.name}
+                                    </div>
+                                    <div className="font-mono text-[10px] text-zinc-500">
+                                      {cal.last_synced_at > 0
+                                        ? `Cập nhật ${formatTimeHm(cal.last_synced_at)}`
+                                        : 'Chưa đồng bộ'}
+                                    </div>
+                                  </div>
+                                </label>
+                                <button
+                                  type="button"
+                                  onClick={() => void handleDeleteCalendar(cal.id)}
+                                  className="rounded p-1 text-zinc-500 transition-colors hover:bg-[#151C2C] hover:text-red-400 cursor-pointer"
+                                  aria-label={`Xóa lịch ${cal.name}`}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                            ))
+                          )}
+                        </div>
                       </div>
                     </div>
                   </div>
                 </div>
+
+                {/* Unified Auto-Sync Summary */}
+                <div className="flex items-center justify-between gap-3 rounded-xl border border-[#1D263B]/80 bg-[#080B12]/70 px-4 py-3 text-xs text-zinc-400">
+                  <span>
+                    Portal, Moodle, Wecode và Lịch tự động đồng bộ nền định kỳ. Bạn có thể bấm icon{' '}
+                    <span className="font-mono text-[#6B9BFF]">↻</span> ở góc dưới thanh bên để đồng bộ ngay toàn bộ dữ liệu.
+                  </span>
+                  <span className="shrink-0 font-mono text-[11px] text-emerald-400">Tự động</span>
+                </div>
               </div>
             )}
 
-            {/* TAB: AI COPILOT (BYOK) */}
+            {/* TAB 3: CẤU HÌNH AI (API) */}
             {activeTab === 'copilot' && (
-              <div className="space-y-6">
+              <div className="space-y-5">
                 <div>
-                  <h3 className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
-                    <Key className="w-4 h-4 text-emerald-400" />
-                    <span>Trợ lý Gemini cá nhân</span>
+                  <h3 className="flex items-center gap-2 text-sm font-semibold text-zinc-100">
+                    <Key className="h-4 w-4 text-[#6B9BFF]" />
+                    <span>Kết nối AI API (BYOK)</span>
                   </h3>
-                  <p className="text-xs text-zinc-400 mt-1">
-                    Dùng khóa API cá nhân của bạn. Khóa được lưu ngay trên máy và gọi trực tiếp tới Google AI.
+                  <p className="mt-1 text-xs text-zinc-400">
+                    Hỗ trợ Google Gemini mặc định hoặc bất kỳ nhà cung cấp nào chuẩn OpenAI (OpenAI, OpenRouter, DeepSeek, Groq, Ollama Local, endpoint riêng...).
                   </p>
                 </div>
 
-                <form onSubmit={handleSaveGeminiConfig} className="space-y-4">
-                  {/* API Key Input */}
-                  <div className="space-y-2">
+                {/* Provider Presets */}
+                <div className="space-y-1.5">
+                  <span className="block font-mono text-[10px] uppercase tracking-wider text-zinc-500">
+                    Điền nhanh theo nhà cung cấp
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {AI_PROVIDER_PRESETS.map((preset) => {
+                      const isActivePreset =
+                        aiBaseUrl.trim() === preset.baseUrl &&
+                        (preset.baseUrl !== '' || aiBaseUrl.trim() === '');
+                      return (
+                        <button
+                          key={preset.id}
+                          type="button"
+                          onClick={() => {
+                            setAiBaseUrl(preset.baseUrl);
+                            setAiModel(preset.model);
+                            setTestAiResult(null);
+                          }}
+                          className={`rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors cursor-pointer ${
+                            isActivePreset
+                              ? 'border-[#2F6BFF]/50 bg-[#2F6BFF]/[0.16] text-[#6B9BFF]'
+                              : 'border-[#1D263B] bg-[#080B12] text-zinc-300 hover:border-[#2F6BFF]/35 hover:bg-[#151C2C]'
+                          }`}
+                        >
+                          {preset.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <form onSubmit={handleSaveAiConfig} className="space-y-3.5">
+                  <div className="space-y-1.5">
+                    <label className="block font-mono text-xs uppercase tracking-wider text-zinc-400">
+                      API Base URL (Endpoint)
+                    </label>
+                    <input
+                      type="text"
+                      value={aiBaseUrl}
+                      onChange={(e) => setAiBaseUrl(e.target.value)}
+                      placeholder="Để trống để dùng Google Gemini mặc định, hoặc dán https://api.openai.com/v1"
+                      className={`${inputCls} py-2`}
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
                     <div className="flex items-center justify-between">
-                      <label className="font-mono text-xs uppercase tracking-wider text-zinc-400 flex items-center gap-1.5">
-                        <Key className="w-3.5 h-3.5 text-emerald-400" />
-                        <span>Google Gemini API Key</span>
+                      <label className="font-mono text-xs uppercase tracking-wider text-zinc-400">
+                        API Key {isLocalBaseUrl(aiBaseUrl) ? '(tùy chọn với Local)' : ''}
                       </label>
-                      <button
-                        type="button"
-                        onClick={() => openExternalUrl('https://aistudio.google.com/app/apikey')}
-                        className="text-[11px] text-emerald-400 hover:text-emerald-300 flex items-center gap-1 cursor-pointer"
-                      >
-                        <span>Lấy API Key miễn phí tại Google AI Studio</span>
-                        <ExternalLink className="w-3 h-3" />
-                      </button>
+                      {aiBaseUrl.trim() === '' && (
+                        <button
+                          type="button"
+                          onClick={() => openExternalUrl('https://aistudio.google.com/app/apikey')}
+                          className="flex items-center gap-1 text-[11px] text-[#6B9BFF] transition-colors hover:text-[#8BB2FF] cursor-pointer"
+                        >
+                          <span>Lấy key miễn phí tại AI Studio</span>
+                          <ExternalLink className="h-3 w-3" />
+                        </button>
+                      )}
                     </div>
 
                     <div className="relative">
                       <input
                         type={showApiKey ? 'text' : 'password'}
-                        value={geminiApiKey}
-                        onChange={(e) => setGeminiApiKey(e.target.value)}
-                        placeholder="AIzaSy..."
-                        className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-4 py-2.5 pr-10 font-mono text-xs text-zinc-200 placeholder-zinc-600 focus:border-zinc-600 focus:outline-none"
+                        value={aiApiKey}
+                        onChange={(e) => setAiApiKey(e.target.value)}
+                        placeholder={
+                          isLocalBaseUrl(aiBaseUrl)
+                            ? 'Có thể để trống với Ollama/Local...'
+                            : 'sk-... hoặc AIzaSy...'
+                        }
+                        className={`${inputCls} py-2 pr-10`}
                       />
                       <button
                         type="button"
                         onClick={() => setShowApiKey((v) => !v)}
                         className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 cursor-pointer"
                       >
-                        {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                       </button>
                     </div>
                   </div>
 
-                  {/* Model Selection */}
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <label className="font-mono text-xs uppercase tracking-wider text-zinc-400">
-                        Mô hình Gemini (Model)
-                      </label>
-                      <button
-                        type="button"
-                        onClick={() => setIsCustomModel((prev) => !prev)}
-                        className="text-[11px] font-mono text-zinc-400 hover:text-zinc-200 underline cursor-pointer"
-                      >
-                        {isCustomModel ? "Chọn từ danh sách có sẵn" : "Nhập mã model tùy chỉnh"}
-                      </button>
-                    </div>
-
-                    {!isCustomModel ? (
-                      <select
-                        value={geminiModel}
-                        onChange={(e) => {
-                          if (e.target.value === "__custom__") {
-                            setIsCustomModel(true);
-                          } else {
-                            setGeminiModel(e.target.value);
-                          }
-                        }}
-                        className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-4 py-2.5 font-mono text-xs text-zinc-200 focus:border-zinc-600 focus:outline-none cursor-pointer"
-                      >
-                        {PRESET_GEMINI_MODELS.map((m) => (
-                          <option key={m.id} value={m.id}>
-                            {m.name}
-                          </option>
-                        ))}
-                        <option value="__custom__">Tùy chỉnh (Nhập mã model bất kỳ...)</option>
-                      </select>
-                    ) : (
-                      <div className="space-y-1.5">
-                        <input
-                          type="text"
-                          value={geminiModel}
-                          onChange={(e) => setGeminiModel(e.target.value)}
-                          placeholder="Ví dụ: gemini-3.8-flash..."
-                          className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-4 py-2.5 font-mono text-xs text-zinc-200 focus:border-zinc-500 focus:outline-none"
-                          autoFocus
-                        />
-                        <p className="text-[10px] text-zinc-500 font-mono">
-                          Nhập chính xác Model ID từ Google AI Studio (ví dụ: gemini-2.5-flash, gemini-3.1-flash-lite...)
-                        </p>
-                      </div>
-                    )}
+                  <div className="space-y-1.5">
+                    <label className="block font-mono text-xs uppercase tracking-wider text-zinc-400">
+                      Model ID
+                    </label>
+                    <input
+                      type="text"
+                      value={aiModel}
+                      onChange={(e) => setAiModel(e.target.value)}
+                      placeholder="Ví dụ: gemini-2.5-flash, gpt-4o-mini, deepseek-chat, llama3.2..."
+                      className={`${inputCls} py-2`}
+                    />
                   </div>
 
-                  {/* Action Buttons */}
-                  <div className="flex items-center gap-3 pt-2">
+                  <div className="flex items-center gap-3 pt-1">
                     <button
                       type="submit"
-                      disabled={isSavingGemini}
-                      className="flex items-center gap-2 rounded-lg bg-zinc-100 hover:bg-zinc-200 px-4 py-2 text-xs font-semibold text-zinc-950 transition cursor-pointer disabled:opacity-50"
+                      disabled={isSavingAi || !aiModel.trim()}
+                      className={primaryBtnCls}
                     >
-                      {isSavingGemini ? (
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      ) : geminiSavedSuccess ? (
-                        <Check className="w-3.5 h-3.5" />
+                      {isSavingAi ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : aiSavedSuccess ? (
+                        <Check className="h-3.5 w-3.5" />
                       ) : null}
-                      <span>{geminiSavedSuccess ? 'Đã lưu cấu hình' : 'Lưu cấu hình'}</span>
+                      <span>{aiSavedSuccess ? 'Đã lưu cấu hình' : 'Lưu cấu hình'}</span>
                     </button>
 
                     <button
                       type="button"
-                      onClick={handleTestGeminiKey}
-                      disabled={isTestingGemini || !geminiApiKey.trim()}
-                      className="flex items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 px-4 py-2 text-xs font-medium text-zinc-200 transition cursor-pointer disabled:opacity-50"
+                      onClick={() => void handleTestAiConnection()}
+                      disabled={isTestingAi || (!aiApiKey.trim() && !isLocalBaseUrl(aiBaseUrl))}
+                      className={secondaryBtnCls}
                     >
-                      {isTestingGemini ? (
-                        <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-400" />
+                      {isTestingAi ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin text-[#6B9BFF]" />
                       ) : (
-                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                        <CheckCircle2 className="h-3.5 w-3.5 text-[#6B9BFF]" />
                       )}
                       <span>Kiểm tra kết nối</span>
                     </button>
                   </div>
                 </form>
 
-                {/* Test Result Feedback */}
-                {testGeminiResult && (
+                {testAiResult && (
                   <div
-                    className={`rounded-lg border p-3.5 text-xs font-mono flex items-start gap-2.5 ${
-                      testGeminiResult.success
-                        ? 'border-emerald-600/30 bg-emerald-950/30 text-emerald-300'
-                        : 'border-rose-600/30 bg-rose-950/30 text-rose-300'
+                    className={`flex items-start gap-2.5 rounded-lg border p-3.5 font-mono text-xs ${
+                      testAiResult.success
+                        ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+                        : 'border-rose-500/30 bg-rose-500/10 text-rose-300'
                     }`}
                   >
-                    {testGeminiResult.success ? (
-                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                    {testAiResult.success ? (
+                      <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />
                     ) : (
-                      <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                      <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-rose-400" />
                     )}
                     <div>
-                      <p className="font-semibold">{testGeminiResult.success ? 'Kết nối thành công!' : 'Lỗi kết nối:'}</p>
-                      <p className="text-[11px] mt-0.5 opacity-90">{testGeminiResult.message}</p>
+                      <p className="font-semibold">
+                        {testAiResult.success ? 'Kết nối thành công!' : 'Lỗi kết nối:'}
+                      </p>
+                      <p className="mt-0.5 text-[11px] opacity-90">{testAiResult.message}</p>
                     </div>
                   </div>
                 )}
 
-                {/* Security Policy */}
-                <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3.5 text-[11px] text-zinc-400 space-y-1">
-                  <p className="font-semibold text-zinc-300 flex items-center gap-1.5">
-                    <Shield className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>Quyền riêng tư (Lưu trên máy):</span>
+                <div className="space-y-1 rounded-xl border border-[#1D263B] bg-[#080B12] p-3.5 text-[11px] text-zinc-400">
+                  <p className="flex items-center gap-1.5 font-semibold text-zinc-200">
+                    <Shield className="h-3.5 w-3.5 text-[#6B9BFF]" />
+                    <span>Quyền riêng tư (Lưu cục bộ):</span>
                   </p>
-                  <p>
-                    • API Key chỉ lưu ngay trên máy tính của bạn, không gửi qua máy chủ trung gian.
-                  </p>
-                  <p>
-                    • Mọi yêu cầu kết nối trực tiếp tới Google Gemini API qua giao thức mã hóa HTTPS.
-                  </p>
+                  <p>• Khóa API và Endpoint chỉ lưu trong SQLite trên máy, không qua máy chủ trung gian.</p>
                 </div>
               </div>
             )}
 
             {/* TAB 4: SYSTEM */}
             {activeTab === 'system' && (
-              <div className="space-y-6">
-                {/* Hotkey Registration Warning Banner */}
+              <div className="space-y-5">
                 {!hotkeyActive && (
                   <div className="flex items-start gap-3 rounded-xl border border-amber-500/40 bg-amber-950/20 p-4 text-xs text-amber-300">
-                    <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                    <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" />
                     <div>
-                      <p className="font-semibold text-amber-200">Cảnh báo: Phím tắt chưa thể kích hoạt</p>
-                      <p className="mt-1 text-slate-300 leading-relaxed">
+                      <p className="font-semibold text-amber-200">
+                        Cảnh báo: Phím tắt chưa thể kích hoạt
+                      </p>
+                      <p className="mt-1 leading-relaxed text-zinc-300">
                         Phím tắt toàn cục ({globalShortcut}) đang bị ứng dụng khác chiếm dụng (ví dụ: Unikey, EVKey hoặc phần mềm khác). Bạn vẫn có thể mở Diark bằng cách nhấp đúp biểu tượng dưới khay hệ thống (System Tray).
                       </p>
                     </div>
@@ -982,21 +1329,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = () => {
                 )}
 
                 {systemPrefError && (
-                  <div className="flex items-center gap-2 rounded-xl border border-rose-500/30 bg-rose-950/20 p-3 text-xs text-rose-300">
-                    <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                  <div className="flex items-center gap-2 rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-300">
+                    <AlertCircle className="h-4 w-4 shrink-0 text-rose-400" />
                     <span>{systemPrefError}</span>
                   </div>
                 )}
 
                 {/* 1. Global Shortcut & HUD */}
-                <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-4 space-y-4">
-                  <div className="flex items-center justify-between">
+                <div className="space-y-4 rounded-xl border border-[#1D263B] bg-[#080B12] p-4">
+                  <div className="flex items-center justify-between gap-3">
                     <div>
-                      <div className="flex items-center gap-2 text-slate-200 font-semibold text-xs font-mono">
-                        <Keyboard className="w-4 h-4 text-cyan-400" />
+                      <div className="flex items-center gap-2 font-mono text-xs font-semibold text-zinc-100">
+                        <Keyboard className="h-4 w-4 text-[#6B9BFF]" />
                         <span>PHÍM TẮT TOÀN CỤC (QUICK HUD)</span>
                       </div>
-                      <p className="text-[11px] text-slate-400 mt-1">
+                      <p className="mt-1 text-[11px] text-zinc-400">
                         Bật/tắt nhanh giao diện Diark OS từ bất kỳ đâu trên máy tính.
                       </p>
                     </div>
@@ -1004,15 +1351,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = () => {
                       type="button"
                       onClick={handleResetDefaultShortcut}
                       disabled={isResettingShortcut}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white font-mono text-xs transition cursor-pointer disabled:opacity-50"
+                      className={`${secondaryBtnCls} py-1.5 px-3`}
                       title="Đặt lại về Alt+K"
                     >
-                      <RotateCcw className="w-3.5 h-3.5" />
+                      <RotateCcw className="h-3.5 w-3.5" />
                       <span>{isResettingShortcut ? 'Đang khôi phục...' : 'Khôi phục mặc định'}</span>
                     </button>
                   </div>
 
-                  <div className="pt-2 border-t border-slate-800/80">
+                  <div className="border-t border-[#1D263B]/80 pt-3">
                     <ShortcutRecorder
                       currentShortcut={globalShortcut}
                       onShortcutChanged={(canonical) => {
@@ -1025,85 +1372,60 @@ export const SettingsModal: React.FC<SettingsModalProps> = () => {
                 </div>
 
                 {/* 2. Autostart & Window Persistence */}
-                <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-4 space-y-4">
-                  <div className="flex items-center justify-between">
+                <div className="space-y-4 rounded-xl border border-[#1D263B] bg-[#080B12] p-4">
+                  <div className="flex items-center justify-between gap-4">
                     <div>
-                      <div className="flex items-center gap-2 text-slate-200 font-semibold text-xs font-mono">
-                        <Power className="w-4 h-4 text-emerald-400" />
+                      <div className="flex items-center gap-2 font-mono text-xs font-semibold text-zinc-100">
+                        <Power className="h-4 w-4 text-[#6B9BFF]" />
                         <span>KHỞI ĐỘNG CÙNG HỆ THỐNG</span>
                       </div>
-                      <p className="text-[11px] text-slate-400 mt-1">
+                      <p className="mt-1 text-[11px] text-zinc-400">
                         Tự động khởi chạy ứng dụng khi đăng nhập Windows (Registry Run key).
                       </p>
                     </div>
-                    <button
-                      type="button"
-                      onClick={handleToggleAutostart}
-                      disabled={isUpdatingAutostart}
-                      className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg font-mono text-xs font-bold border transition cursor-pointer disabled:opacity-50 ${
-                        autostartEnabled
-                          ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50'
-                          : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700'
-                      }`}
-                    >
-                      {isUpdatingAutostart ? (
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      ) : (
-                        <span>{autostartEnabled ? 'BẬT (ON)' : 'TẮT (OFF)'}</span>
-                      )}
-                    </button>
+                    <UitToggle
+                      checked={autostartEnabled}
+                      loading={isUpdatingAutostart}
+                      onChange={() => void handleToggleAutostart()}
+                      ariaLabel="Khởi động cùng hệ thống"
+                    />
                   </div>
 
-                  <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between">
+                  <div className="flex items-center justify-between gap-4 border-t border-[#1D263B]/80 pt-3">
                     <div>
-                      <p className="text-xs font-semibold text-slate-300">Khởi động thu nhỏ vào khay (Start Minimized)</p>
-                      <p className="text-[11px] text-slate-500 mt-0.5">
+                      <p className="text-xs font-semibold text-zinc-200">
+                        Khởi động thu nhỏ vào khay (Start Minimized)
+                      </p>
+                      <p className="mt-0.5 text-[11px] text-zinc-500">
                         Khi bật tự động lúc khởi động máy, app sẽ ẩn dưới khay hệ thống thay vì bung toàn màn hình.
                       </p>
                     </div>
-                    <button
-                      type="button"
-                      onClick={handleToggleStartMinimized}
-                      disabled={!autostartEnabled || isUpdatingStartMinimized}
-                      className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg font-mono text-xs font-bold border transition cursor-pointer ${
-                        !autostartEnabled
-                          ? 'opacity-40 cursor-not-allowed bg-slate-900 border-slate-800 text-slate-600'
-                          : startMinimized
-                          ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/50'
-                          : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700'
-                      }`}
-                    >
-                      {isUpdatingStartMinimized ? (
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      ) : (
-                        <span>{startMinimized ? 'BẬT (ON)' : 'TẮT (OFF)'}</span>
-                      )}
-                    </button>
+                    <UitToggle
+                      checked={startMinimized}
+                      disabled={!autostartEnabled}
+                      loading={isUpdatingStartMinimized}
+                      onChange={() => void handleToggleStartMinimized()}
+                      ariaLabel="Khởi động thu nhỏ vào khay"
+                    />
                   </div>
                 </div>
 
                 {/* Demo Privacy Shield */}
-                <div className="flex items-center justify-between rounded-xl border border-amber-500/30 bg-amber-950/10 p-4">
+                <div className="flex items-center justify-between gap-4 rounded-xl border border-amber-500/30 bg-amber-950/10 p-4">
                   <div>
-                    <div className="flex items-center gap-2 text-amber-400 font-semibold text-sm">
-                      <Shield className="w-4 h-4" />
+                    <div className="flex items-center gap-2 text-sm font-semibold text-amber-400">
+                      <Shield className="h-4 w-4" />
                       <span>Demo Privacy Shield</span>
                     </div>
-                    <p className="text-xs text-slate-400 mt-1">
+                    <p className="mt-1 text-xs text-zinc-400">
                       Ẩn MSSV và tên định danh khi chụp ảnh màn hình hoặc demo thuyết trình.
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={toggleDemoMode}
-                    className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg font-mono text-xs font-bold border transition cursor-pointer ${
-                      isDemoMode
-                        ? 'bg-amber-500/30 text-amber-300 border-amber-500/60'
-                        : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
-                    }`}
-                  >
-                    <span>{isDemoMode ? 'ĐANG BẬT (ON)' : 'TẮT (OFF)'}</span>
-                  </button>
+                  <UitToggle
+                    checked={isDemoMode}
+                    onChange={toggleDemoMode}
+                    ariaLabel="Demo Privacy Shield"
+                  />
                 </div>
 
                 {/* Storage & DB Stats */}
@@ -1114,27 +1436,31 @@ export const SettingsModal: React.FC<SettingsModalProps> = () => {
 
                   {loadingStats ? (
                     <div className="flex items-center justify-center p-6 text-zinc-400">
-                      <Loader2 className="w-5 h-5 animate-spin" />
+                      <Loader2 className="h-5 w-5 animate-spin" />
                     </div>
                   ) : (
                     <div className="grid grid-cols-3 gap-3">
-                      <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3.5 text-center">
-                        <p className="font-mono text-[10px] text-zinc-500 uppercase">Dung lượng dữ liệu</p>
-                        <p className="font-mono text-base font-bold text-zinc-100 mt-1">
+                      <div className="rounded-xl border border-[#1D263B] bg-[#080B12] p-3.5 text-center">
+                        <p className="font-mono text-[10px] uppercase text-zinc-500">
+                          Dung lượng dữ liệu
+                        </p>
+                        <p className="mt-1 font-mono text-base font-bold text-zinc-100">
                           {formatBytes(storageStats?.db_size_bytes || 0)}
                         </p>
                       </div>
 
-                      <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3.5 text-center">
-                        <p className="font-mono text-[10px] text-zinc-500 uppercase">Bộ đệm tạm</p>
-                        <p className="font-mono text-base font-bold text-zinc-300 mt-1">
+                      <div className="rounded-xl border border-[#1D263B] bg-[#080B12] p-3.5 text-center">
+                        <p className="font-mono text-[10px] uppercase text-zinc-500">Bộ đệm tạm</p>
+                        <p className="mt-1 font-mono text-base font-bold text-zinc-300">
                           {formatBytes(storageStats?.wal_size_bytes || 0)}
                         </p>
                       </div>
 
-                      <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3.5 text-center">
-                        <p className="font-mono text-[10px] text-zinc-500 uppercase">Tổng số bản ghi</p>
-                        <p className="font-mono text-base font-bold text-emerald-400 mt-1">
+                      <div className="rounded-xl border border-[#1D263B] bg-[#080B12] p-3.5 text-center">
+                        <p className="font-mono text-[10px] uppercase text-zinc-500">
+                          Tổng số bản ghi
+                        </p>
+                        <p className="mt-1 font-mono text-base font-bold text-[#6B9BFF]">
                           {storageStats?.total_records_count?.toLocaleString() || 0}
                         </p>
                       </div>
@@ -1142,28 +1468,93 @@ export const SettingsModal: React.FC<SettingsModalProps> = () => {
                   )}
                 </div>
 
-                {/* Auto-Updater Section */}
-                <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-4 space-y-3">
-                  <div className="flex items-center justify-between">
+                {/* Auto-Updater Section (Codex / Antigravity style) */}
+                <div className="space-y-3 rounded-xl border border-[#1D263B] bg-[#080B12] p-4">
+                  <div className="flex items-center justify-between gap-3">
                     <div>
-                      <div className="flex items-center gap-2 text-zinc-200 font-semibold text-xs font-mono">
-                        <ArrowUpCircle className="w-4 h-4 text-emerald-400" />
+                      <div className="flex items-center gap-2 font-mono text-xs font-semibold text-zinc-100">
+                        <ArrowUpCircle className="h-4 w-4 text-[#6B9BFF]" />
                         <span>CẬP NHẬT ỨNG DỤNG</span>
                       </div>
-                      <p className="text-[11px] text-zinc-400 mt-1">
-                        Phiên bản hiện tại: <span className="font-mono text-emerald-400">{APP_VERSION}</span>
+                      <p className="mt-1 text-[11px] text-zinc-400">
+                        Phiên bản hiện tại:{' '}
+                        <span className="font-mono text-emerald-400">{APP_VERSION}</span>
+                        {lastCheckedAt ? (
+                          <span className="ml-2 text-zinc-500">
+                            · Kiểm tra lúc {formatLastCheckedTime(lastCheckedAt)}
+                          </span>
+                        ) : null}
                       </p>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        window.dispatchEvent(new CustomEvent('check-app-updates'));
-                      }}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-mono text-xs transition cursor-pointer"
-                    >
-                      <RefreshCw className="w-3.5 h-3.5" />
-                      <span>Kiểm tra bản mới</span>
-                    </button>
+                    <div className="flex items-center gap-2">
+                      {updateStatus === 'available' && updateInfo && onInstallUpdate && (
+                        <button
+                          type="button"
+                          onClick={onInstallUpdate}
+                          className={`${primaryBtnCls} py-1.5 px-3`}
+                        >
+                          Cập nhật v{updateInfo.version}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        disabled={isCheckingUpdate}
+                        onClick={() => {
+                          if (onCheckUpdates) {
+                            onCheckUpdates();
+                          } else {
+                            window.dispatchEvent(new CustomEvent('check-app-updates'));
+                          }
+                        }}
+                        className={`${secondaryBtnCls} py-1.5 px-3`}
+                      >
+                        <RefreshCw
+                          className={`h-3.5 w-3.5 ${isCheckingUpdate ? 'animate-spin text-[#6B9BFF]' : ''}`}
+                        />
+                        <span>{isCheckingUpdate ? 'Đang kiểm tra...' : 'Kiểm tra bản mới'}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {updateStatus !== 'idle' && (
+                    <div className="border-t border-[#1D263B]/70 pt-2.5 text-xs">
+                      {updateStatus === 'checking' && (
+                        <span className="text-zinc-400">Đang kết nối máy chủ phát hành để kiểm tra phiên bản mới...</span>
+                      )}
+                      {updateStatus === 'up-to-date' && (
+                        <span className="flex items-center gap-1.5 text-emerald-400">
+                          <CheckCircle2 className="h-3.5 w-3.5" />
+                          <span>Diark OS đang ở phiên bản mới nhất ({APP_VERSION}).</span>
+                        </span>
+                      )}
+                      {updateStatus === 'available' && updateInfo && (
+                        <span className="text-[#6B9BFF]">
+                          Đã có bản cập nhật mới <span className="font-mono font-semibold">v{updateInfo.version}</span>. Bấm &ldquo;Cập nhật&rdquo; để tải và cài đặt tự động.
+                        </span>
+                      )}
+                      {updateStatus === 'downloading' && (
+                        <span className="text-[#6B9BFF]">Đang tải bản cập nhật...</span>
+                      )}
+                      {updateStatus === 'error' && updateError && (
+                        <span className="text-rose-400">Không thể kiểm tra: {updateError}</span>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-between gap-4 border-t border-[#1D263B]/80 pt-3">
+                    <div>
+                      <p className="text-xs font-semibold text-zinc-200">
+                        Tự động kiểm tra bản cập nhật
+                      </p>
+                      <p className="mt-0.5 text-[11px] text-zinc-500">
+                        Kiểm tra ngầm khi khởi động và định kỳ mỗi 4 giờ, thông báo ngay khi có bản phát hành mới.
+                      </p>
+                    </div>
+                    <UitToggle
+                      checked={autoCheckUpdates}
+                      onChange={() => onToggleAutoCheckUpdates?.(!autoCheckUpdates)}
+                      ariaLabel="Tự động kiểm tra bản cập nhật"
+                    />
                   </div>
                 </div>
               </div>

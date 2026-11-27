@@ -1,9 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
-  RefreshCw,
   AlertCircle,
   CheckCircle2,
-  Download,
+  Eye,
+  EyeOff,
+  RefreshCw,
 } from "lucide-react";
 import { useSyncOrchestratorStore } from "./stores/syncOrchestratorStore";
 import { useAcademicRadar } from "./hooks/useAcademicRadar";
@@ -13,7 +14,6 @@ import { SyncPortalModal } from "./components/SyncPortalModal";
 import { ArchiveRitualModal } from "./components/ArchiveRitualModal";
 import { SemesterTabs } from "./components/SemesterTabs";
 import { AcademicCourseTable } from "./components/AcademicCourseTable";
-import { StudentIdentityChip } from "./components/StudentIdentityChip";
 import { GraduationAuditCard } from "./components/GraduationAuditCard";
 import { ExamRadarCard } from "./components/ExamRadarCard";
 import {
@@ -29,8 +29,17 @@ import {
   getPortalCertificates,
   getPortalRegisteredClasses,
   getPortalClassActivities,
+  getStudentProfile,
+  type StudentProfilePayload,
 } from "../../lib/tauri-client";
 import { listen } from "@tauri-apps/api/event";
+import { usePrivacyStore } from "../../stores/usePrivacyStore";
+import {
+  formatVietnameseName,
+  maskClassName,
+  maskFullName,
+  maskStudentId,
+} from "../../utils/masking";
 import type { AcademicCourseRecord, AcademicMacroMetricSSOT } from "./types";
 import type {
   PortalCertificate,
@@ -67,16 +76,18 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
     overview,
     selectedSemesterId,
     courses,
-    isLoadingOverview,
     isLoadingCourses,
     error,
     selectSemester,
     refetchOverview,
   } = useAcademicRadar();
 
+  const isDemoMode = usePrivacyStore((s) => s.isDemoMode);
+  const toggleDemoMode = usePrivacyStore((s) => s.toggleDemoMode);
+
   const [activeSubTab, setActiveSubTab] = useState<AcademicSubTab>("transcript");
   const [macroMetrics, setMacroMetrics] = useState<AcademicMacroMetricSSOT[]>([]);
-  const [isLoadingMacro, setIsLoadingMacro] = useState<boolean>(false);
+  const [studentProfile, setStudentProfile] = useState<StudentProfilePayload | null>(null);
   const [allCourses, setAllCourses] = useState<AcademicCourseRecord[]>([]);
   const [isLoadingAllCourses, setIsLoadingAllCourses] = useState<boolean>(false);
   const [radarScope, setRadarScope] = useState<"all" | "semester">("all");
@@ -92,14 +103,14 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
 
   const loadMacroMetrics = useCallback(async () => {
     try {
-      setIsLoadingMacro(true);
-      const [data, curr, tuition, certs, classes, acts] = await Promise.allSettled([
+      const [data, curr, tuition, certs, classes, acts, prof] = await Promise.allSettled([
         getAcademicMacroMetricsSsot(),
         getResolvedCurriculum(),
         getPortalTuition(),
         getPortalCertificates(),
         getPortalRegisteredClasses(),
         getPortalClassActivities(),
+        getStudentProfile(),
       ]);
       if (data.status === "fulfilled") setMacroMetrics(data.value);
       if (curr.status === "fulfilled") setCurriculumCredits(curr.value.total_credits);
@@ -107,15 +118,27 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
       if (certs.status === "fulfilled") setCertificates(certs.value);
       if (classes.status === "fulfilled") setRegisteredClasses(classes.value);
       if (acts.status === "fulfilled") setClassActivities(acts.value);
+      if (prof.status === "fulfilled" && prof.value) setStudentProfile(prof.value);
     } catch (err) {
       console.error("Không thể nạp academic_macro_metrics SSOT:", err);
-    } finally {
-      setIsLoadingMacro(false);
     }
   }, []);
 
   useEffect(() => {
     void loadMacroMetrics();
+  }, [loadMacroMetrics]);
+
+  useEffect(() => {
+    const unlistenProf = listen<StudentProfilePayload>("student-profile-synced", (event) => {
+      if (event.payload) setStudentProfile(event.payload);
+    });
+    const unlistenExtra = listen("portal-extra-synced", () => {
+      void loadMacroMetrics();
+    });
+    return () => {
+      void unlistenProf.then((fn) => fn());
+      void unlistenExtra.then((fn) => fn());
+    };
   }, [loadMacroMetrics]);
 
   useEffect(() => {
@@ -173,7 +196,12 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
 
     for (const c of uniqueCourses) {
       if (c.isPassed) currentEarnedCredits += c.credits;
-      if (c.isGpaCalculated && c.credits > 0 && c.summaryScore10 !== null && c.summaryScore10 !== undefined) {
+      if (
+        c.isGpaCalculated &&
+        c.credits > 0 &&
+        c.summaryScore10 !== null &&
+        c.summaryScore10 !== undefined
+      ) {
         currentTotalWeighted10 += c.summaryScore10 * c.credits;
         currentGpaCredits += c.credits;
       }
@@ -199,8 +227,12 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
 
     return {
       cGpa10: Number(cGpa10.toFixed(2)),
-      currentGpaCredits: currentGpaCredits > 0 ? currentGpaCredits : (latest ? latest.cumulativeCredits : 0),
-      currentEarnedCredits: Math.max(currentEarnedCredits, latest ? latest.cumulativeCredits : 0),
+      currentGpaCredits:
+        currentGpaCredits > 0 ? currentGpaCredits : latest ? latest.cumulativeCredits : 0,
+      currentEarnedCredits: Math.max(
+        currentEarnedCredits,
+        latest ? latest.cumulativeCredits : 0
+      ),
       currentTotalWeighted10,
     };
   }, [allCourses, macroMetrics]);
@@ -219,35 +251,11 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
 
   const isPortalSyncing = useSyncOrchestratorStore((s) => s.serviceState.portal.isSyncing);
   const portalAuthStatus = useSyncOrchestratorStore((s) => s.serviceState.portal.authStatus);
-  const requestSync = useSyncOrchestratorStore((s) => s.requestSync);
 
   const [scrapeFeedback, setScrapeFeedback] = useState<{
     type: "success" | "error" | "info";
     text: string;
   } | null>(null);
-
-  const handleRefreshClick = useCallback(async () => {
-    setScrapeFeedback(null);
-    void handleRefresh();
-    try {
-      const ok = await requestSync("portal", {
-        bypassTtl: true,
-        bypassCircuitBreaker: true,
-      });
-      if (ok) {
-        setScrapeFeedback({
-          type: "info",
-          text: "Đang đồng bộ dữ liệu Portal UIT...",
-        });
-      }
-    } catch (err) {
-      console.error("Lỗi cạo dữ liệu Cổng UIT:", err);
-      setScrapeFeedback({
-        type: "error",
-        text: "Không thể kết nối tới trình cạo dữ liệu.",
-      });
-    }
-  }, [handleRefresh, requestSync]);
 
   useEffect(() => {
     const unlisten = listen<string>("portal-sync-failed", (event) => {
@@ -297,64 +305,159 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
     }
     return macroMetrics.length > 0 ? macroMetrics[macroMetrics.length - 1] : null;
   }, [macroMetrics]);
+
+  const averageDrl = useMemo(() => {
+    const completed = macroMetrics.filter((m) => m.termGpa > 0 && m.drlScore > 0);
+    const valid = completed.length > 0 ? completed : macroMetrics.filter((m) => m.drlScore > 0);
+    if (valid.length === 0) return null;
+    const sum = valid.reduce((acc, m) => acc + m.drlScore, 0);
+    return Number((sum / valid.length).toFixed(1));
+  }, [macroMetrics]);
+
+  const tabListRef = useRef<HTMLDivElement | null>(null);
+  const tabButtonRefs = useRef<Partial<Record<AcademicSubTab, HTMLButtonElement | null>>>({});
+  const [tabIndicator, setTabIndicator] = useState<{
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+    ready: boolean;
+  }>({ left: 0, top: 0, width: 0, height: 0, ready: false });
+
+  const updateTabIndicator = useCallback(() => {
+    const activeBtn = tabButtonRefs.current[activeSubTab];
+    if (!activeBtn) return;
+    setTabIndicator({
+      left: activeBtn.offsetLeft,
+      top: activeBtn.offsetTop,
+      width: activeBtn.offsetWidth,
+      height: activeBtn.offsetHeight,
+      ready: true,
+    });
+  }, [activeSubTab]);
+
+  useLayoutEffect(() => {
+    updateTabIndicator();
+  }, [updateTabIndicator]);
+
+  useEffect(() => {
+    window.addEventListener("resize", updateTabIndicator);
+    return () => window.removeEventListener("resize", updateTabIndicator);
+  }, [updateTabIndicator]);
+
+  const handleSyncAcademic = useCallback(() => {
+    if (portalAuthStatus === "expired") {
+      setIsSyncPortalModalOpen(true);
+    } else {
+      void useSyncOrchestratorStore.getState().requestSync("portal", {
+        bypassTtl: true,
+        bypassCircuitBreaker: true,
+      });
+    }
+  }, [portalAuthStatus]);
+
   const totalTuitionDebt = useMemo(
     () => tuitionRecords.reduce((acc, r) => acc + (r.remaining > 0 ? r.remaining : 0), 0),
     [tuitionRecords]
   );
 
-  const isRefreshing = isLoadingOverview || isLoadingMacro;
+  const rawFullName = studentProfile?.full_name
+    ? formatVietnameseName(studentProfile.full_name)
+    : "Sức khỏe học vụ UIT";
+  const displayName =
+    studentProfile?.full_name && isDemoMode ? maskFullName(rawFullName) : rawFullName;
+  const displayId = studentProfile?.student_id
+    ? isDemoMode
+      ? maskStudentId(studentProfile.student_id)
+      : studentProfile.student_id
+    : null;
+  const displayClass = studentProfile?.student_class
+    ? isDemoMode
+      ? maskClassName(studentProfile.student_class)
+      : studentProfile.student_class
+    : null;
+
+  const termBadge =
+    registeredClasses.length > 0 && registeredClasses[0].hoc_ky > 0
+      ? `Đang học · HK${registeredClasses[0].hoc_ky}`
+      : "Đang học";
 
   return (
     <div className={`mx-auto max-w-7xl space-y-4 ${className}`}>
-      {/* Compact Header & Action Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/[0.07] bg-[#121213] px-4 py-3.5">
-        <div>
-          <h2 className="text-sm font-semibold text-white">Sức khỏe học vụ UIT</h2>
-          <div className="mt-1 flex flex-wrap items-center gap-4 divide-x divide-white/[0.08] text-xs">
-            <span className="text-zinc-400">
-              GPA tích lũy{" "}
-              <strong className="font-mono tabular-nums text-zinc-100">
+      {/* Single Merged Compact Academic Header */}
+      <div className="flex flex-col gap-3 rounded-xl border border-[#1D263B] bg-[#0F1420] px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
+        {/* Left: Student Identity + Meta */}
+        <div className="min-w-0 space-y-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="truncate text-sm font-semibold tracking-tight text-white">
+              {displayName}
+            </h2>
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-[#1D263B] bg-[#080B12] px-2 py-0.5 text-[11px] font-medium text-zinc-300">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+              {termBadge}
+            </span>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-xs text-[#71717A]">
+            {displayId && <span className="text-zinc-300">MSSV: {displayId}</span>}
+            {displayClass && (
+              <>
+                <span className="text-zinc-600">·</span>
+                <span>Lớp: {displayClass}</span>
+              </>
+            )}
+            {studentProfile?.cohort && (
+              <>
+                <span className="text-zinc-600">·</span>
+                <span>{studentProfile.cohort}</span>
+              </>
+            )}
+            <span className="text-zinc-600 hidden sm:inline">·</span>
+            <span className="font-sans text-[#71717A]">
+              GPA{" "}
+              <strong className="font-mono font-semibold tabular-nums text-[#F4F4F5]">
                 {latestMacro ? latestMacro.cumulativeGpa.toFixed(2) : "—"}
               </strong>
-            </span>
-            <span className="pl-4 text-zinc-400">
-              Tín chỉ{" "}
-              <strong className="font-mono tabular-nums text-zinc-100">
+              {" · "}
+              <strong className="font-mono font-semibold tabular-nums text-[#F4F4F5]">
                 {latestMacro ? `${latestMacro.cumulativeCredits}/${curriculumCredits}` : `0/${curriculumCredits}`}
-              </strong>
-            </span>
-            <span className="pl-4 text-zinc-400">
+              </strong>{" "}
+              TC
+              {" · "}
               ĐRL{" "}
-              <strong className="font-mono tabular-nums text-emerald-400">
-                {latestMacro ? latestMacro.drlScore : "—"}
+              <strong
+                title="Điểm rèn luyện trung bình các học kỳ đã có điểm"
+                className="font-mono font-semibold tabular-nums text-[#F4F4F5]"
+              >
+                {averageDrl !== null ? averageDrl : "—"}
               </strong>
-            </span>
-            <span className="pl-4 text-zinc-400">
+              {" · "}
               Học phí{" "}
               <strong
-                className={`font-mono tabular-nums ${
-                  totalTuitionDebt > 0 ? "text-amber-400" : "text-zinc-300"
+                className={`font-mono font-semibold tabular-nums ${
+                  totalTuitionDebt > 0 ? "text-amber-400" : "text-[#F4F4F5]"
                 }`}
               >
                 {tuitionRecords.length === 0
                   ? "—"
                   : totalTuitionDebt > 0
                   ? `Nợ ${formatVnd(totalTuitionDebt)}`
-                  : "Đã đóng đủ"}
+                  : "Đã đóng"}
               </strong>
             </span>
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        {/* Right: Feedback pill + Eye toggle + Compact Icon Sync */}
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
           {scrapeFeedback && !isPortalSyncing && (
             <div
-              className={`flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs ${
+              className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs ${
                 scrapeFeedback.type === "success"
-                  ? "border-emerald-900/60 bg-emerald-950/40 text-emerald-300"
+                  ? "border-emerald-500/30 bg-emerald-950/40 text-emerald-300"
                   : scrapeFeedback.type === "error"
-                  ? "border-rose-900/60 bg-rose-950/40 text-rose-300"
-                  : "border-zinc-800 bg-zinc-900 text-zinc-300"
+                  ? "border-rose-500/30 bg-rose-950/40 text-rose-300"
+                  : "border-[#1D263B] bg-[#080B12] text-zinc-300"
               }`}
             >
               {scrapeFeedback.type === "success" && (
@@ -369,49 +472,73 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
 
           <button
             type="button"
-            onClick={() => void handleRefreshClick()}
-            disabled={isPortalSyncing || isRefreshing}
-            className="flex h-8 items-center gap-1.5 rounded-lg border border-white/[0.08] bg-[#18181b] px-3 text-xs font-medium text-zinc-300 transition-colors duration-150 hover:border-white/[0.15] hover:bg-[#222226] hover:text-white disabled:opacity-50 cursor-pointer"
+            onClick={toggleDemoMode}
+            title={
+              isDemoMode
+                ? "Chế độ riêng tư: Đang bật (Click để hiện thông tin)"
+                : "Chế độ riêng tư: Đang tắt (Click để ẩn thông tin)"
+            }
+            aria-label="Ẩn/hiện thông tin cá nhân"
+            className={`flex h-8 w-8 items-center justify-center rounded-lg border transition-colors cursor-pointer ${
+              isDemoMode
+                ? "border-[#2F6BFF]/45 bg-[#2F6BFF]/[0.16] text-[#6B9BFF]"
+                : "border-[#1D263B] bg-[#080B12] text-zinc-400 hover:border-[#2F6BFF]/40 hover:bg-[#151C2C] hover:text-zinc-200"
+            }`}
           >
-            <RefreshCw
-              className={`h-3.5 w-3.5 ${isPortalSyncing || isRefreshing ? "animate-spin text-emerald-400" : ""}`}
-              aria-hidden="true"
-            />
-            <span>{isPortalSyncing ? "Đang đồng bộ..." : "Làm mới"}</span>
+            {isDemoMode ? (
+              <EyeOff className="h-4 w-4" aria-hidden="true" />
+            ) : (
+              <Eye className="h-4 w-4" aria-hidden="true" />
+            )}
           </button>
 
           <button
             type="button"
-            onClick={() => setIsSyncPortalModalOpen(true)}
-            className="flex h-8 items-center gap-1.5 rounded-lg bg-white px-3 text-xs font-semibold text-[#09090b] transition-colors duration-150 hover:bg-zinc-200 active:scale-[0.98] cursor-pointer"
+            onClick={handleSyncAcademic}
+            disabled={isPortalSyncing}
+            title="Đồng bộ Học vụ (F5)"
+            aria-label="Đồng bộ Học vụ"
+            className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#2F6BFF] text-white transition-colors duration-150 hover:bg-[#255CE6] active:scale-[0.98] disabled:opacity-60 cursor-pointer"
           >
-            <Download className="h-3.5 w-3.5" aria-hidden="true" />
-            <span>Đồng bộ Portal</span>
+            <RefreshCw className={`h-3.5 w-3.5 ${isPortalSyncing ? "animate-spin" : ""}`} aria-hidden="true" />
           </button>
         </div>
       </div>
 
-      <StudentIdentityChip />
-
-      {/* Sub-Tab Bar — tránh cuộn dài */}
+      {/* Sub-Tab Bar with Sliding Active Indicator */}
       <div
+        ref={tabListRef}
         role="tablist"
         aria-label="Phân mục Học vụ"
-        className="flex flex-wrap items-center gap-1 border-b border-white/[0.07] pb-2"
+        className="relative flex flex-wrap items-center gap-1.5 border-b border-[#1D263B] pb-2"
       >
+        {tabIndicator.ready && (
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute top-0 left-0 rounded-lg border border-[#2F6BFF]/55 bg-[#2F6BFF]/[0.14] transition-[transform,width] duration-[180ms] ease-out motion-reduce:transition-none"
+            style={{
+              width: `${tabIndicator.width}px`,
+              height: `${tabIndicator.height}px`,
+              transform: `translate3d(${tabIndicator.left}px, ${tabIndicator.top}px, 0)`,
+            }}
+          />
+        )}
         {SUB_TABS.map((tab) => {
           const isActive = activeSubTab === tab.id;
           return (
             <button
               key={tab.id}
+              ref={(el) => {
+                tabButtonRefs.current[tab.id] = el;
+              }}
               type="button"
               role="tab"
               aria-selected={isActive}
               onClick={() => setActiveSubTab(tab.id)}
-              className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors duration-150 cursor-pointer ${
+              className={`relative z-10 rounded-lg border border-transparent px-3 py-1.5 text-xs transition-colors duration-150 cursor-pointer ${
                 isActive
-                  ? "border border-white/[0.08] bg-[#1d1d20] text-white"
-                  : "border border-transparent text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-200"
+                  ? "font-semibold text-[#6B9BFF]"
+                  : "font-medium text-zinc-400 hover:text-zinc-200"
               }`}
             >
               {tab.label}
@@ -421,7 +548,10 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
       </div>
 
       {error && (
-        <div className="rounded-md border border-rose-900/50 bg-rose-950/40 p-3 text-xs text-rose-300" role="alert">
+        <div
+          className="rounded-lg border border-rose-500/30 bg-rose-950/40 p-3 text-xs text-rose-300"
+          role="alert"
+        >
           {error}
         </div>
       )}
@@ -440,6 +570,7 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
               isLoading={isLoadingCourses}
               currentMacro={currentMacro}
               currentSemester={currentSemester}
+              semesterKey={selectedSemesterId ?? "none"}
               onArchiveClick={() => setIsArchiveModalOpen(true)}
             />
           </div>
@@ -449,20 +580,27 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
       {/* SUB-TAB 2: Tổng quan & CTĐT */}
       {activeSubTab === "overview" && (
         <div className="space-y-4">
-          <GraduationAuditCard onRefreshTrigger={() => { void handleRefresh(); }} />
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-12 items-start">
-            <div className="xl:col-span-5 rounded-lg border border-zinc-800/80 bg-zinc-900/40 p-4">
-              <div className="flex items-center justify-between border-b border-zinc-800 pb-3 mb-3">
+          <GraduationAuditCard
+            onRefreshTrigger={() => {
+              void handleRefresh();
+            }}
+          />
+          <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-12">
+            {/* Sticky Left Radar Column */}
+            <div className="rounded-xl border border-[#1D263B] bg-[#0F1420] p-4 xl:sticky xl:top-4 xl:col-span-5 xl:self-start">
+              <div className="mb-3 flex items-center justify-between border-b border-[#1D263B] pb-3">
                 <div>
                   <h3 className="text-xs font-semibold text-zinc-100">Phân bố khối kiến thức</h3>
                   <p className="text-[11px] text-zinc-500">4 nhóm chuẩn CTĐT UIT</p>
                 </div>
-                <div className="flex items-center rounded-md border border-zinc-800 bg-zinc-950 p-0.5 text-xs">
+                <div className="flex items-center rounded-md border border-[#1D263B] bg-[#080B12] p-0.5 text-xs">
                   <button
                     type="button"
                     onClick={() => setRadarScope("all")}
-                    className={`rounded px-2 py-1 text-xs cursor-pointer ${
-                      radarScope === "all" ? "bg-zinc-800 text-zinc-100" : "text-zinc-500 hover:text-zinc-300"
+                    className={`rounded px-2 py-1 text-xs transition-colors cursor-pointer ${
+                      radarScope === "all"
+                        ? "bg-[#2F6BFF]/[0.16] font-medium text-[#6B9BFF]"
+                        : "text-zinc-500 hover:text-zinc-300"
                     }`}
                   >
                     Toàn khóa
@@ -470,8 +608,10 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
                   <button
                     type="button"
                     onClick={() => setRadarScope("semester")}
-                    className={`rounded px-2 py-1 text-xs cursor-pointer ${
-                      radarScope === "semester" ? "bg-zinc-800 text-zinc-100" : "text-zinc-500 hover:text-zinc-300"
+                    className={`rounded px-2 py-1 text-xs transition-colors cursor-pointer ${
+                      radarScope === "semester"
+                        ? "bg-[#2F6BFF]/[0.16] font-medium text-[#6B9BFF]"
+                        : "text-zinc-500 hover:text-zinc-300"
                     }`}
                   >
                     Kỳ này
@@ -485,11 +625,11 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
                   <AcademicRadarChart data={radarData} size={280} />
                 )}
               </div>
-              <div className="mt-3 grid grid-cols-2 gap-2 border-t border-zinc-800 pt-3 text-xs">
+              <div className="mt-3 grid grid-cols-2 gap-2 border-t border-[#1D263B] pt-3 text-xs">
                 {radarData.map((item) => (
                   <div
                     key={item.category}
-                    className="flex items-center justify-between rounded border border-zinc-800/70 bg-zinc-950/60 px-2.5 py-1.5"
+                    className="flex items-center justify-between rounded-lg border border-[#1D263B] bg-[#080B12] px-2.5 py-1.5"
                   >
                     <span className="truncate text-zinc-400">{item.shortLabel}</span>
                     <span className="font-mono font-semibold tabular-nums text-zinc-200">
@@ -519,30 +659,38 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
       {/* SUB-TAB 3: Học phí & Chứng chỉ */}
       {activeSubTab === "finance" && (
         <div className="space-y-4">
-          <section className="rounded-lg border border-zinc-800/80 bg-zinc-900/40 overflow-hidden">
-            <div className="border-b border-zinc-800 px-4 py-3">
+          <section className="overflow-hidden rounded-xl border border-[#1D263B] bg-[#0F1420]">
+            <div className="border-b border-[#1D263B] px-4 py-3">
               <h3 className="text-xs font-semibold text-zinc-100">Học phí theo học kỳ</h3>
             </div>
             {tuitionRecords.length === 0 ? (
-              <div className="px-4 py-6 text-center text-xs text-zinc-500">
-                Chưa có dữ liệu học phí. Hãy bấm Đồng bộ Portal.
+              <div className="flex flex-col items-center gap-3 px-4 py-7 text-center text-xs text-zinc-400">
+                <p>Chưa có dữ liệu học phí. Nhấn F5 hoặc nút đồng bộ để cập nhật.</p>
+                <button
+                  type="button"
+                  onClick={handleSyncAcademic}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-[#1D263B] bg-[#151C2C] px-3.5 text-xs font-medium text-zinc-200 transition-colors hover:border-[#2F6BFF]/50 hover:text-white cursor-pointer"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 text-[#6B9BFF] ${isPortalSyncing ? "animate-spin" : ""}`} aria-hidden="true" />
+                  <span>Đồng bộ ngay</span>
+                </button>
               </div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs">
-                  <thead className="border-b border-zinc-800 bg-zinc-950/60 text-zinc-500">
+                  <thead className="border-b border-[#1D263B] bg-[#080B12] text-zinc-500">
                     <tr>
                       <th className="px-4 py-2 font-medium">Học kỳ</th>
-                      <th className="px-4 py-2 font-medium text-right">Phải đóng</th>
-                      <th className="px-4 py-2 font-medium text-right">Đã đóng</th>
-                      <th className="px-4 py-2 font-medium text-right">Còn nợ</th>
+                      <th className="px-4 py-2 text-right font-medium">Phải đóng</th>
+                      <th className="px-4 py-2 text-right font-medium">Đã đóng</th>
+                      <th className="px-4 py-2 text-right font-medium">Còn nợ</th>
                       <th className="px-4 py-2 font-medium">Trạng thái</th>
                       <th className="px-4 py-2 font-medium">Hạn / Ngày đóng</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-zinc-800/60">
+                  <tbody className="divide-y divide-[#1D263B]/60">
                     {tuitionRecords.map((rec) => (
-                      <tr key={rec.id} className="hover:bg-zinc-900/60">
+                      <tr key={rec.id} className="transition-colors hover:bg-[#151C2C]">
                         <td className="px-4 py-2.5 font-medium text-zinc-200">{rec.period}</td>
                         <td className="px-4 py-2.5 text-right font-mono tabular-nums text-zinc-300">
                           {formatVnd(rec.must_be_paid)}
@@ -552,7 +700,7 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
                         </td>
                         <td
                           className={`px-4 py-2.5 text-right font-mono font-semibold tabular-nums ${
-                            rec.remaining > 0 ? "text-amber-400" : "text-emerald-400"
+                            rec.remaining > 0 ? "text-amber-400" : "text-[#F4F4F5]"
                           }`}
                         >
                           {formatVnd(rec.remaining)}
@@ -572,16 +720,16 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
           </section>
 
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <section className="rounded-lg border border-zinc-800/80 bg-zinc-900/40 overflow-hidden">
-              <div className="border-b border-zinc-800 px-4 py-3">
-                <h3 className="text-xs font-semibold text-zinc-100">Chứng chỉ & Chuẩn đầu ra</h3>
+            <section className="overflow-hidden rounded-xl border border-[#1D263B] bg-[#0F1420]">
+              <div className="border-b border-[#1D263B] px-4 py-3">
+                <h3 className="text-xs font-semibold text-zinc-100">Chứng chỉ &amp; Chuẩn đầu ra</h3>
               </div>
               {certificates.length === 0 ? (
                 <div className="px-4 py-6 text-center text-xs text-zinc-500">
                   Chưa ghi nhận chứng chỉ nào trên Portal.
                 </div>
               ) : (
-                <div className="divide-y divide-zinc-800/60">
+                <div className="divide-y divide-[#1D263B]/60">
                   {certificates.map((c) => (
                     <div key={c.id} className="flex items-center justify-between px-4 py-2.5 text-xs">
                       <div>
@@ -601,8 +749,8 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
                         <span
                           className={`rounded px-1.5 py-0.5 font-mono text-[10px] ${
                             c.output_standard
-                              ? "border border-emerald-900/60 bg-emerald-950/60 text-emerald-300"
-                              : "bg-zinc-800 text-zinc-400"
+                              ? "border border-emerald-500/30 bg-emerald-950/60 text-emerald-300"
+                              : "border border-[#1D263B] bg-[#080B12] text-zinc-400"
                           }`}
                         >
                           {c.status}
@@ -614,8 +762,8 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
               )}
             </section>
 
-            <section className="rounded-lg border border-zinc-800/80 bg-zinc-900/40 overflow-hidden">
-              <div className="border-b border-zinc-800 px-4 py-3">
+            <section className="overflow-hidden rounded-xl border border-[#1D263B] bg-[#0F1420]">
+              <div className="border-b border-[#1D263B] px-4 py-3">
                 <h3 className="text-xs font-semibold text-zinc-100">Lịch sinh hoạt lớp</h3>
               </div>
               {classActivities.length === 0 ? (
@@ -623,12 +771,13 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
                   Không có lịch sinh hoạt lớp sắp tới.
                 </div>
               ) : (
-                <div className="divide-y divide-zinc-800/60">
+                <div className="divide-y divide-[#1D263B]/60">
                   {classActivities.map((act) => (
                     <div key={act.id} className="px-4 py-2.5 text-xs">
                       <div className="font-medium text-zinc-200">{act.noi_dung}</div>
                       <div className="mt-0.5 font-mono text-[11px] text-zinc-500">
-                        {act.ngay} · Phòng {act.dia_diem || "—"} {act.gv_chu_tri ? `· ${act.gv_chu_tri}` : ""}
+                        {act.ngay} · Phòng {act.dia_diem || "—"}{" "}
+                        {act.gv_chu_tri ? `· ${act.gv_chu_tri}` : ""}
                       </div>
                     </div>
                   ))}
@@ -642,29 +791,29 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
       {/* SUB-TAB 4: Lớp học phần & Thi */}
       {activeSubTab === "classes" && (
         <div className="space-y-4">
-          <section className="rounded-lg border border-zinc-800/80 bg-zinc-900/40 overflow-hidden">
-            <div className="border-b border-zinc-800 px-4 py-3">
+          <section className="overflow-hidden rounded-xl border border-[#1D263B] bg-[#0F1420]">
+            <div className="border-b border-[#1D263B] px-4 py-3">
               <h3 className="text-xs font-semibold text-zinc-100">
                 Lớp học phần đã đăng ký ({registeredClasses.length})
               </h3>
             </div>
             {registeredClasses.length === 0 ? (
               <div className="px-4 py-6 text-center text-xs text-zinc-500">
-                Chưa có danh sách lớp đăng ký. Hãy bấm Đồng bộ Portal.
+                Chưa có danh sách lớp đăng ký. Nhấn F5 hoặc nút đồng bộ để cập nhật.
               </div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs">
-                  <thead className="border-b border-zinc-800 bg-zinc-950/60 text-zinc-500">
+                  <thead className="border-b border-[#1D263B] bg-[#080B12] text-zinc-500">
                     <tr>
                       <th className="px-4 py-2 font-medium">Mã lớp</th>
                       <th className="px-4 py-2 font-medium">Môn học</th>
-                      <th className="px-4 py-2 font-medium text-center">TC</th>
+                      <th className="px-4 py-2 text-center font-medium">TC</th>
                       <th className="px-4 py-2 font-medium">Giảng viên</th>
-                      <th className="px-4 py-2 font-medium">Lịch & Phòng</th>
+                      <th className="px-4 py-2 font-medium">Lịch &amp; Phòng</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-zinc-800/60">
+                  <tbody className="divide-y divide-[#1D263B]/60">
                     {registeredClasses.map((cls) => {
                       let slots: ClassSlot[] = [];
                       try {
@@ -674,8 +823,8 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
                         slots = [];
                       }
                       return (
-                        <tr key={cls.id} className="hover:bg-zinc-900/60">
-                          <td className="px-4 py-2.5 font-mono font-medium text-emerald-400">
+                        <tr key={cls.id} className="transition-colors hover:bg-[#151C2C]">
+                          <td className="px-4 py-2.5 font-mono font-medium text-[#6B9BFF]">
                             {cls.code}
                           </td>
                           <td className="px-4 py-2.5 text-zinc-200">{cls.subject_name}</td>
@@ -702,7 +851,7 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
             )}
           </section>
 
-          <ExamRadarCard onSyncPortal={() => setIsSyncPortalModalOpen(true)} />
+          <ExamRadarCard onSyncPortal={handleSyncAcademic} />
         </div>
       )}
 

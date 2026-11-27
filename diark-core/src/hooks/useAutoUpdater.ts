@@ -2,6 +2,9 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 
+const AUTO_CHECK_STORAGE_KEY = "diark_auto_check_updates";
+const AUTO_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000;
+
 export type UpdateStatus =
   | "idle"
   | "checking"
@@ -28,6 +31,9 @@ export interface UseAutoUpdaterReturn {
   error: string | null;
   isChecking: boolean;
   isDownloading: boolean;
+  autoCheckEnabled: boolean;
+  lastCheckedAt: number | null;
+  setAutoCheckEnabled: (enabled: boolean) => void;
   checkForUpdates: (manual?: boolean) => Promise<void>;
   installUpdate: () => Promise<void>;
   dismissUpdate: () => void;
@@ -40,9 +46,27 @@ export function useAutoUpdater(): UseAutoUpdaterReturn {
   const [downloadedBytes, setDownloadedBytes] = useState<number>(0);
   const [totalBytes, setTotalBytes] = useState<number>(0);
   const [error, setError] = useState<string | null>(null);
+  const [lastCheckedAt, setLastCheckedAt] = useState<number | null>(null);
+  const [autoCheckEnabled, setAutoCheckEnabledState] = useState<boolean>(() => {
+    try {
+      const saved = window.localStorage.getItem(AUTO_CHECK_STORAGE_KEY);
+      return saved === null ? true : saved === "true";
+    } catch {
+      return true;
+    }
+  });
 
   const pendingUpdateRef = useRef<Update | null>(null);
   const checkingLockRef = useRef<boolean>(false);
+
+  const setAutoCheckEnabled = useCallback((enabled: boolean) => {
+    setAutoCheckEnabledState(enabled);
+    try {
+      window.localStorage.setItem(AUTO_CHECK_STORAGE_KEY, enabled ? "true" : "false");
+    } catch {
+      // ignore storage restrictions
+    }
+  }, []);
 
   const checkForUpdates = useCallback(async (manual = false) => {
     if (checkingLockRef.current) return;
@@ -52,6 +76,7 @@ export function useAutoUpdater(): UseAutoUpdaterReturn {
 
     try {
       const update = await check();
+      setLastCheckedAt(Date.now());
 
       if (update && (update.available ?? true)) {
         pendingUpdateRef.current = update;
@@ -71,13 +96,12 @@ export function useAutoUpdater(): UseAutoUpdaterReturn {
       const message = err instanceof Error ? err.message : String(err);
       console.warn("[AutoUpdater] Check failed:", message);
       pendingUpdateRef.current = null;
+      setLastCheckedAt(Date.now());
 
       if (manual) {
         setError(message);
         setStatus("error");
       } else {
-        // Lỗi kiểm tra tự động khi app mount (offline, dev mode, hoặc repo chưa có release)
-        // không làm phiền người dùng.
         setStatus("idle");
       }
     } finally {
@@ -123,7 +147,6 @@ export function useAutoUpdater(): UseAutoUpdaterReturn {
         }
       });
 
-      // Sau khi cài đặt hoàn tất, gọi relaunch() để khởi động lại ứng dụng
       await relaunch();
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -137,15 +160,22 @@ export function useAutoUpdater(): UseAutoUpdaterReturn {
     setStatus("dismissed");
   }, []);
 
-  // Tự động kiểm tra bản cập nhật khi app mount
   useEffect(() => {
-    // Trì hoãn nhẹ 2.5s để nhường tài nguyên cho quá trình khởi động ban đầu
-    const timer = setTimeout(() => {
+    if (!autoCheckEnabled) return;
+
+    const initialTimer = window.setTimeout(() => {
       void checkForUpdates(false);
     }, 2500);
 
-    return () => clearTimeout(timer);
-  }, [checkForUpdates]);
+    const periodicTimer = window.setInterval(() => {
+      void checkForUpdates(false);
+    }, AUTO_CHECK_INTERVAL_MS);
+
+    return () => {
+      window.clearTimeout(initialTimer);
+      window.clearInterval(periodicTimer);
+    };
+  }, [autoCheckEnabled, checkForUpdates]);
 
   const isChecking = status === "checking";
   const isDownloading = status === "downloading";
@@ -159,6 +189,9 @@ export function useAutoUpdater(): UseAutoUpdaterReturn {
     error,
     isChecking,
     isDownloading,
+    autoCheckEnabled,
+    lastCheckedAt,
+    setAutoCheckEnabled,
     checkForUpdates,
     installUpdate,
     dismissUpdate,

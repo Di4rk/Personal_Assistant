@@ -1315,8 +1315,8 @@ impl PortalIngestionEngine {
                             rank_label = excluded.rank_label,
                             term_credits = excluded.term_credits,
                             cumulative_credits = excluded.cumulative_credits,
-                            drl = excluded.drl,
-                            drl_score = excluded.drl_score,
+                            drl = COALESCE(NULLIF(excluded.drl, 0), academic_macro_metrics.drl),
+                            drl_score = COALESCE(NULLIF(excluded.drl_score, 0), academic_macro_metrics.drl_score),
                             updated_at = excluded.updated_at",
                         params![
                             sem_id,
@@ -1387,8 +1387,8 @@ impl PortalIngestionEngine {
                         rank_label = excluded.rank_label,
                         term_credits = excluded.term_credits,
                         cumulative_credits = excluded.cumulative_credits,
-                        drl = excluded.drl,
-                        drl_score = excluded.drl_score,
+                        drl = COALESCE(NULLIF(excluded.drl, 0), academic_macro_metrics.drl),
+                        drl_score = COALESCE(NULLIF(excluded.drl_score, 0), academic_macro_metrics.drl_score),
                         updated_at = excluded.updated_at",
                     params![
                         sem_id,

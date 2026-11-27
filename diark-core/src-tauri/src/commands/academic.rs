@@ -1429,6 +1429,29 @@ pub fn ingest_portal_sync_payload_json(
     Ok(courses_count)
 }
 
+/// Đồng bộ điểm rèn luyện trực tiếp từ `https://drl.uit.edu.vn/` bằng HTTP session (DPAPI credentials).
+#[tauri::command]
+pub async fn sync_drl_from_uit(
+    app: tauri::AppHandle,
+    db: tauri::State<'_, SharedDb>,
+) -> Result<Vec<crate::modules::academic::drl_scraper::DrlSemesterScore>, String> {
+    let (username, password, _auto) = crate::commands::portal_extra::read_sso_settings(&db);
+    if username.trim().is_empty() || password.is_empty() {
+        return Err("Chưa lưu tài khoản SSO để đồng bộ điểm rèn luyện".to_string());
+    }
+
+    let scores = crate::modules::academic::drl_scraper::fetch_all_semester_drl(&username, &password).await?;
+
+    {
+        let mut conn = db.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
+        crate::db::academic::upsert_drl_from_site(&mut conn, &scores)
+            .map_err(|e| format!("Lỗi lưu ĐRL từ drl.uit.edu.vn: {e}"))?;
+    }
+
+    let _ = app.emit("academic-data-synced", ());
+    Ok(scores)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

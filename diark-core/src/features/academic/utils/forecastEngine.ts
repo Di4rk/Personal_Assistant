@@ -111,7 +111,7 @@ export function evaluateUitWorkload(creditsPerTerm: number): UitWorkloadEvaluati
     return {
       tier: "below_floor",
       creditsPerTerm,
-      label: "Mất quyền xét HB (<14 TC)",
+      label: "<14 TC · Mất HB",
       badgeColor: "text-amber-400 border-amber-500/40 bg-amber-950/50",
       advice:
         "Lưu ý: Đăng ký dưới 14 tín chỉ trong học kỳ chính sẽ mất tư cách tham gia xét Học bổng Khuyến khích Học tập (KKHT) theo quy chế đào tạo UIT.",
@@ -138,7 +138,7 @@ export function evaluateUitWorkload(creditsPerTerm: number): UitWorkloadEvaluati
       tier: "high_pace",
       creditsPerTerm,
       label: "Cường độ cao • Bao HB",
-      badgeColor: "text-cyan-400 border-cyan-500/40 bg-cyan-950/50",
+      badgeColor: "text-[#6B9BFF] border-[#2F6BFF]/40 bg-[#2F6BFF]/[0.16]",
       advice:
         "Đủ điều kiện học bổng nhưng áp lực thi cử, bài tập lớn dồn ứ cao.",
       scholarshipEligible: true,

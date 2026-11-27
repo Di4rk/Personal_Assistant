@@ -15,6 +15,8 @@ pub const GEMINI_EMIT_INTERVAL: Duration = Duration::from_millis(16);
 pub struct GeminiConfigDto {
     pub api_key: String,
     pub model: String,
+    #[serde(default)]
+    pub base_url: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -160,9 +162,76 @@ struct GeminiApiResponseWire {
     error: Option<GeminiApiErrorDetail>,
 }
 
+// Internal OpenAI-compatible API Wire Formats
+#[derive(Serialize)]
+struct OpenAiMessageWire {
+    role: String,
+    content: String,
+}
+
+#[derive(Serialize)]
+struct OpenAiChatRequestWire {
+    model: String,
+    messages: Vec<OpenAiMessageWire>,
+    temperature: f32,
+    max_tokens: u32,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    stream: bool,
+}
+
+#[derive(Deserialize)]
+struct OpenAiChoiceDelta {
+    content: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct OpenAiChoiceMessage {
+    content: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct OpenAiChoiceWire {
+    delta: Option<OpenAiChoiceDelta>,
+    message: Option<OpenAiChoiceMessage>,
+}
+
+#[derive(Deserialize)]
+struct OpenAiApiErrorDetail {
+    message: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct OpenAiResponseWire {
+    choices: Option<Vec<OpenAiChoiceWire>>,
+    error: Option<OpenAiApiErrorDetail>,
+}
+
 // ============================================================
-//  Gemini Configuration Store (SQLite settings table)
+//  AI Configuration Store & Endpoint Helpers
 // ============================================================
+
+pub fn is_gemini_native_endpoint(base_url: &str) -> bool {
+    let trimmed = base_url.trim();
+    if trimmed.is_empty() {
+        return true;
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    lower.contains("generativelanguage.googleapis.com") && !lower.contains("/openai")
+}
+
+pub fn is_local_endpoint(base_url: &str) -> bool {
+    let lower = base_url.trim().to_ascii_lowercase();
+    lower.contains("localhost") || lower.contains("127.0.0.1") || lower.contains("0.0.0.0")
+}
+
+pub fn build_openai_chat_url(base_url: &str) -> String {
+    let trimmed = base_url.trim().trim_end_matches('/');
+    if trimmed.ends_with("/chat/completions") {
+        trimmed.to_string()
+    } else {
+        format!("{trimmed}/chat/completions")
+    }
+}
 
 pub fn query_gemini_config(conn: &Connection) -> Result<GeminiConfigDto, rusqlite::Error> {
     let get_setting = |key: &str| -> Result<Option<String>, rusqlite::Error> {
@@ -175,15 +244,21 @@ pub fn query_gemini_config(conn: &Connection) -> Result<GeminiConfigDto, rusqlit
     };
 
     let api_key = get_setting("gemini_api_key")?.unwrap_or_default();
-    let model = get_setting("gemini_model")?.unwrap_or_else(|| "gemini-1.5-flash".to_string());
+    let model = get_setting("gemini_model")?.unwrap_or_else(|| "gemini-2.5-flash".to_string());
+    let base_url = get_setting("ai_base_url")?.unwrap_or_default();
 
-    Ok(GeminiConfigDto { api_key, model })
+    Ok(GeminiConfigDto {
+        api_key,
+        model,
+        base_url,
+    })
 }
 
 pub fn update_gemini_config(
     conn: &mut Connection,
     api_key: &str,
     model: &str,
+    base_url: &str,
 ) -> Result<(), rusqlite::Error> {
     let tx = conn.transaction()?;
 
@@ -199,8 +274,50 @@ pub fn update_gemini_config(
         params![model.trim()],
     )?;
 
+    tx.execute(
+        "INSERT INTO settings (key, value) VALUES ('ai_base_url', ?1)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        params![base_url.trim()],
+    )?;
+
     tx.commit()?;
     Ok(())
+}
+
+pub fn parse_openai_sse_line(line: &str) -> Result<Option<String>, String> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() || !trimmed.starts_with("data:") {
+        return Ok(None);
+    }
+
+    let json_str = trimmed.trim_start_matches("data:").trim();
+    if json_str == "[DONE]" {
+        return Ok(None);
+    }
+
+    let payload: OpenAiResponseWire = serde_json::from_str(json_str)
+        .map_err(|e| format!("Lỗi phân tích JSON stream AI: {e} | Raw: {json_str}"))?;
+
+    if let Some(err) = payload.error {
+        return Err(format!(
+            "AI API Error: {}",
+            err.message.unwrap_or_else(|| "Unknown error".to_string())
+        ));
+    }
+
+    if let Some(choices) = payload.choices {
+        for choice in choices {
+            if let Some(delta) = choice.delta {
+                if let Some(content) = delta.content {
+                    if !content.is_empty() {
+                        return Ok(Some(content));
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(None)
 }
 
 // ============================================================
@@ -364,8 +481,12 @@ YÊU CẦU BÓC TÁCH:
 //  API Client Operations (Streaming & Non-Streaming)
 // ============================================================
 
-pub async fn test_gemini_api_key(api_key: &str, model: &str) -> Result<String, String> {
-    if api_key.trim().is_empty() {
+pub async fn test_gemini_api_key(
+    api_key: &str,
+    model: &str,
+    base_url: &str,
+) -> Result<String, String> {
+    if api_key.trim().is_empty() && !is_local_endpoint(base_url) {
         return Err("API Key không được để trống".to_string());
     }
 
@@ -374,43 +495,76 @@ pub async fn test_gemini_api_key(api_key: &str, model: &str) -> Result<String, S
         .build()
         .map_err(|e| format!("Không thể khởi tạo HTTP Client: {e}"))?;
 
-    let url = format!(
-        "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
-        model.trim(),
-        api_key.trim()
-    );
-
-    let body = GeminiRequestWire {
-        contents: vec![GeminiContentWire {
-            role: "user".to_string(),
-            parts: vec![GeminiPartWire {
-                text: "Ping test. Please reply with 'OK'.".to_string(),
-            }],
-        }],
-        generation_config: GeminiGenerationConfigWire {
-            temperature: 0.1,
-            max_output_tokens: 16,
-            response_mime_type: None,
-        },
-    };
-
     let start = std::time::Instant::now();
-    let res = client
-        .post(&url)
-        .header("Content-Type", "application/json")
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| format!("Lỗi kết nối tới Gemini API: {e}"))?;
 
-    let duration_ms = start.elapsed().as_millis();
+    if is_gemini_native_endpoint(base_url) {
+        let url = format!(
+            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
+            model.trim(),
+            api_key.trim()
+        );
 
-    if !res.status().is_success() {
-        let status = res.status();
-        let err_text = res.text().await.unwrap_or_default();
-        return Err(format!("Gemini API từ chối ({status}): {err_text}"));
+        let body = GeminiRequestWire {
+            contents: vec![GeminiContentWire {
+                role: "user".to_string(),
+                parts: vec![GeminiPartWire {
+                    text: "Ping test. Please reply with 'OK'.".to_string(),
+                }],
+            }],
+            generation_config: GeminiGenerationConfigWire {
+                temperature: 0.1,
+                max_output_tokens: 16,
+                response_mime_type: None,
+            },
+        };
+
+        let res = client
+            .post(&url)
+            .header("Content-Type", "application/json")
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| format!("Lỗi kết nối tới Gemini API: {e}"))?;
+
+        if !res.status().is_success() {
+            let status = res.status();
+            let err_text = res.text().await.unwrap_or_default();
+            return Err(format!("Gemini API từ chối ({status}): {err_text}"));
+        }
+    } else {
+        let url = build_openai_chat_url(base_url);
+        let body = OpenAiChatRequestWire {
+            model: model.trim().to_string(),
+            messages: vec![OpenAiMessageWire {
+                role: "user".to_string(),
+                content: "Ping test. Please reply with 'OK'.".to_string(),
+            }],
+            temperature: 0.1,
+            max_tokens: 16,
+            stream: false,
+        };
+
+        let mut req = client
+            .post(&url)
+            .header("Content-Type", "application/json")
+            .json(&body);
+        if !api_key.trim().is_empty() {
+            req = req.header("Authorization", format!("Bearer {}", api_key.trim()));
+        }
+
+        let res = req
+            .send()
+            .await
+            .map_err(|e| format!("Lỗi kết nối tới AI API: {e}"))?;
+
+        if !res.status().is_success() {
+            let status = res.status();
+            let err_text = res.text().await.unwrap_or_default();
+            return Err(format!("AI API từ chối ({status}): {err_text}"));
+        }
     }
 
+    let duration_ms = start.elapsed().as_millis();
     Ok(format!("Kết nối thành công tới {model} ({duration_ms}ms)!"))
 }
 
@@ -418,11 +572,12 @@ pub async fn stream_gemini_request(
     app: AppHandle,
     api_key: String,
     model: String,
+    base_url: String,
     session_id: String,
     prompt: String,
 ) -> Result<(), String> {
-    if api_key.trim().is_empty() {
-        let err_msg = "Chưa cấu hình Gemini API Key. Vui lòng nhập API Key trong Cài đặt hoặc giao diện.".to_string();
+    if api_key.trim().is_empty() && !is_local_endpoint(&base_url) {
+        let err_msg = "Chưa cấu hình AI API Key. Vui lòng nhập API Key trong phần Cài đặt.".to_string();
         let _ = app.emit(
             &format!("gemini-stream-{}", session_id),
             GeminiStreamChunk {
@@ -439,33 +594,54 @@ pub async fn stream_gemini_request(
         .build()
         .map_err(|e| format!("Lỗi khởi tạo HTTP client: {e}"))?;
 
-    let url = format!(
-        "https://generativelanguage.googleapis.com/v1beta/models/{}:streamGenerateContent?alt=sse&key={}",
-        model.trim(),
-        api_key.trim()
-    );
-
-    let body = GeminiRequestWire {
-        contents: vec![GeminiContentWire {
-            role: "user".to_string(),
-            parts: vec![GeminiPartWire { text: prompt }],
-        }],
-        generation_config: GeminiGenerationConfigWire {
-            temperature: 0.3,
-            max_output_tokens: 3072,
-            response_mime_type: None,
-        },
-    };
-
+    let use_gemini_native = is_gemini_native_endpoint(&base_url);
     let event_name = format!("gemini-stream-{}", session_id);
 
     tokio::spawn(async move {
-        let response_res = client
-            .post(&url)
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
-            .await;
+        let response_res = if use_gemini_native {
+            let url = format!(
+                "https://generativelanguage.googleapis.com/v1beta/models/{}:streamGenerateContent?alt=sse&key={}",
+                model.trim(),
+                api_key.trim()
+            );
+            let body = GeminiRequestWire {
+                contents: vec![GeminiContentWire {
+                    role: "user".to_string(),
+                    parts: vec![GeminiPartWire { text: prompt }],
+                }],
+                generation_config: GeminiGenerationConfigWire {
+                    temperature: 0.3,
+                    max_output_tokens: 3072,
+                    response_mime_type: None,
+                },
+            };
+            client
+                .post(&url)
+                .header("Content-Type", "application/json")
+                .json(&body)
+                .send()
+                .await
+        } else {
+            let url = build_openai_chat_url(&base_url);
+            let body = OpenAiChatRequestWire {
+                model: model.trim().to_string(),
+                messages: vec![OpenAiMessageWire {
+                    role: "user".to_string(),
+                    content: prompt,
+                }],
+                temperature: 0.3,
+                max_tokens: 3072,
+                stream: true,
+            };
+            let mut req = client
+                .post(&url)
+                .header("Content-Type", "application/json")
+                .json(&body);
+            if !api_key.trim().is_empty() {
+                req = req.header("Authorization", format!("Bearer {}", api_key.trim()));
+            }
+            req.send().await
+        };
 
         let mut response = match response_res {
             Ok(resp) => {
@@ -478,7 +654,7 @@ pub async fn stream_gemini_request(
                             session_id: session_id.clone(),
                             chunk: String::new(),
                             is_done: true,
-                            error: Some(format!("Gemini API Error ({status}): {err_body}")),
+                            error: Some(format!("AI API Error ({status}): {err_body}")),
                         },
                     );
                     return;
@@ -510,7 +686,13 @@ pub async fn stream_gemini_request(
                 let line = buffer[..pos].to_string();
                 buffer = buffer[pos + 1..].to_string();
 
-                match parse_gemini_sse_line(&line) {
+                let parsed = if use_gemini_native {
+                    parse_gemini_sse_line(&line)
+                } else {
+                    parse_openai_sse_line(&line)
+                };
+
+                match parsed {
                     Ok(Some(text)) => {
                         if let Some(flushed) = batcher.push(&text) {
                             let _ = app.emit(
@@ -526,7 +708,6 @@ pub async fn stream_gemini_request(
                     }
                     Ok(None) => {}
                     Err(err) => {
-                        // Flush any pending text before sending error
                         if let Some(flushed) = batcher.flush() {
                             let _ = app.emit(
                                 &event_name,
@@ -554,7 +735,6 @@ pub async fn stream_gemini_request(
             }
         }
 
-        // Flush any remaining accumulated text before final is_done
         if let Some(flushed) = batcher.flush() {
             let _ = app.emit(
                 &event_name,
@@ -567,7 +747,6 @@ pub async fn stream_gemini_request(
             );
         }
 
-        // Emit final done chunk (only terminal chunk with is_done: true)
         let _ = app.emit(
             &event_name,
             GeminiStreamChunk {
@@ -585,11 +764,12 @@ pub async fn stream_gemini_request(
 pub async fn extract_tasks_with_gemini(
     api_key: &str,
     model: &str,
+    base_url: &str,
     prose_text: &str,
     course_hint: Option<&str>,
 ) -> Result<Vec<ExtractedTaskDto>, String> {
-    if api_key.trim().is_empty() {
-        return Err("Chưa cấu hình Gemini API Key. Vui lòng nhập API Key để bóc tách bài viết.".to_string());
+    if api_key.trim().is_empty() && !is_local_endpoint(base_url) {
+        return Err("Chưa cấu hình AI API Key. Vui lòng nhập API Key để bóc tách bài viết.".to_string());
     }
 
     let client = reqwest::Client::builder()
@@ -597,57 +777,109 @@ pub async fn extract_tasks_with_gemini(
         .build()
         .map_err(|e| format!("HTTP Client Error: {e}"))?;
 
-    let url = format!(
-        "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
-        model.trim(),
-        api_key.trim()
-    );
-
     let prompt = build_task_extraction_prompt(prose_text, course_hint);
 
-    let body = GeminiRequestWire {
-        contents: vec![GeminiContentWire {
-            role: "user".to_string(),
-            parts: vec![GeminiPartWire { text: prompt }],
-        }],
-        generation_config: GeminiGenerationConfigWire {
+    let candidate_text = if is_gemini_native_endpoint(base_url) {
+        let url = format!(
+            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
+            model.trim(),
+            api_key.trim()
+        );
+
+        let body = GeminiRequestWire {
+            contents: vec![GeminiContentWire {
+                role: "user".to_string(),
+                parts: vec![GeminiPartWire { text: prompt }],
+            }],
+            generation_config: GeminiGenerationConfigWire {
+                temperature: 0.1,
+                max_output_tokens: 4096,
+                response_mime_type: Some("application/json".to_string()),
+            },
+        };
+
+        let res = client
+            .post(&url)
+            .header("Content-Type", "application/json")
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| format!("Lỗi kết nối Gemini API: {e}"))?;
+
+        if !res.status().is_success() {
+            let status = res.status();
+            let err_text = res.text().await.unwrap_or_default();
+            return Err(format!("Gemini API từ chối ({status}): {err_text}"));
+        }
+
+        let api_resp: GeminiApiResponseWire = res
+            .json()
+            .await
+            .map_err(|e| format!("Lỗi parse response từ Gemini: {e}"))?;
+
+        if let Some(err) = api_resp.error {
+            return Err(format!("Gemini Error: {}", err.message));
+        }
+
+        api_resp
+            .candidates
+            .and_then(|mut c| c.pop())
+            .and_then(|c| c.content)
+            .and_then(|c| c.parts)
+            .and_then(|mut p| p.pop())
+            .and_then(|p| p.text)
+            .ok_or_else(|| "Gemini không trả về nội dung text nào".to_string())?
+    } else {
+        let url = build_openai_chat_url(base_url);
+        let body = OpenAiChatRequestWire {
+            model: model.trim().to_string(),
+            messages: vec![OpenAiMessageWire {
+                role: "user".to_string(),
+                content: prompt,
+            }],
             temperature: 0.1,
-            max_output_tokens: 4096,
-            response_mime_type: Some("application/json".to_string()),
-        },
+            max_tokens: 4096,
+            stream: false,
+        };
+
+        let mut req = client
+            .post(&url)
+            .header("Content-Type", "application/json")
+            .json(&body);
+        if !api_key.trim().is_empty() {
+            req = req.header("Authorization", format!("Bearer {}", api_key.trim()));
+        }
+
+        let res = req
+            .send()
+            .await
+            .map_err(|e| format!("Lỗi kết nối AI API: {e}"))?;
+
+        if !res.status().is_success() {
+            let status = res.status();
+            let err_text = res.text().await.unwrap_or_default();
+            return Err(format!("AI API từ chối ({status}): {err_text}"));
+        }
+
+        let api_resp: OpenAiResponseWire = res
+            .json()
+            .await
+            .map_err(|e| format!("Lỗi parse response từ AI API: {e}"))?;
+
+        if let Some(err) = api_resp.error {
+            return Err(format!(
+                "AI API Error: {}",
+                err.message.unwrap_or_else(|| "Unknown error".to_string())
+            ));
+        }
+
+        api_resp
+            .choices
+            .and_then(|mut c| c.pop())
+            .and_then(|c| c.message)
+            .and_then(|m| m.content)
+            .ok_or_else(|| "AI API không trả về nội dung text nào".to_string())?
     };
-
-    let res = client
-        .post(&url)
-        .header("Content-Type", "application/json")
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| format!("Lỗi kết nối Gemini API: {e}"))?;
-
-    if !res.status().is_success() {
-        let status = res.status();
-        let err_text = res.text().await.unwrap_or_default();
-        return Err(format!("Gemini API từ chối ({status}): {err_text}"));
-    }
-
-    let api_resp: GeminiApiResponseWire = res
-        .json()
-        .await
-        .map_err(|e| format!("Lỗi parse response từ Gemini: {e}"))?;
-
-    if let Some(err) = api_resp.error {
-        return Err(format!("Gemini Error: {}", err.message));
-    }
-
-    let candidate_text = api_resp
-        .candidates
-        .and_then(|mut c| c.pop())
-        .and_then(|c| c.content)
-        .and_then(|c| c.parts)
-        .and_then(|mut p| p.pop())
-        .and_then(|p| p.text)
-        .ok_or_else(|| "Gemini không trả về nội dung text nào".to_string())?;
 
     let cleaned_json = clean_json_markdown_block(&candidate_text);
 
@@ -655,7 +887,6 @@ pub async fn extract_tasks_with_gemini(
     match list_res {
         Ok(list) => Ok(list.tasks),
         Err(e) => {
-            // Thử parse mảng trực tiếp [ ... ]
             let vec_res: Result<Vec<ExtractedTaskDto>, _> = serde_json::from_str(cleaned_json);
             match vec_res {
                 Ok(tasks) => Ok(tasks),
@@ -889,5 +1120,30 @@ mod tests {
         let emitted = batcher.push(" new text");
         assert_eq!(emitted, Some("initial text new text".to_string()));
         assert_eq!(batcher.pending, "");
+    }
+
+    #[test]
+    fn test_ai_endpoint_helpers_and_openai_sse() {
+        assert!(is_gemini_native_endpoint(""));
+        assert!(is_gemini_native_endpoint("https://generativelanguage.googleapis.com"));
+        assert!(!is_gemini_native_endpoint("https://generativelanguage.googleapis.com/v1beta/openai"));
+        assert!(!is_gemini_native_endpoint("https://api.openai.com/v1"));
+
+        assert!(is_local_endpoint("http://localhost:11434/v1"));
+        assert!(is_local_endpoint("http://127.0.0.1:8080/v1"));
+        assert!(!is_local_endpoint("https://openrouter.ai/api/v1"));
+
+        assert_eq!(
+            build_openai_chat_url("https://api.openai.com/v1/"),
+            "https://api.openai.com/v1/chat/completions"
+        );
+        assert_eq!(
+            build_openai_chat_url("https://api.deepseek.com/v1/chat/completions"),
+            "https://api.deepseek.com/v1/chat/completions"
+        );
+
+        let chunk = r#"data: {"choices":[{"delta":{"content":"Xin chào"}}]}"#;
+        assert_eq!(parse_openai_sse_line(chunk).unwrap(), Some("Xin chào".to_string()));
+        assert_eq!(parse_openai_sse_line("data: [DONE]").unwrap(), None);
     }
 }

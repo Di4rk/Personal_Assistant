@@ -545,18 +545,45 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
   return (
     <div className="mx-auto max-w-7xl space-y-5">
       {/* Ambient UIT Blue Obsidian Hero Banner */}
-      <div className="relative overflow-hidden rounded-2xl border border-[#1D263B] bg-[#0F1420]/90 px-5 py-4 backdrop-blur-[2px]">
+      <div
+        onMouseMove={handleKpiMouseMove}
+        className="group relative overflow-hidden rounded-2xl border border-[#1D263B] bg-[#0F1420]/90 px-5 py-4 backdrop-blur-[2px]"
+      >
+        <span
+          aria-hidden="true"
+          className="kpi-spotlight-border pointer-events-none absolute inset-0 rounded-[inherit] opacity-0 transition-opacity duration-200 group-hover:opacity-100"
+        />
+        <span
+          aria-hidden="true"
+          className="uit-hero-beam pointer-events-none absolute top-0 left-0 h-px w-1/2 bg-gradient-to-r from-transparent via-[#6B9BFF]/80 to-transparent"
+        />
         <div
-          className="uit-glow-breathe pointer-events-none absolute inset-0"
+          className="pointer-events-none absolute inset-0"
           style={{
             background:
-              "radial-gradient(circle at 88% 45%, rgba(47,107,255,0.22) 0%, rgba(47,107,255,0.08) 32%, rgba(15,20,32,0) 64%), radial-gradient(circle at 18% 12%, rgba(47,107,255,0.10) 0%, rgba(15,20,32,0) 52%)",
+              "radial-gradient(circle at 18% 12%, rgba(47,107,255,0.10) 0%, rgba(15,20,32,0) 52%)",
           }}
           aria-hidden="true"
         />
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute -right-4 -top-5 h-40 w-40 select-none opacity-[0.22]"
+          className="uit-hero-mist-1 pointer-events-none absolute -right-[4%] -top-16 h-[220%] w-[52%]"
+          style={{
+            background:
+              "radial-gradient(ellipse 68% 62% at 62% 48%, rgba(47,107,255,0.16) 0%, rgba(107,155,255,0.075) 42%, rgba(15,20,32,0) 74%)",
+          }}
+        />
+        <div
+          aria-hidden="true"
+          className="uit-hero-mist-2 pointer-events-none absolute right-[8%] -bottom-14 h-[200%] w-[44%]"
+          style={{
+            background:
+              "radial-gradient(ellipse 64% 58% at 48% 55%, rgba(107,155,255,0.12) 0%, rgba(47,107,255,0.05) 45%, rgba(15,20,32,0) 72%)",
+          }}
+        />
+        <div
+          aria-hidden="true"
+          className="uit-hero-logo-glow pointer-events-none absolute -right-4 -top-5 h-40 w-40 select-none"
           style={{
             background:
               "linear-gradient(135deg, #8BB2FF 0%, #2F6BFF 55%, #163E9E 100%)",

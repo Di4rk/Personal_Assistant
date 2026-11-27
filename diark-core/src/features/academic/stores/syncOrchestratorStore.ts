@@ -4,6 +4,7 @@ import {
   launchWecodeSilentSync,
   launchMoodleSilentSync,
   getSyncTimestamps,
+  syncDrlFromUit,
 } from '../../../lib/tauri-client';
 
 export type SyncService = 'portal' | 'wecode' | 'moodle';
@@ -184,7 +185,14 @@ async function executeSync(
 
   try {
     if (service === 'portal') {
-      await launchPortalSilentSync();
+      const drlPromise = syncDrlFromUit().catch((e: unknown) =>
+        console.warn('[SyncOrchestrator] drl.uit.edu.vn sync skipped:', e)
+      );
+      try {
+        await launchPortalSilentSync();
+      } finally {
+        await drlPromise;
+      }
     } else if (service === 'wecode') {
       await launchWecodeSilentSync();
     } else {

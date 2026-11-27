@@ -1,25 +1,22 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ArrowRight,
+  CalendarPlus,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Copy,
   Download,
-  ExternalLink,
-  LogIn,
-  LogOut,
+  Pencil,
   Plus,
   RefreshCw,
-  Settings2,
+  Settings,
   Trash2,
   UploadCloud,
-  X,
 } from "lucide-react";
 import {
-  addGoogleCalendar,
-  connectGoogleCalendarOAuth,
   createGoogleCalendarEvent,
   deleteGoogleCalendarEvent,
-  disconnectGoogleCalendarOAuth,
   exportUitScheduleIcs,
   getCalendarEvents,
   getExamSchedules,
@@ -27,10 +24,7 @@ import {
   getPortalClassActivities,
   getPortalTimetable,
   listGoogleCalendars,
-  openExternalUrl,
   pushUitScheduleToGoogle,
-  removeGoogleCalendar,
-  saveGoogleOAuthClientConfig,
   syncGoogleCalendars,
   toggleGoogleCalendar,
 } from "../../lib/tauri-client";
@@ -58,14 +52,16 @@ import {
   uitPeriodStartMinutes,
 } from "../../utils/scheduleTime";
 import { MiniMonthCalendar } from "./components/MiniMonthCalendar";
-
-const CALENDAR_PALETTE = [
-  "#10b981",
-  "#38bdf8",
-  "#f59e0b",
-  "#f43f5e",
-  "#a1a1aa",
-];
+import {
+  ScheduleContextMenu,
+  type ContextMenuItem,
+} from "./components/ScheduleContextMenu";
+import {
+  getNextRoundedHourRange,
+  ScheduleEventModal,
+  UitClassPreviewModal,
+  type ScheduleEventFormValues,
+} from "./components/ScheduleEventModal";
 
 const WEEKDAY_NAMES = ["Thứ 2", "Thứ 3", "Thứ 4", "Thứ 5", "Thứ 6", "Thứ 7", "CN"];
 
@@ -78,11 +74,55 @@ interface AgendaEntry {
   title: string;
   roomOrLocation: string;
   badgeLabel: string;
+  showBadge: boolean;
   dotColor: string;
   subtext: string;
-  calendarId?: string;
-  eventUid?: string;
-  canDelete?: boolean;
+  rawDateIso: string;
+  rawEvent?: CalendarEvent;
+  rawTimetable?: PortalTimetableSlot;
+  canEdit?: boolean;
+}
+
+type ModalState =
+  | {
+      mode: "create";
+      defaultDateIso: string;
+      prefill?: Partial<ScheduleEventFormValues>;
+      nonce?: number;
+    }
+  | {
+      mode: "edit";
+      calendarId: string;
+      uid: string;
+      values: ScheduleEventFormValues;
+    }
+  | null;
+
+type ContextMenuState =
+  | {
+      x: number;
+      y: number;
+      kind: "day";
+      dateIso: string;
+      fromMiniCalendar: boolean;
+    }
+  | {
+      x: number;
+      y: number;
+      kind: "event";
+      entry: AgendaEntry;
+    }
+  | null;
+
+function parseLocalIsoDate(iso: string): Date {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+
+function formatDayMonthShort(iso: string): string {
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return iso;
+  return `${m[3]}/${m[2]}`;
 }
 
 export const ScheduleDashboard: React.FC = () => {
@@ -99,35 +139,32 @@ export const ScheduleDashboard: React.FC = () => {
   const [exams, setExams] = useState<AcademicExamRecord[]>([]);
   const [activities, setActivities] = useState<PortalClassActivity[]>([]);
 
-  // Google OAuth state
-  const [isConnectingOAuth, setIsConnectingOAuth] = useState(false);
+  // Google OAuth push state
   const [isPushingUit, setIsPushingUit] = useState(false);
-  const [showOAuthSetup, setShowOAuthSetup] = useState(false);
-  const [oauthClientId, setOauthClientId] = useState("");
-  const [oauthClientSecret, setOauthClientSecret] = useState("");
-  const [isSavingOAuthConfig, setIsSavingOAuthConfig] = useState(false);
 
-  // Create Event Modal / Drawer state
-  const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const [eventCalendarId, setEventCalendarId] = useState("");
-  const [eventTitle, setEventTitle] = useState("");
-  const [eventDate, setEventDate] = useState(() => toLocalDateIso(new Date()));
-  const [eventAllDay, setEventAllDay] = useState(false);
-  const [eventStartTime, setEventStartTime] = useState("09:00");
-  const [eventEndTime, setEventEndTime] = useState("10:30");
-  const [eventLocation, setEventLocation] = useState("");
-  const [eventDescription, setEventDescription] = useState("");
-  const [isCreatingEvent, setIsCreatingEvent] = useState(false);
-  const [deletingEventKey, setDeletingEventKey] = useState<string | null>(null);
+  // Unified Create / Edit Event Modal + UIT Quick View Modal
+  const [modalState, setModalState] = useState<ModalState>(null);
+  const [previewUitSlot, setPreviewUitSlot] = useState<PortalTimetableSlot | null>(null);
+  const [isSavingEvent, setIsSavingEvent] = useState(false);
+  const [isDeletingEvent, setIsDeletingEvent] = useState(false);
 
-  // Advanced ICS fallback state
-  const [showIcsAdvanced, setShowIcsAdvanced] = useState(false);
-  const [newName, setNewName] = useState("");
-  const [newUrl, setNewUrl] = useState("");
-  const [newColor, setNewColor] = useState(CALENDAR_PALETTE[1]);
-  const [isAdding, setIsAdding] = useState(false);
+  // Toolbar utilities dropdown
+  const [isUtilsOpen, setIsUtilsOpen] = useState(false);
+  const utilsDropdownRef = useRef<HTMLDivElement | null>(null);
+
   const [isSyncing, setIsSyncing] = useState(false);
   const [feedback, setFeedback] = useState<{ ok: boolean; text: string } | null>(null);
+  const silentSyncInFlightRef = useRef(false);
+  const hasAutoSyncedMountRef = useRef(false);
+
+  // Scroll, collapse & context-menu state
+  const dayRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const pendingScrollIsoRef = useRef<string | null>(null);
+  const hasAutoScrolledTodayRef = useRef(false);
+  const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [flashedDayIso, setFlashedDayIso] = useState<string | null>(null);
+  const [expandedPastDays, setExpandedPastDays] = useState<Record<string, boolean>>({});
+  const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
 
   const weekDays = useMemo(
     () => Array.from({ length: 7 }, (_, i) => addDays(weekAnchor, i)),
@@ -136,6 +173,7 @@ export const ScheduleDashboard: React.FC = () => {
 
   const weekStartIso = useMemo(() => toLocalDateIso(weekDays[0]), [weekDays]);
   const weekEndIso = useMemo(() => toLocalDateIso(weekDays[6]), [weekDays]);
+  const todayIso = toLocalDateIso(new Date());
 
   const loadData = useCallback(async () => {
     const startTs = Math.floor(weekDays[0].getTime() / 1000);
@@ -173,6 +211,39 @@ export const ScheduleDashboard: React.FC = () => {
   useTauriEvent("calendar-events-synced", () => void loadData());
   useTauriEvent("exam-schedule-synced", () => void loadData());
 
+  const runSilentSync = useCallback(async () => {
+    if (silentSyncInFlightRef.current) return;
+    silentSyncInFlightRef.current = true;
+    try {
+      await syncGoogleCalendars();
+      await loadData();
+    } catch {
+      // Bỏ qua lỗi mạng tạm thời khi đồng bộ nền
+    } finally {
+      silentSyncInFlightRef.current = false;
+    }
+  }, [loadData]);
+
+  useEffect(() => {
+    if (!oauthStatus?.connected) return;
+    if (!hasAutoSyncedMountRef.current) {
+      hasAutoSyncedMountRef.current = true;
+      void runSilentSync();
+    }
+    const timer = window.setInterval(() => {
+      void runSilentSync();
+    }, 300_000);
+    return () => window.clearInterval(timer);
+  }, [oauthStatus?.connected, runSilentSync]);
+
+  useEffect(() => {
+    const onSettingsUpdated = () => {
+      void loadData();
+    };
+    window.addEventListener("calendar-settings-updated", onSettingsUpdated);
+    return () => window.removeEventListener("calendar-settings-updated", onSettingsUpdated);
+  }, [loadData]);
+
   const oauthCalendars = useMemo(
     () => calendars.filter((c) => c.source === "oauth"),
     [calendars]
@@ -186,11 +257,84 @@ export const ScheduleDashboard: React.FC = () => {
     [oauthCalendars]
   );
 
+  // Close utilities dropdown on outside click or Escape
   useEffect(() => {
-    if (writableOAuthCalendars.length > 0 && !writableOAuthCalendars.some((c) => c.id === eventCalendarId)) {
-      setEventCalendarId(writableOAuthCalendars[0].id);
-    }
-  }, [writableOAuthCalendars, eventCalendarId]);
+    if (!isUtilsOpen) return;
+    const onPointerDown = (e: MouseEvent) => {
+      if (utilsDropdownRef.current && !utilsDropdownRef.current.contains(e.target as Node)) {
+        setIsUtilsOpen(false);
+      }
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setIsUtilsOpen(false);
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [isUtilsOpen]);
+
+  // Keyboard shortcut 'N' to open Create Event Modal when idle
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.key.toLowerCase() !== "n") return;
+      if (modalState || previewUitSlot || contextMenu) return;
+      if (writableOAuthCalendars.length === 0) return;
+
+      const active = document.activeElement as HTMLElement | null;
+      if (
+        active &&
+        (active.tagName === "INPUT" ||
+          active.tagName === "TEXTAREA" ||
+          active.tagName === "SELECT" ||
+          active.isContentEditable)
+      ) {
+        return;
+      }
+
+      e.preventDefault();
+      setModalState({ mode: "create", defaultDateIso: todayIso });
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [modalState, previewUitSlot, contextMenu, writableOAuthCalendars.length, todayIso]);
+
+  // Initial scroll to Today on mount
+  useEffect(() => {
+    if (hasAutoScrolledTodayRef.current) return;
+    const todayEl = dayRefs.current.get(todayIso);
+    if (!todayEl) return;
+    hasAutoScrolledTodayRef.current = true;
+    requestAnimationFrame(() => {
+      todayEl.scrollIntoView({ behavior: "auto", block: "nearest" });
+    });
+  }, [todayIso, weekStartIso]);
+
+  // Scroll + flash when clicking a date in MiniMonthCalendar
+  useEffect(() => {
+    const targetIso = pendingScrollIsoRef.current;
+    if (!targetIso) return;
+    const el = dayRefs.current.get(targetIso);
+    if (!el) return;
+    pendingScrollIsoRef.current = null;
+    requestAnimationFrame(() => {
+      el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      setFlashedDayIso(targetIso);
+      if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
+      flashTimerRef.current = setTimeout(() => {
+        setFlashedDayIso((curr) => (curr === targetIso ? null : curr));
+      }, 820);
+    });
+  }, [weekStartIso]);
+
+  useEffect(() => {
+    return () => {
+      if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
+    };
+  }, []);
 
   const calendarMap = useMemo(() => {
     const map = new Map<string, GoogleCalendarConfig>();
@@ -211,7 +355,7 @@ export const ScheduleDashboard: React.FC = () => {
     const map = new Map<string, string>();
     for (const ev of monthCalendarEvents) {
       const cal = calendarMap.get(ev.calendar_id);
-      const color = cal?.color ?? "#38bdf8";
+      const color = cal?.color ?? "#6B9BFF";
       for (const iso of getEventCoveredDatesVn(ev.start_ts, ev.end_ts, ev.all_day)) {
         if (!map.has(iso)) {
           map.set(iso, color);
@@ -222,14 +366,41 @@ export const ScheduleDashboard: React.FC = () => {
   }, [monthCalendarEvents, calendarMap]);
 
   const handleSelectMiniDate = (date: Date) => {
+    const iso = toLocalDateIso(date);
+    if (iso < todayIso) {
+      setExpandedPastDays((prev) => (prev[iso] ? prev : { ...prev, [iso]: true }));
+    }
+    pendingScrollIsoRef.current = iso;
     setWeekAnchor(getMondayOfWeek(date));
     setMiniMonth(new Date(date.getFullYear(), date.getMonth(), 1));
+    const existingEl = dayRefs.current.get(iso);
+    if (existingEl && iso >= weekStartIso && iso <= weekEndIso) {
+      pendingScrollIsoRef.current = null;
+      existingEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      setFlashedDayIso(iso);
+      if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
+      flashTimerRef.current = setTimeout(() => {
+        setFlashedDayIso((curr) => (curr === iso ? null : curr));
+      }, 820);
+    }
   };
 
   const handleJumpToday = () => {
     const now = new Date();
+    const iso = toLocalDateIso(now);
+    pendingScrollIsoRef.current = iso;
     setWeekAnchor(getMondayOfWeek(now));
     setMiniMonth(new Date(now.getFullYear(), now.getMonth(), 1));
+    const existingEl = dayRefs.current.get(iso);
+    if (existingEl && iso >= weekStartIso && iso <= weekEndIso) {
+      pendingScrollIsoRef.current = null;
+      existingEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      setFlashedDayIso(iso);
+      if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
+      flashTimerRef.current = setTimeout(() => {
+        setFlashedDayIso((curr) => (curr === iso ? null : curr));
+      }, 820);
+    }
   };
 
   const entriesByDate = useMemo(() => {
@@ -247,11 +418,16 @@ export const ScheduleDashboard: React.FC = () => {
         allDay: false,
         title: `${t.ten_mon_hoc} (${t.ma_lop})`,
         roomOrLocation: t.phong,
-        badgeLabel: "TKB UIT",
-        dotColor: "#10b981",
+        badgeLabel: "UIT",
+        showBadge: true,
+        dotColor: "#2F6BFF",
         subtext: `Tiết ${t.tiet_bat_dau}–${t.tiet_ket_thuc} · ${t.hinh_thuc}`,
+        rawDateIso: t.ngay,
+        rawTimetable: t,
       });
     }
+
+    const userEmailLower = (oauthStatus?.email ?? "").trim().toLowerCase();
 
     for (const ev of calendarEvents) {
       const cal = calendarMap.get(ev.calendar_id);
@@ -259,7 +435,13 @@ export const ScheduleDashboard: React.FC = () => {
       const timeLabel = ev.all_day
         ? "Cả ngày"
         : `${formatTimeHm(ev.start_ts)}–${formatTimeHm(ev.end_ts)}`;
-      const canDelete = Boolean(cal && cal.source === "oauth" && cal.can_write);
+      const canEdit = Boolean(cal && cal.source === "oauth" && cal.can_write);
+      const calLabel = cal?.name ?? "Google";
+      const isPrimaryEmailBadge =
+        (userEmailLower !== "" &&
+          (calLabel.toLowerCase() === userEmailLower ||
+            cal?.google_calendar_id.toLowerCase() === userEmailLower)) ||
+        (calLabel.includes("@") && calLabel.toLowerCase() === userEmailLower);
 
       for (const evDate of getEventCoveredDatesVn(ev.start_ts, ev.end_ts, ev.all_day)) {
         const list = grouped.get(evDate);
@@ -272,12 +454,13 @@ export const ScheduleDashboard: React.FC = () => {
           allDay: ev.all_day,
           title: ev.summary,
           roomOrLocation: ev.location,
-          badgeLabel: cal?.name ?? "Google",
-          dotColor: cal?.color ?? "#38bdf8",
+          badgeLabel: calLabel,
+          showBadge: !isPrimaryEmailBadge,
+          dotColor: cal?.color ?? "#6B9BFF",
           subtext: "",
-          calendarId: ev.calendar_id,
-          eventUid: ev.uid,
-          canDelete,
+          rawDateIso: evDate,
+          rawEvent: ev,
+          canEdit,
         });
       }
     }
@@ -296,8 +479,10 @@ export const ScheduleDashboard: React.FC = () => {
         title: `${ex.subject_code} — ${ex.subject_name}`,
         roomOrLocation: ex.room,
         badgeLabel: ex.examination === "midterm" ? "Thi GK" : "Thi CK",
-        dotColor: "#f43f5e",
+        showBadge: true,
+        dotColor: "#f87171",
         subtext: `Ca ${ex.shift} · ${ex.section_class_code}`,
+        rawDateIso: exIso,
       });
     }
 
@@ -316,9 +501,11 @@ export const ScheduleDashboard: React.FC = () => {
         allDay: act.tiet_bat_dau <= 0,
         title: act.noi_dung,
         roomOrLocation: act.dia_diem,
-        badgeLabel: "Sinh hoạt lớp",
-        dotColor: "#f59e0b",
+        badgeLabel: "Sinh hoạt",
+        showBadge: true,
+        dotColor: "#94a3b8",
         subtext: act.gv_chu_tri,
+        rawDateIso: actIso,
       });
     }
 
@@ -330,67 +517,7 @@ export const ScheduleDashboard: React.FC = () => {
     }
 
     return grouped;
-  }, [weekDays, timetable, calendarEvents, calendarMap, exams, activities]);
-
-  const handleConnectGoogleOAuth = async () => {
-    setIsConnectingOAuth(true);
-    setFeedback(null);
-    try {
-      const res = await connectGoogleCalendarOAuth();
-      await loadData();
-      if (res.errors.length > 0) {
-        setFeedback({
-          ok: false,
-          text: `Đã kết nối Google nhưng có lỗi tải lịch: ${res.errors.join("; ")}`,
-        });
-      } else {
-        setFeedback({
-          ok: true,
-          text: `Đã kết nối Google và kéo về ${res.total_events} sự kiện từ ${res.synced_calendars} lịch.`,
-        });
-      }
-    } catch (err) {
-      const msg = String(err);
-      if (msg.includes("OAuth Client ID")) {
-        setShowOAuthSetup(true);
-      }
-      setFeedback({ ok: false, text: msg });
-    } finally {
-      setIsConnectingOAuth(false);
-    }
-  };
-
-  const handleDisconnectGoogleOAuth = async () => {
-    setFeedback(null);
-    try {
-      await disconnectGoogleCalendarOAuth();
-      await loadData();
-      setFeedback({ ok: true, text: "Đã ngắt kết nối tài khoản Google Calendar." });
-    } catch (err) {
-      setFeedback({ ok: false, text: String(err) });
-    }
-  };
-
-  const handleSaveOAuthConfig = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!oauthClientId.trim()) return;
-    setIsSavingOAuthConfig(true);
-    setFeedback(null);
-    try {
-      await saveGoogleOAuthClientConfig(oauthClientId.trim(), oauthClientSecret.trim());
-      setOauthClientSecret("");
-      setShowOAuthSetup(false);
-      await loadData();
-      setFeedback({
-        ok: true,
-        text: "Đã lưu cấu hình OAuth Client. Giờ bạn có thể bấm Đăng nhập bằng Google.",
-      });
-    } catch (err) {
-      setFeedback({ ok: false, text: String(err) });
-    } finally {
-      setIsSavingOAuthConfig(false);
-    }
-  };
+  }, [weekDays, timetable, calendarEvents, calendarMap, exams, activities, oauthStatus?.email]);
 
   const handleSyncAll = async () => {
     setIsSyncing(true);
@@ -414,6 +541,7 @@ export const ScheduleDashboard: React.FC = () => {
   };
 
   const handlePushUitToGoogle = async () => {
+    setIsUtilsOpen(false);
     setIsPushingUit(true);
     setFeedback(null);
     try {
@@ -437,89 +565,238 @@ export const ScheduleDashboard: React.FC = () => {
     }
   };
 
-  const handleCreateEvent = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!eventCalendarId || !eventTitle.trim() || !eventDate) return;
-    setIsCreatingEvent(true);
+  const handleOpenEditModal = (entry: AgendaEntry) => {
+    if (!entry.canEdit || !entry.rawEvent) return;
+    const ev = entry.rawEvent;
+    setModalState({
+      mode: "edit",
+      calendarId: ev.calendar_id,
+      uid: ev.uid,
+      values: {
+        calendarId: ev.calendar_id,
+        title: ev.summary,
+        dateIso: entry.rawDateIso,
+        allDay: ev.all_day,
+        startTime: ev.all_day ? "09:00" : formatTimeHm(ev.start_ts),
+        endTime: ev.all_day ? "10:30" : formatTimeHm(ev.end_ts),
+        location: ev.location ?? "",
+        description: ev.description ?? "",
+      },
+    });
+  };
+
+  const handleSubmitEventModal = async (values: ScheduleEventFormValues) => {
+    if (!modalState) return;
+    setIsSavingEvent(true);
     setFeedback(null);
     try {
       const created = await createGoogleCalendarEvent({
-        calendar_id: eventCalendarId,
-        summary: eventTitle.trim(),
-        date: eventDate,
-        start_time: eventStartTime,
-        end_time: eventEndTime,
-        all_day: eventAllDay,
-        location: eventLocation.trim(),
-        description: eventDescription.trim(),
+        calendar_id: values.calendarId,
+        summary: values.title,
+        date: values.dateIso,
+        start_time: values.startTime,
+        end_time: values.endTime,
+        all_day: values.allDay,
+        location: values.location,
+        description: values.description,
       });
-      setEventTitle("");
-      setEventLocation("");
-      setEventDescription("");
-      setIsCreateOpen(false);
+
+      if (modalState.mode === "edit") {
+        await deleteGoogleCalendarEvent(modalState.calendarId, modalState.uid);
+      }
+
+      setModalState(null);
       await loadData();
       setFeedback({
         ok: true,
-        text: `Đã thêm "${created.summary}" lên Google Calendar.`,
+        text:
+          modalState.mode === "edit"
+            ? `Đã cập nhật "${created.summary}" trên Google Calendar.`
+            : `Đã thêm "${created.summary}" lên Google Calendar.`,
       });
     } catch (err) {
       setFeedback({ ok: false, text: String(err) });
     } finally {
-      setIsCreatingEvent(false);
+      setIsSavingEvent(false);
     }
   };
 
-  const handleDeleteEvent = async (calendarId: string, uid: string) => {
-    const key = `${calendarId}:${uid}`;
-    setDeletingEventKey(key);
+  const handleDeleteFromModal = async () => {
+    if (!modalState || modalState.mode !== "edit") return;
+    setIsDeletingEvent(true);
     setFeedback(null);
     try {
-      await deleteGoogleCalendarEvent(calendarId, uid);
+      await deleteGoogleCalendarEvent(modalState.calendarId, modalState.uid);
+      setModalState(null);
       await loadData();
       setFeedback({ ok: true, text: "Đã xóa sự kiện khỏi Google Calendar." });
     } catch (err) {
       setFeedback({ ok: false, text: String(err) });
     } finally {
-      setDeletingEventKey(null);
+      setIsDeletingEvent(false);
     }
   };
 
-  const handleAddCalendar = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newName.trim() || !newUrl.trim()) return;
-    setIsAdding(true);
+  const handleMoveEventNextDay = async (entry: AgendaEntry) => {
+    if (!entry.canEdit || !entry.rawEvent) return;
+    const ev = entry.rawEvent;
+    const nextDateIso = toLocalDateIso(addDays(parseLocalIsoDate(entry.rawDateIso), 1));
     setFeedback(null);
     try {
-      await addGoogleCalendar(newName.trim(), newUrl.trim(), newColor);
-      setNewName("");
-      setNewUrl("");
-      const res = await syncGoogleCalendars();
+      await createGoogleCalendarEvent({
+        calendar_id: ev.calendar_id,
+        summary: ev.summary,
+        date: nextDateIso,
+        start_time: ev.all_day ? "09:00" : formatTimeHm(ev.start_ts),
+        end_time: ev.all_day ? "10:30" : formatTimeHm(ev.end_ts),
+        all_day: ev.all_day,
+        location: ev.location ?? "",
+        description: ev.description ?? "",
+      });
+      await deleteGoogleCalendarEvent(ev.calendar_id, ev.uid);
       await loadData();
       setFeedback({
-        ok: res.errors.length === 0,
-        text:
-          res.errors.length > 0
-            ? res.errors.join("; ")
-            : `Đã thêm và tải ${res.total_events} sự kiện.`,
+        ok: true,
+        text: `Đã dời "${ev.summary}" sang ngày ${formatDayMonthShort(nextDateIso)}.`,
       });
     } catch (err) {
       setFeedback({ ok: false, text: String(err) });
-    } finally {
-      setIsAdding(false);
     }
   };
+
+  const handleDuplicateEvent = (entry: AgendaEntry) => {
+    if (!entry.canEdit || !entry.rawEvent) return;
+    const ev = entry.rawEvent;
+    setModalState({
+      mode: "create",
+      defaultDateIso: entry.rawDateIso,
+      nonce: Date.now(),
+      prefill: {
+        calendarId: ev.calendar_id,
+        title: ev.summary,
+        dateIso: entry.rawDateIso,
+        allDay: ev.all_day,
+        startTime: ev.all_day ? "09:00" : formatTimeHm(ev.start_ts),
+        endTime: ev.all_day ? "10:30" : formatTimeHm(ev.end_ts),
+        location: ev.location ?? "",
+        description: ev.description ?? "",
+      },
+    });
+  };
+
+  const handleQuickDeleteEvent = async (entry: AgendaEntry) => {
+    if (!entry.canEdit || !entry.rawEvent) return;
+    const ev = entry.rawEvent;
+    setFeedback(null);
+    try {
+      await deleteGoogleCalendarEvent(ev.calendar_id, ev.uid);
+      await loadData();
+      setFeedback({ ok: true, text: `Đã xóa "${ev.summary}" khỏi Google Calendar.` });
+    } catch (err) {
+      setFeedback({ ok: false, text: String(err) });
+    }
+  };
+
+  const handleDayContextMenu = (
+    dateIso: string,
+    fromMiniCalendar: boolean,
+    e: React.MouseEvent<HTMLElement>
+  ) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setContextMenu({
+      x: e.clientX,
+      y: e.clientY,
+      kind: "day",
+      dateIso,
+      fromMiniCalendar,
+    });
+  };
+
+  const handleEventContextMenu = (
+    entry: AgendaEntry,
+    e: React.MouseEvent<HTMLDivElement>
+  ) => {
+    if (!entry.canEdit || !entry.rawEvent) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setContextMenu({
+      x: e.clientX,
+      y: e.clientY,
+      kind: "event",
+      entry,
+    });
+  };
+
+  const contextMenuItems: ContextMenuItem[] = useMemo(() => {
+    if (!contextMenu) return [];
+    if (contextMenu.kind === "day") {
+      const items: ContextMenuItem[] = [];
+      if (writableOAuthCalendars.length > 0) {
+        items.push({
+          id: "add-event-day",
+          label: `+ Thêm sự kiện vào ${formatDayMonthShort(contextMenu.dateIso)}`,
+          icon: <CalendarPlus className="h-3.5 w-3.5 text-[#6B9BFF]" aria-hidden="true" />,
+          onSelect: () => {
+            setModalState({
+              mode: "create",
+              defaultDateIso: contextMenu.dateIso,
+              nonce: Date.now(),
+            });
+          },
+        });
+      }
+      if (contextMenu.fromMiniCalendar) {
+        items.push({
+          id: "jump-day",
+          label: "Nhảy tới ngày này",
+          icon: <ArrowRight className="h-3.5 w-3.5 text-zinc-400" aria-hidden="true" />,
+          onSelect: () => {
+            handleSelectMiniDate(parseLocalIsoDate(contextMenu.dateIso));
+          },
+        });
+      }
+      return items;
+    }
+
+    const { entry } = contextMenu;
+    return [
+      {
+        id: "edit-event",
+        label: "Chỉnh sửa",
+        icon: <Pencil className="h-3.5 w-3.5 text-zinc-300" aria-hidden="true" />,
+        onSelect: () => handleOpenEditModal(entry),
+      },
+      {
+        id: "move-next-day",
+        label: "Dời sang ngày mai (+1 ngày)",
+        icon: <ArrowRight className="h-3.5 w-3.5 text-[#6B9BFF]" aria-hidden="true" />,
+        onSelect: () => handleMoveEventNextDay(entry),
+      },
+      {
+        id: "duplicate-event",
+        label: "Nhân bản",
+        icon: <Copy className="h-3.5 w-3.5 text-zinc-300" aria-hidden="true" />,
+        onSelect: () => handleDuplicateEvent(entry),
+      },
+      {
+        id: "delete-event",
+        label: "Xóa sự kiện",
+        confirmLabel: "Bấm lần nữa để xác nhận xóa",
+        danger: true,
+        icon: <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />,
+        onSelect: () => handleQuickDeleteEvent(entry),
+      },
+    ];
+  }, [contextMenu, writableOAuthCalendars.length]);
 
   const handleToggleCalendar = async (id: string, current: boolean) => {
     await toggleGoogleCalendar(id, !current);
     await loadData();
   };
 
-  const handleDeleteCalendar = async (id: string) => {
-    await removeGoogleCalendar(id);
-    await loadData();
-  };
-
   const handleExportIcs = async () => {
+    setIsUtilsOpen(false);
     try {
       const icsContent = await exportUitScheduleIcs();
       const blob = new Blob([icsContent], { type: "text/calendar;charset=utf-8" });
@@ -537,14 +814,28 @@ export const ScheduleDashboard: React.FC = () => {
     }
   };
 
-  const todayIso = toLocalDateIso(new Date());
+  const createModalInitialValues: ScheduleEventFormValues | null = useMemo(() => {
+    if (!modalState || modalState.mode !== "create") return null;
+    const defaultRange = getNextRoundedHourRange();
+    return {
+      calendarId: writableOAuthCalendars[0]?.id ?? "",
+      title: "",
+      dateIso: modalState.defaultDateIso,
+      allDay: false,
+      startTime: defaultRange.startTime,
+      endTime: defaultRange.endTime,
+      location: "",
+      description: "",
+      ...modalState.prefill,
+    };
+  }, [modalState, writableOAuthCalendars]);
 
   return (
     <div className="mx-auto max-w-7xl space-y-4">
-      {/* Header Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-zinc-800/80 bg-zinc-900/50 px-4 py-3">
+      {/* Compact Header Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#1D263B] bg-[#0F1420] px-4 py-3">
         <div className="flex items-center gap-3">
-          <div className="flex items-center rounded-md border border-zinc-800 bg-zinc-950 p-0.5">
+          <div className="flex items-center rounded-lg border border-[#1D263B] bg-[#080B12] p-0.5">
             <button
               type="button"
               onClick={() => {
@@ -552,7 +843,7 @@ export const ScheduleDashboard: React.FC = () => {
                 setWeekAnchor(next);
                 setMiniMonth(new Date(next.getFullYear(), next.getMonth(), 1));
               }}
-              className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 cursor-pointer"
+              className="rounded p-1 text-zinc-400 transition-colors hover:bg-[#151C2C] hover:text-zinc-100 cursor-pointer"
               aria-label="Tuần trước"
             >
               <ChevronLeft className="h-4 w-4" />
@@ -560,7 +851,7 @@ export const ScheduleDashboard: React.FC = () => {
             <button
               type="button"
               onClick={handleJumpToday}
-              className="rounded px-2.5 py-1 text-xs font-medium text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100 cursor-pointer"
+              className="rounded px-2.5 py-1 text-xs font-medium text-zinc-300 transition-colors hover:bg-[#151C2C] hover:text-zinc-100 cursor-pointer"
             >
               Tuần này
             </button>
@@ -571,7 +862,7 @@ export const ScheduleDashboard: React.FC = () => {
                 setWeekAnchor(next);
                 setMiniMonth(new Date(next.getFullYear(), next.getMonth(), 1));
               }}
-              className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 cursor-pointer"
+              className="rounded p-1 text-zinc-400 transition-colors hover:bg-[#151C2C] hover:text-zinc-100 cursor-pointer"
               aria-label="Tuần sau"
             >
               <ChevronRight className="h-4 w-4" />
@@ -586,148 +877,84 @@ export const ScheduleDashboard: React.FC = () => {
           {writableOAuthCalendars.length > 0 && (
             <button
               type="button"
-              onClick={() => setIsCreateOpen((prev) => !prev)}
-              className="flex h-8 items-center gap-1.5 rounded-md bg-zinc-100 px-3 text-xs font-medium text-zinc-950 transition-colors duration-150 hover:bg-zinc-200 active:scale-[0.98] cursor-pointer"
+              onClick={() => setModalState({ mode: "create", defaultDateIso: todayIso })}
+              title="Thêm sự kiện mới (N)"
+              className="flex h-8 items-center gap-1.5 rounded-lg bg-[#2F6BFF] px-3 text-xs font-semibold text-white transition-colors duration-150 hover:bg-[#255CE6] active:scale-[0.98] cursor-pointer"
             >
               <Plus className="h-3.5 w-3.5" aria-hidden="true" />
               <span>Thêm sự kiện</span>
             </button>
           )}
-          {oauthStatus?.connected && (
-            <button
-              type="button"
-              onClick={() => void handlePushUitToGoogle()}
-              disabled={isPushingUit}
-              className="flex h-8 items-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-900 px-3 text-xs font-medium text-zinc-200 transition-colors duration-150 hover:border-zinc-600 hover:bg-zinc-800 active:scale-[0.98] disabled:opacity-50 cursor-pointer"
-            >
-              <UploadCloud
-                className={`h-3.5 w-3.5 text-emerald-400 ${isPushingUit ? "animate-pulse" : ""}`}
-                aria-hidden="true"
-              />
-              <span>{isPushingUit ? "Đang đẩy TKB..." : "Đẩy TKB UIT lên Google"}</span>
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={() => void handleExportIcs()}
-            className="flex h-8 items-center gap-1.5 rounded-md border border-zinc-800 bg-zinc-900 px-3 text-xs font-medium text-zinc-300 transition-colors duration-150 hover:border-zinc-700 hover:bg-zinc-800 hover:text-zinc-100 active:scale-[0.98] cursor-pointer"
-          >
-            <Download className="h-3.5 w-3.5 text-zinc-400" aria-hidden="true" />
-            <span>Xuất .ics UIT</span>
-          </button>
+
           <button
             type="button"
             onClick={() => void handleSyncAll()}
             disabled={isSyncing}
-            className="flex h-8 items-center gap-1.5 rounded-md border border-emerald-800/70 bg-emerald-950/60 px-3 text-xs font-medium text-emerald-200 transition-colors duration-150 hover:bg-emerald-900/60 active:scale-[0.98] disabled:opacity-50 cursor-pointer"
+            title="Đồng bộ lịch Google"
+            aria-label="Đồng bộ lịch Google"
+            className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#1D263B] bg-[#080B12] text-[#6B9BFF] transition-colors duration-150 hover:border-[#2F6BFF]/40 hover:bg-[#151C2C] active:scale-[0.98] disabled:opacity-50 cursor-pointer"
           >
             <RefreshCw className={`h-3.5 w-3.5 ${isSyncing ? "animate-spin" : ""}`} aria-hidden="true" />
-            <span>Đồng bộ</span>
           </button>
+
+          <div ref={utilsDropdownRef} className="relative">
+            <button
+              type="button"
+              onClick={() => setIsUtilsOpen((v) => !v)}
+              aria-expanded={isUtilsOpen}
+              aria-haspopup="menu"
+              className="flex h-8 items-center gap-1.5 rounded-lg border border-[#1D263B] bg-[#080B12] px-3 text-xs font-medium text-zinc-300 transition-colors duration-150 hover:border-[#2F6BFF]/30 hover:bg-[#151C2C] hover:text-white cursor-pointer"
+            >
+              <span>Tiện ích</span>
+              <ChevronDown
+                className={`h-3.5 w-3.5 text-zinc-500 transition-transform duration-150 ${
+                  isUtilsOpen ? "rotate-180" : ""
+                }`}
+                aria-hidden="true"
+              />
+            </button>
+
+            {isUtilsOpen && (
+              <div
+                role="menu"
+                className="uit-modal-in absolute right-0 top-10 z-30 w-56 rounded-xl border border-[#1D263B] bg-[#0F1420] py-1.5 shadow-2xl"
+              >
+                {oauthStatus?.connected && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled={isPushingUit}
+                    onClick={() => void handlePushUitToGoogle()}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-zinc-200 transition-colors hover:bg-[#151C2C] disabled:opacity-50 cursor-pointer"
+                  >
+                    <UploadCloud
+                      className={`h-3.5 w-3.5 text-[#6B9BFF] ${isPushingUit ? "animate-pulse" : ""}`}
+                      aria-hidden="true"
+                    />
+                    <span>{isPushingUit ? "Đang đẩy TKB..." : "Đẩy TKB UIT lên Google"}</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => void handleExportIcs()}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-zinc-200 transition-colors hover:bg-[#151C2C] cursor-pointer"
+                >
+                  <Download className="h-3.5 w-3.5 text-zinc-400" aria-hidden="true" />
+                  <span>Xuất .ics UIT</span>
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Inline Quick Create Google Calendar Event Panel */}
-      {isCreateOpen && writableOAuthCalendars.length > 0 && (
-        <form
-          onSubmit={(e) => void handleCreateEvent(e)}
-          className="rounded-lg border border-zinc-800 bg-zinc-900/70 p-4 space-y-3"
-        >
-          <div className="flex items-center justify-between">
-            <h2 className="text-xs font-semibold text-zinc-100">
-              Tạo sự kiện mới (tự đồng bộ lên Google Calendar)
-            </h2>
-            <button
-              type="button"
-              onClick={() => setIsCreateOpen(false)}
-              className="rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200 cursor-pointer"
-              aria-label="Đóng biểu mẫu"
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
-          </div>
-
-          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-12">
-            <input
-              type="text"
-              value={eventTitle}
-              onChange={(e) => setEventTitle(e.target.value)}
-              placeholder="Tên sự kiện (vd: Họp nhóm đồ án, Đi khám răng)"
-              required
-              className="sm:col-span-5 rounded-md border border-zinc-800 bg-zinc-950 px-3 py-1.5 text-xs text-zinc-100 placeholder-zinc-600 focus:border-zinc-600 focus:outline-none"
-            />
-            <select
-              value={eventCalendarId}
-              onChange={(e) => setEventCalendarId(e.target.value)}
-              className="sm:col-span-4 rounded-md border border-zinc-800 bg-zinc-950 px-2.5 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
-            >
-              {writableOAuthCalendars.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-            <input
-              type="date"
-              value={eventDate}
-              onChange={(e) => setEventDate(e.target.value)}
-              required
-              className="sm:col-span-3 rounded-md border border-zinc-800 bg-zinc-950 px-2.5 py-1.5 font-mono text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
-            />
-          </div>
-
-          <div className="flex flex-wrap items-center gap-3">
-            <label className="flex items-center gap-1.5 text-xs text-zinc-300 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={eventAllDay}
-                onChange={(e) => setEventAllDay(e.target.checked)}
-                className="h-3.5 w-3.5 rounded border-zinc-700 bg-zinc-950 accent-emerald-500"
-              />
-              <span>Cả ngày</span>
-            </label>
-            {!eventAllDay && (
-              <div className="flex items-center gap-1.5">
-                <input
-                  type="time"
-                  value={eventStartTime}
-                  onChange={(e) => setEventStartTime(e.target.value)}
-                  className="rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1 font-mono text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
-                />
-                <span className="text-xs text-zinc-500">đến</span>
-                <input
-                  type="time"
-                  value={eventEndTime}
-                  onChange={(e) => setEventEndTime(e.target.value)}
-                  className="rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1 font-mono text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
-                />
-              </div>
-            )}
-            <input
-              type="text"
-              value={eventLocation}
-              onChange={(e) => setEventLocation(e.target.value)}
-              placeholder="Địa điểm (không bắt buộc)"
-              className="min-w-[180px] flex-1 rounded-md border border-zinc-800 bg-zinc-950 px-2.5 py-1 text-xs text-zinc-100 placeholder-zinc-600 focus:border-zinc-600 focus:outline-none"
-            />
-            <button
-              type="submit"
-              disabled={isCreatingEvent || !eventTitle.trim()}
-              className="flex h-7 items-center gap-1.5 rounded-md bg-emerald-600 px-3 text-xs font-medium text-white transition-colors hover:bg-emerald-500 disabled:opacity-40 cursor-pointer"
-            >
-              <Plus className="h-3.5 w-3.5" />
-              <span>{isCreatingEvent ? "Đang lưu..." : "Lưu lên Google"}</span>
-            </button>
-          </div>
-        </form>
-      )}
-
       {feedback && (
         <div
-          className={`rounded-md border px-3 py-2 text-xs ${
+          className={`rounded-lg border px-3 py-2 text-xs ${
             feedback.ok
-              ? "border-emerald-900/60 bg-emerald-950/40 text-emerald-300"
-              : "border-rose-900/60 bg-rose-950/40 text-rose-300"
+              ? "border-[#2F6BFF]/35 bg-[#2F6BFF]/[0.12] text-[#8BB2FF]"
+              : "border-red-500/30 bg-red-500/10 text-red-300"
           }`}
         >
           {feedback.text}
@@ -736,18 +963,66 @@ export const ScheduleDashboard: React.FC = () => {
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
         {/* Left 8 cols: 7-day Agenda */}
-        <div className="lg:col-span-8 rounded-lg border border-zinc-800/80 bg-zinc-900/40 divide-y divide-zinc-800/80">
+        <div className="lg:col-span-8 rounded-xl border border-[#1D263B] bg-[#0F1420] divide-y divide-[#1D263B]/75">
           {weekDays.map((day, idx) => {
             const iso = toLocalDateIso(day);
             const entries = entriesByDate.get(iso) ?? [];
             const isToday = iso === todayIso;
+            const isPastDay = iso < todayIso;
+            const isExpandedPast = Boolean(expandedPastDays[iso]);
+            const isCollapsedPast = isPastDay && !isExpandedPast;
+            const isFlashed = flashedDayIso === iso;
+
             return (
-              <div key={iso} className="px-4 py-3">
-                <div className="flex items-center justify-between">
+              <div
+                key={iso}
+                ref={(el) => {
+                  if (el) dayRefs.current.set(iso, el);
+                  else dayRefs.current.delete(iso);
+                }}
+                className={`px-4 py-3 transition-opacity duration-150 ${
+                  isCollapsedPast
+                    ? "opacity-60 hover:opacity-90"
+                    : isPastDay
+                    ? "opacity-80"
+                    : ""
+                }`}
+              >
+                <div
+                  role={isPastDay ? "button" : undefined}
+                  tabIndex={isPastDay ? 0 : undefined}
+                  aria-expanded={isPastDay ? isExpandedPast : undefined}
+                  onClick={
+                    isPastDay
+                      ? () =>
+                          setExpandedPastDays((prev) => ({
+                            ...prev,
+                            [iso]: !prev[iso],
+                          }))
+                      : undefined
+                  }
+                  onKeyDown={
+                    isPastDay
+                      ? (e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            setExpandedPastDays((prev) => ({
+                              ...prev,
+                              [iso]: !prev[iso],
+                            }));
+                          }
+                        }
+                      : undefined
+                  }
+                  onContextMenu={(e) => handleDayContextMenu(iso, false, e)}
+                  className={`group/dayhead flex items-center justify-between rounded-md px-1.5 py-1 -mx-1.5 transition-colors duration-150 ${
+                    isPastDay ? "cursor-pointer hover:bg-[#151C2C]/70" : ""
+                  } ${isFlashed ? "uit-day-flash" : ""}`}
+                >
                   <div className="flex items-center gap-2">
                     <span
                       className={`text-xs font-semibold ${
-                        isToday ? "text-emerald-400" : "text-zinc-200"
+                        isToday ? "text-[#6B9BFF]" : "text-zinc-200"
                       }`}
                     >
                       {WEEKDAY_NAMES[idx]}
@@ -756,27 +1031,91 @@ export const ScheduleDashboard: React.FC = () => {
                       {formatVietnameseShortDate(day)}
                     </span>
                     {isToday && (
-                      <span className="rounded border border-emerald-900/70 bg-emerald-950/60 px-1.5 py-0.5 font-mono text-[10px] text-emerald-300">
+                      <span className="rounded-full bg-[#2F6BFF] px-2 py-0.5 text-[10px] font-semibold text-white">
                         Hôm nay
                       </span>
                     )}
+                    {isCollapsedPast && (
+                      <span className="inline-flex items-center gap-1 font-mono text-[11px] text-zinc-400">
+                        <span>— {entries.length > 0 ? `${entries.length} mục` : "Trống"}</span>
+                        <ChevronRight className="h-3 w-3 text-zinc-500" aria-hidden="true" />
+                      </span>
+                    )}
                   </div>
-                  <span className="font-mono text-[11px] text-zinc-600 tabular-nums">
-                    {entries.length > 0 ? `${entries.length} mục` : "Trống"}
-                  </span>
+
+                  <div className="flex items-center gap-1.5">
+                    {writableOAuthCalendars.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setModalState({
+                            mode: "create",
+                            defaultDateIso: iso,
+                            nonce: Date.now(),
+                          });
+                        }}
+                        title={`Thêm sự kiện vào ${formatDayMonthShort(iso)}`}
+                        aria-label={`Thêm sự kiện vào ${formatDayMonthShort(iso)}`}
+                        className="flex h-5 w-5 items-center justify-center rounded border border-[#1D263B] bg-[#080B12] text-zinc-400 opacity-0 transition-opacity duration-150 group-hover/dayhead:opacity-100 focus-visible:opacity-100 hover:border-[#2F6BFF]/40 hover:bg-[#151C2C] hover:text-[#6B9BFF] cursor-pointer"
+                      >
+                        <Plus className="h-3 w-3" aria-hidden="true" />
+                      </button>
+                    )}
+                    {!isCollapsedPast && (
+                      <span className="inline-flex items-center gap-1 font-mono text-[11px] text-zinc-600 tabular-nums">
+                        <span>{entries.length > 0 ? `${entries.length} mục` : "Trống"}</span>
+                        {isPastDay && (
+                          <ChevronDown className="h-3 w-3 text-zinc-500" aria-hidden="true" />
+                        )}
+                      </span>
+                    )}
+                  </div>
                 </div>
 
-                {entries.length > 0 && (
-                  <div className="mt-2 divide-y divide-zinc-800/50 border-t border-zinc-800/60">
+                {!isCollapsedPast && entries.length > 0 && (
+                  <div className="mt-2 divide-y divide-[#1D263B]/60 border-t border-[#1D263B]/75">
                     {entries.map((item) => {
-                      const delKey =
-                        item.calendarId && item.eventUid
-                          ? `${item.calendarId}:${item.eventUid}`
-                          : "";
+                      const isUitClass = item.source === "uit" && Boolean(item.rawTimetable);
+                      const isEditableGcal = Boolean(item.canEdit && item.rawEvent);
+                      const isClickable = isUitClass || isEditableGcal;
+
+                      const handleRowClick = () => {
+                        if (isUitClass && item.rawTimetable) {
+                          setPreviewUitSlot(item.rawTimetable);
+                          return;
+                        }
+                        if (isEditableGcal) {
+                          handleOpenEditModal(item);
+                        }
+                      };
+
                       return (
                         <div
                           key={item.id}
-                          className="group flex items-center justify-between gap-3 py-2"
+                          role={isClickable ? "button" : undefined}
+                          tabIndex={isClickable ? 0 : undefined}
+                          onClick={isClickable ? handleRowClick : undefined}
+                          onContextMenu={
+                            isEditableGcal
+                              ? (e) => handleEventContextMenu(item, e)
+                              : undefined
+                          }
+                          onKeyDown={
+                            isClickable
+                              ? (e) => {
+                                  if (e.key === "Enter" || e.key === " ") {
+                                    e.preventDefault();
+                                    handleRowClick();
+                                  }
+                                }
+                              : undefined
+                          }
+                          className={`group flex items-center justify-between gap-3 rounded-md py-2 px-2 -mx-2 transition-colors duration-150 hover:bg-[#151C2C] ${
+                            item.source === "uit"
+                              ? "border-l-2 border-[#2F6BFF] pl-2.5"
+                              : ""
+                          } ${isClickable ? "cursor-pointer" : ""}`}
                         >
                           <div className="flex min-w-0 items-center gap-3">
                             <span className="w-24 shrink-0 font-mono text-xs tabular-nums text-zinc-400">
@@ -800,35 +1139,31 @@ export const ScheduleDashboard: React.FC = () => {
                           </div>
 
                           <div className="flex shrink-0 items-center gap-2">
-                            <span className="rounded border border-zinc-800 bg-zinc-950 px-1.5 py-0.5 font-mono text-[10px] text-zinc-400">
-                              {item.badgeLabel}
-                            </span>
+                            {item.showBadge && (
+                              <span
+                                className={`rounded border px-1.5 py-0.5 font-mono text-[10px] ${
+                                  item.source === "uit"
+                                    ? "border-[#2F6BFF]/30 bg-[#2F6BFF]/[0.12] text-[#6B9BFF]"
+                                    : item.source === "exam"
+                                    ? "border-red-500/30 bg-red-500/15 text-red-300"
+                                    : "border-[#1D263B] bg-[#080B12] text-zinc-400"
+                                }`}
+                              >
+                                {item.badgeLabel}
+                              </span>
+                            )}
                             {item.roomOrLocation && (
                               <span
                                 className={`rounded px-1.5 py-0.5 font-mono text-[11px] font-semibold ${
                                   item.source === "uit"
-                                    ? "bg-zinc-800 text-zinc-100"
+                                    ? "bg-[#2F6BFF]/[0.16] text-[#6B9BFF]"
                                     : item.source === "exam"
-                                    ? "bg-rose-950 text-rose-200"
-                                    : "bg-zinc-900 text-zinc-300 border border-zinc-800"
+                                    ? "border border-red-500/30 bg-red-500/15 text-red-300"
+                                    : "border border-[#1D263B] bg-[#080B12] text-zinc-300"
                                 }`}
                               >
                                 {item.roomOrLocation}
                               </span>
-                            )}
-                            {item.canDelete && item.calendarId && item.eventUid && (
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  void handleDeleteEvent(item.calendarId!, item.eventUid!)
-                                }
-                                disabled={deletingEventKey === delKey}
-                                title="Xóa khỏi Google Calendar"
-                                aria-label={`Xóa ${item.title}`}
-                                className="rounded p-1 text-zinc-600 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-zinc-800 hover:text-rose-400 disabled:opacity-50 cursor-pointer"
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </button>
                             )}
                           </div>
                         </div>
@@ -841,297 +1176,146 @@ export const ScheduleDashboard: React.FC = () => {
           })}
         </div>
 
-        {/* Right 4 cols: Mini Calendar + Google Account OAuth + Advanced ICS */}
-        <aside className="lg:col-span-4 space-y-4">
+        {/* Right 4 cols: Sticky Mini Calendar + Google Account OAuth + Advanced ICS */}
+        <aside className="lg:col-span-4 space-y-4 lg:sticky lg:top-4 lg:self-start">
           <MiniMonthCalendar
             selectedWeekStart={weekAnchor}
             viewMonth={miniMonth}
             onChangeMonth={setMiniMonth}
             onSelectDate={handleSelectMiniDate}
             onJumpToday={handleJumpToday}
+            onDateContextMenu={(date, e) =>
+              handleDayContextMenu(toLocalDateIso(date), true, e)
+            }
             examDateSet={examDateSet}
             gcalDateColorMap={gcalDateColorMap}
           />
 
-          {/* Primary Google Calendar OAuth Card */}
-          <div className="rounded-lg border border-zinc-800/80 bg-zinc-900/40 p-4 space-y-3">
+          {/* Compact Calendar Visibility Card (OAuth & ICS setup moved to Settings -> Kết nối & Đồng bộ) */}
+          <div className="rounded-xl border border-[#1D263B] bg-[#0F1420] p-3.5 space-y-2.5">
             <div className="flex items-center justify-between gap-2">
-              <h2 className="text-xs font-semibold text-zinc-100">
-                Google Calendar (2 chiều)
-              </h2>
-              {oauthStatus?.connected && (
-                <button
-                  type="button"
-                  onClick={() => void handleDisconnectGoogleOAuth()}
-                  className="flex items-center gap-1 rounded border border-zinc-800 bg-zinc-950 px-2 py-1 text-[11px] font-medium text-zinc-400 hover:border-zinc-700 hover:text-rose-300 cursor-pointer"
-                >
-                  <LogOut className="h-3 w-3" aria-hidden="true" />
-                  <span>Ngắt kết nối</span>
-                </button>
-              )}
+              <div className="flex items-center gap-2 min-w-0">
+                <h2 className="text-xs font-semibold text-zinc-100">Lịch hiển thị</h2>
+                {oauthStatus?.connected && (
+                  <span
+                    className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400"
+                    title={oauthStatus.email ? `Đã kết nối: ${oauthStatus.email}` : "Đã kết nối Google Calendar"}
+                  />
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() =>
+                  window.dispatchEvent(new CustomEvent("open-settings", { detail: { tab: "services" } }))
+                }
+                title="Cài đặt kết nối & đồng bộ lịch"
+                aria-label="Cài đặt kết nối & đồng bộ lịch"
+                className="flex h-7 w-7 items-center justify-center rounded-md border border-[#1D263B] bg-[#080B12] text-zinc-400 transition-colors hover:border-[#2F6BFF]/40 hover:bg-[#151C2C] hover:text-[#6B9BFF] cursor-pointer"
+              >
+                <Settings className="h-3.5 w-3.5" aria-hidden="true" />
+              </button>
             </div>
 
-            {!oauthStatus?.connected ? (
-              <div className="space-y-3">
+            {calendars.length === 0 ? (
+              <div className="space-y-2 pt-0.5">
                 <p className="text-[11px] leading-relaxed text-zinc-400">
-                  Đăng nhập bằng tài khoản Google để tự động lấy toàn bộ lịch, tạo sự kiện mới và đồng bộ TKB UIT lên điện thoại.
+                  Chưa có lịch cá nhân nào được kết nối.
                 </p>
-
                 <button
                   type="button"
-                  onClick={() => void handleConnectGoogleOAuth()}
-                  disabled={isConnectingOAuth}
-                  className="flex h-9 w-full items-center justify-center gap-2 rounded-md bg-emerald-600 px-3 text-xs font-semibold text-white transition-colors hover:bg-emerald-500 active:scale-[0.99] disabled:opacity-50 cursor-pointer"
+                  onClick={() =>
+                    window.dispatchEvent(new CustomEvent("open-settings", { detail: { tab: "services" } }))
+                  }
+                  className="flex h-8 w-full items-center justify-center gap-1.5 rounded-lg border border-[#1D263B] bg-[#151C2C] px-3 text-xs font-medium text-zinc-200 transition-colors hover:border-[#2F6BFF]/50 hover:text-white cursor-pointer"
                 >
-                  <LogIn className="h-3.5 w-3.5" aria-hidden="true" />
-                  <span>
-                    {isConnectingOAuth
-                      ? "Đang chờ xác nhận trên trình duyệt..."
-                      : "Đăng nhập bằng Google"}
-                  </span>
+                  <Settings className="h-3.5 w-3.5 text-[#6B9BFF]" aria-hidden="true" />
+                  <span>Kết nối lịch trong Cài đặt</span>
                 </button>
-
-                {oauthStatus && !oauthStatus.is_embedded_config && (
-                  <div className="border-t border-zinc-800/80 pt-2.5">
-                    <button
-                      type="button"
-                      onClick={() => setShowOAuthSetup((v) => !v)}
-                      className="flex w-full items-center justify-between text-[11px] text-zinc-400 hover:text-zinc-200 cursor-pointer"
-                    >
-                      <span className="flex items-center gap-1.5">
-                        <Settings2 className="h-3 w-3" aria-hidden="true" />
-                        <span>
-                          {oauthStatus.is_configured
-                            ? "Đổi OAuth Client ID (bản dev)"
-                            : "Cấu hình OAuth (dành cho bản dev)"}
-                        </span>
-                      </span>
-                      <ChevronDown
-                        className={`h-3.5 w-3.5 transition-transform ${
-                          showOAuthSetup ? "rotate-180" : ""
-                        }`}
-                      />
-                    </button>
-
-                    {showOAuthSetup && (
-                      <form
-                        onSubmit={(e) => void handleSaveOAuthConfig(e)}
-                        className="mt-2.5 space-y-2"
-                      >
-                        <p className="text-[11px] text-zinc-500">
-                          Dán Desktop OAuth Client ID & Secret từ Google Cloud Console (khi đóng gói bản phát hành qua env, mục này sẽ tự ẩn).
-                        </p>
-                        <input
-                          type="text"
-                          value={oauthClientId}
-                          onChange={(e) => setOauthClientId(e.target.value)}
-                          placeholder="Google OAuth Client ID"
-                          className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2.5 py-1.5 font-mono text-[11px] text-zinc-100 placeholder-zinc-600 focus:border-zinc-600 focus:outline-none"
-                        />
-                        <input
-                          type="password"
-                          value={oauthClientSecret}
-                          onChange={(e) => setOauthClientSecret(e.target.value)}
-                          placeholder="Client Secret (tùy chọn)"
-                          className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2.5 py-1.5 font-mono text-[11px] text-zinc-100 placeholder-zinc-600 focus:border-zinc-600 focus:outline-none"
-                        />
-                        <button
-                          type="submit"
-                          disabled={isSavingOAuthConfig || !oauthClientId.trim()}
-                          className="h-7 w-full rounded-md bg-zinc-100 text-xs font-medium text-zinc-950 hover:bg-zinc-200 disabled:opacity-40 cursor-pointer"
-                        >
-                          {isSavingOAuthConfig ? "Đang lưu..." : "Lưu cấu hình OAuth"}
-                        </button>
-                      </form>
-                    )}
-                  </div>
-                )}
               </div>
             ) : (
-              <div className="space-y-2.5">
-                <div className="flex items-center gap-2 rounded-md border border-emerald-900/60 bg-emerald-950/30 px-2.5 py-1.5">
-                  <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-400" />
-                  <span className="truncate font-mono text-[11px] text-emerald-200">
-                    {oauthStatus.email || "Đã đăng nhập Google"}
-                  </span>
-                </div>
-
-                {oauthCalendars.length > 0 && (
-                  <div className="divide-y divide-zinc-800/70 border-t border-zinc-800">
-                    {oauthCalendars.map((cal) => (
-                      <label
-                        key={cal.id}
-                        className="flex items-center justify-between gap-2 py-2 cursor-pointer"
-                      >
-                        <div className="flex min-w-0 items-center gap-2">
-                          <input
-                            type="checkbox"
-                            checked={cal.is_enabled}
-                            onChange={() =>
-                              void handleToggleCalendar(cal.id, cal.is_enabled)
-                            }
-                            className="h-3.5 w-3.5 rounded border-zinc-700 bg-zinc-950 accent-emerald-500"
-                          />
-                          <span
-                            className="h-2.5 w-2.5 shrink-0 rounded-full"
-                            style={{ backgroundColor: cal.color }}
-                          />
-                          <span className="truncate text-xs font-medium text-zinc-200">
-                            {cal.name}
-                          </span>
-                        </div>
-                        <span className="shrink-0 font-mono text-[10px] text-zinc-500">
-                          {cal.can_write ? "2 chiều" : "Chỉ đọc"}
-                        </span>
-                      </label>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Secondary Collapsible ICS Feed Manager */}
-          <div className="rounded-lg border border-zinc-800/80 bg-zinc-900/40 p-4">
-            <button
-              type="button"
-              onClick={() => setShowIcsAdvanced((v) => !v)}
-              className="flex w-full items-center justify-between gap-2 text-left cursor-pointer"
-            >
-              <span className="text-xs font-semibold text-zinc-300">
-                Nâng cao: Thêm lịch bằng link .ics ({icsCalendars.length})
-              </span>
-              <ChevronDown
-                className={`h-4 w-4 text-zinc-500 transition-transform ${
-                  showIcsAdvanced ? "rotate-180" : ""
-                }`}
-              />
-            </button>
-
-            {showIcsAdvanced && (
-              <div className="mt-3 space-y-3 border-t border-zinc-800/70 pt-3">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-[11px] font-medium text-zinc-400">
-                    Nguồn iCalendar công khai / bí mật
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      void openExternalUrl(
-                        "https://calendar.google.com/calendar/r/settings"
-                      )
-                    }
-                    className="flex items-center gap-1 rounded border border-zinc-800 bg-zinc-950 px-2 py-1 text-[11px] font-medium text-emerald-400 hover:border-zinc-700 hover:bg-zinc-800 cursor-pointer"
+              <div className="divide-y divide-[#1D263B]/70 border-t border-[#1D263B]/80">
+                {[...oauthCalendars, ...icsCalendars].map((cal) => (
+                  <label
+                    key={cal.id}
+                    className="flex items-center justify-between gap-2 py-2 cursor-pointer"
                   >
-                    <span>Mở Google Calendar</span>
-                    <ExternalLink className="h-3 w-3" aria-hidden="true" />
-                  </button>
-                </div>
-
-                <ol className="space-y-1 text-[11px] text-zinc-400 list-decimal list-inside">
-                  <li>Mở cài đặt Google Calendar trên trình duyệt.</li>
-                  <li>Chọn lịch ở cột trái, kéo xuống mục Tích hợp lịch.</li>
-                  <li>Sao chép Địa chỉ bí mật iCal và dán vào ô bên dưới.</li>
-                </ol>
-
-                <form
-                  onSubmit={(e) => void handleAddCalendar(e)}
-                  className="space-y-2.5"
-                >
-                  <input
-                    type="text"
-                    value={newName}
-                    onChange={(e) => setNewName(e.target.value)}
-                    placeholder="Tên lịch (vd: Cá nhân, CLB)"
-                    className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-1.5 text-xs text-zinc-100 placeholder-zinc-600 focus:border-zinc-600 focus:outline-none"
-                  />
-                  <input
-                    type="url"
-                    value={newUrl}
-                    onChange={(e) => setNewUrl(e.target.value)}
-                    placeholder="https://calendar.google.com/calendar/ical/..."
-                    className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-1.5 font-mono text-xs text-zinc-100 placeholder-zinc-600 focus:border-zinc-600 focus:outline-none"
-                  />
-                  <div className="flex items-center justify-between pt-1">
-                    <div className="flex items-center gap-1.5">
-                      {CALENDAR_PALETTE.map((hex) => (
-                        <button
-                          key={hex}
-                          type="button"
-                          onClick={() => setNewColor(hex)}
-                          aria-label={`Chọn màu ${hex}`}
-                          className={`h-4 w-4 rounded-full cursor-pointer transition-transform duration-100 ${
-                            newColor === hex
-                              ? "ring-2 ring-zinc-200 ring-offset-2 ring-offset-zinc-900"
-                              : ""
-                          }`}
-                          style={{ backgroundColor: hex }}
-                        />
-                      ))}
+                    <div className="flex min-w-0 items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={cal.is_enabled}
+                        onChange={() => void handleToggleCalendar(cal.id, cal.is_enabled)}
+                        className="h-3.5 w-3.5 rounded border-[#1D263B] bg-[#080B12] accent-[#2F6BFF]"
+                      />
+                      <span
+                        className="h-2.5 w-2.5 shrink-0 rounded-full"
+                        style={{ backgroundColor: cal.color }}
+                      />
+                      <span className="truncate text-xs font-medium text-zinc-200">
+                        {cal.name}
+                      </span>
                     </div>
-                    <button
-                      type="submit"
-                      disabled={isAdding || !newName.trim() || !newUrl.trim()}
-                      className="flex h-7 items-center gap-1 rounded-md bg-zinc-100 px-2.5 text-xs font-medium text-zinc-950 transition-colors duration-150 hover:bg-zinc-200 disabled:opacity-40 cursor-pointer"
-                    >
-                      <Plus className="h-3.5 w-3.5" aria-hidden="true" />
-                      <span>Thêm lịch</span>
-                    </button>
-                  </div>
-                </form>
-
-                <div className="divide-y divide-zinc-800/70 border-t border-zinc-800">
-                  {icsCalendars.length === 0 ? (
-                    <div className="py-3 text-center text-xs text-zinc-500">
-                      Chưa gắn lịch .ics nào.
-                    </div>
-                  ) : (
-                    icsCalendars.map((cal) => (
-                      <div
-                        key={cal.id}
-                        className="flex items-center justify-between gap-2 py-2.5"
-                      >
-                        <label className="flex min-w-0 flex-1 items-center gap-2.5 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={cal.is_enabled}
-                            onChange={() =>
-                              void handleToggleCalendar(cal.id, cal.is_enabled)
-                            }
-                            className="h-3.5 w-3.5 rounded border-zinc-700 bg-zinc-950 accent-emerald-500"
-                          />
-                          <span
-                            className="h-2.5 w-2.5 shrink-0 rounded-full"
-                            style={{ backgroundColor: cal.color }}
-                          />
-                          <div className="min-w-0">
-                            <div className="truncate text-xs font-medium text-zinc-200">
-                              {cal.name}
-                            </div>
-                            <div className="font-mono text-[10px] text-zinc-500">
-                              {cal.last_synced_at > 0
-                                ? `Cập nhật ${formatTimeHm(cal.last_synced_at)}`
-                                : "Chưa đồng bộ"}
-                            </div>
-                          </div>
-                        </label>
-                        <button
-                          type="button"
-                          onClick={() => void handleDeleteCalendar(cal.id)}
-                          className="rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-rose-400 cursor-pointer"
-                          aria-label={`Xóa lịch ${cal.name}`}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    ))
-                  )}
-                </div>
+                    <span className="shrink-0 font-mono text-[10px] text-zinc-500">
+                      {cal.source === "oauth"
+                        ? cal.can_write
+                          ? "2 chiều"
+                          : "Chỉ đọc"
+                        : ".ics"}
+                    </span>
+                  </label>
+                ))}
               </div>
             )}
           </div>
         </aside>
       </div>
+
+      {/* Unified Create / Edit Event Modal */}
+      {modalState && writableOAuthCalendars.length > 0 && (
+        <ScheduleEventModal
+          key={
+            modalState.mode === "create"
+              ? `create-${modalState.defaultDateIso}-${modalState.nonce ?? 0}`
+              : `edit-${modalState.calendarId}-${modalState.uid}`
+          }
+          mode={modalState.mode}
+          writableCalendars={writableOAuthCalendars}
+          initialValues={
+            modalState.mode === "create"
+              ? createModalInitialValues!
+              : modalState.values
+          }
+          isSaving={isSavingEvent}
+          isDeleting={isDeletingEvent}
+          onClose={() => {
+            if (!isSavingEvent && !isDeletingEvent) setModalState(null);
+          }}
+          onSubmit={handleSubmitEventModal}
+          onDelete={modalState.mode === "edit" ? handleDeleteFromModal : undefined}
+        />
+      )}
+
+      {/* Read-only UIT Timetable Quick Preview Modal */}
+      {previewUitSlot && (
+        <UitClassPreviewModal
+          slot={previewUitSlot}
+          onClose={() => setPreviewUitSlot(null)}
+        />
+      )}
+
+      {/* Custom Context Menu */}
+      {contextMenu && contextMenuItems.length > 0 && (
+        <ScheduleContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          header={
+            contextMenu.kind === "day"
+              ? `Ngày ${formatDayMonthShort(contextMenu.dateIso)}`
+              : contextMenu.entry.title
+          }
+          items={contextMenuItems}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
     </div>
   );
 };

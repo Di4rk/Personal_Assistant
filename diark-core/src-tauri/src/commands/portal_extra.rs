@@ -376,7 +376,7 @@ pub fn get_local_sync_token() -> String {
     crate::server::get_sync_token().to_string()
 }
 
-fn read_sso_settings(db: &SharedDb) -> (String, String, bool) {
+pub(crate) fn read_sso_settings(db: &SharedDb) -> (String, String, bool) {
     let Ok(conn) = db.lock() else {
         return (String::new(), String::new(), false);
     };

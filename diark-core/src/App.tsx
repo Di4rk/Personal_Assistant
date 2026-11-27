@@ -52,16 +52,18 @@ import {
   Search,
   PanelLeftClose,
   PanelLeftOpen,
-  LogIn,
   RefreshCw,
-  ShieldCheck,
+  Check,
 } from "lucide-react";
 import uitLogoMono from "./assets/uit-logo-mono.png";
 import { APP_VERSION } from "./constants/app";
 import {
+  clearSsoCredentials,
+  getGoogleOAuthStatus,
   getSsoCredentialsStatus,
   getUserProfile,
   saveUserProfile,
+  syncGoogleCalendars,
   type SsoCredentialsStatus,
   type UserProfileDto,
 } from "./lib/tauri-client";
@@ -88,6 +90,39 @@ export default function App() {
     }
   });
   const isPortalSyncing = useSyncOrchestratorStore((s) => s.serviceState.portal.isSyncing);
+  const isMoodleSyncing = useSyncOrchestratorStore((s) => s.serviceState.moodle.isSyncing);
+  const isWecodeSyncing = useSyncOrchestratorStore((s) => s.serviceState.wecode.isSyncing);
+  const [isCalSyncing, setIsCalSyncing] = useState(false);
+  const [isQuickRefreshing, setIsQuickRefreshing] = useState(false);
+  const [justSynced, setJustSynced] = useState(false);
+  const wasSyncingRef = useRef(false);
+  const isCurrentTabSyncing =
+    isQuickRefreshing ||
+    (activeTab === "home"
+      ? isPortalSyncing || isMoodleSyncing || isCalSyncing
+      : activeTab === "schedule"
+      ? isCalSyncing
+      : activeTab === "academic"
+      ? isPortalSyncing
+      : activeTab === "uit-courses"
+      ? isMoodleSyncing
+      : activeTab === "uit-wecode"
+      ? isWecodeSyncing
+      : false);
+
+  useEffect(() => {
+    if (isCurrentTabSyncing) {
+      wasSyncingRef.current = true;
+      setJustSynced(false);
+      return;
+    }
+    if (wasSyncingRef.current) {
+      wasSyncingRef.current = false;
+      setJustSynced(true);
+      const timer = window.setTimeout(() => setJustSynced(false), 2000);
+      return () => window.clearTimeout(timer);
+    }
+  }, [isCurrentTabSyncing]);
   const navItemRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
   const [navIndicator, setNavIndicator] = useState<{
     y: number;
@@ -146,6 +181,10 @@ export default function App() {
     downloadedBytes,
     totalBytes,
     error: updateError,
+    isChecking: isCheckingUpdate,
+    autoCheckEnabled: autoCheckUpdates,
+    lastCheckedAt,
+    setAutoCheckEnabled: setAutoCheckUpdates,
     checkForUpdates,
     installUpdate,
     dismissUpdate,
@@ -218,7 +257,7 @@ export default function App() {
     return () => window.removeEventListener("open-settings", handleOpenSettings);
   }, []);
 
-  // Load User Profile on mount
+  // Load User Profile on mount (bypass onboarding directly to workspace when SSO credentials are already saved)
   useEffect(() => {
     let isMounted = true;
 
@@ -234,10 +273,35 @@ export default function App() {
       }
     }, 2500);
 
-    getUserProfile()
-      .then((profile) => {
+    Promise.allSettled([getUserProfile(), getSsoCredentialsStatus()])
+      .then(([profileRes, ssoRes]) => {
         if (!isMounted) return;
         clearTimeout(fallbackTimer);
+
+        const sso = ssoRes.status === "fulfilled" ? ssoRes.value : null;
+        const hasSavedSso = Boolean(sso && sso.has_password && sso.username.trim().length > 0);
+        const profile =
+          profileRes.status === "fulfilled"
+            ? profileRes.value
+            : { nickname: sso?.username.trim() || "Diark", major: "CS", is_initialized: false };
+
+        if (hasSavedSso) {
+          const resolvedNickname = profile.nickname || sso!.username.trim();
+          const resolvedMajor = profile.major || "CS";
+          if (!profile.is_initialized) {
+            void saveUserProfile(resolvedNickname, resolvedMajor).catch(() => undefined);
+          }
+          setProfileState({
+            status: "ready",
+            profile: {
+              nickname: resolvedNickname,
+              major: resolvedMajor,
+              is_initialized: true,
+            },
+          });
+          return;
+        }
+
         if (!profile.is_initialized) {
           setProfileState({ status: "needs-onboarding" });
         } else {
@@ -391,19 +455,114 @@ export default function App() {
     setIsPortalSyncModalOpen(true);
   });
 
-  const handleQuickPortalSync = useCallback(async () => {
-    try {
-      const status = await getSsoCredentialsStatus().catch(() => null);
-      if (status?.auto_login && status.has_password) {
-        const started = await useSyncOrchestratorStore
-          .getState()
-          .requestSync("portal", { bypassTtl: true, bypassCircuitBreaker: true });
-        if (started) return;
+  const handleSyncCurrentTab = useCallback(async () => {
+    const syncCalendarOnly = async () => {
+      setIsCalSyncing(true);
+      try {
+        const googleStatus = await getGoogleOAuthStatus().catch(() => null);
+        if (googleStatus?.connected) {
+          await syncGoogleCalendars();
+          window.dispatchEvent(new Event("calendar-settings-updated"));
+        }
+      } catch {
+        // Bỏ qua lỗi đồng bộ lịch tạm thời
+      } finally {
+        setIsCalSyncing(false);
       }
-    } catch {
-      // Fallback sang mở modal trực tiếp
+    };
+
+    const ensureSsoAndSync = async (services: Array<"portal" | "moodle" | "wecode">) => {
+      const sso = await getSsoCredentialsStatus().catch(() => null);
+      if (!sso?.has_password) {
+        setIsSsoLoginOpen(true);
+        return;
+      }
+      const store = useSyncOrchestratorStore.getState();
+      for (const svc of services) {
+        void store.requestSync(svc, { bypassTtl: true, bypassCircuitBreaker: true });
+      }
+    };
+
+    switch (activeTab) {
+      case "schedule":
+        await syncCalendarOnly();
+        return;
+      case "home":
+        await Promise.allSettled([
+          syncCalendarOnly(),
+          ensureSsoAndSync(["portal", "moodle"]),
+        ]);
+        return;
+      case "academic":
+        await ensureSsoAndSync(["portal"]);
+        return;
+      case "uit-courses":
+        await ensureSsoAndSync(["moodle"]);
+        return;
+      case "uit-wecode":
+        await ensureSsoAndSync(["wecode"]);
+        return;
+      case "cp":
+      case "cp-codeforces":
+        setIsQuickRefreshing(true);
+        try {
+          await refetchAll();
+        } finally {
+          window.setTimeout(() => setIsQuickRefreshing(false), 600);
+        }
+        return;
+      case "vault":
+        setIsQuickRefreshing(true);
+        window.dispatchEvent(new Event("vault-refresh"));
+        window.setTimeout(() => setIsQuickRefreshing(false), 600);
+        return;
+      default:
+        await ensureSsoAndSync(["portal"]);
     }
-    setIsPortalSyncModalOpen(true);
+  }, [activeTab, refetchAll]);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "F5" || e.ctrlKey || e.metaKey || e.altKey) return;
+      e.preventDefault();
+      if (profileState.status !== "ready") return;
+      if (isSsoLoginOpen || useSettingsStore.getState().isOpen) return;
+      void handleSyncCurrentTab();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [profileState.status, isSsoLoginOpen, handleSyncCurrentTab]);
+
+  // Tự động đồng bộ nền Portal, Moodle, Wecode khi khởi động và định kỳ theo TTL
+  useEffect(() => {
+    if (profileState.status !== "ready") return;
+    if (!ssoStatus?.has_password || !ssoStatus.auto_login) return;
+
+    const runAutoSync = async () => {
+      const store = useSyncOrchestratorStore.getState();
+      await store.initSyncTimestamps();
+      void store.requestSync("portal");
+      void store.requestSync("moodle");
+      void store.requestSync("wecode");
+    };
+
+    void runAutoSync();
+    const timer = window.setInterval(() => {
+      void runAutoSync();
+    }, 15 * 60 * 1000);
+    return () => window.clearInterval(timer);
+  }, [profileState.status, ssoStatus?.has_password, ssoStatus?.auto_login]);
+
+  const handleLogout = useCallback(async () => {
+    try {
+      await clearSsoCredentials();
+    } catch {
+      // Tiếp tục đưa về màn hình đăng nhập
+    }
+    window.dispatchEvent(new Event("sso-credentials-updated"));
+    useSettingsStore.getState().closeSettings();
+    setSsoStatus(null);
+    setProfileState({ status: "needs-onboarding" });
   }, []);
 
   // Khai báo vô điều kiện trước mọi early-return để tuân thủ React Rules of Hooks
@@ -432,7 +591,7 @@ export default function App() {
 
   const pageTitle =
     activeTab === "home"
-      ? "Hôm nay"
+      ? "Tổng quan"
       : activeTab === "schedule"
       ? "Lịch học & Cá nhân"
       : activeTab === "academic"
@@ -541,7 +700,7 @@ export default function App() {
               type="button"
               onClick={() => setActiveTab("home")}
               aria-current={activeTab === "home" ? "page" : undefined}
-              title="Hôm nay"
+              title="Tổng quan"
               className={`relative flex h-8 w-full items-center rounded-lg text-xs font-medium transition-colors duration-150 cursor-pointer ${
                 sidebarCollapsed ? "justify-center px-0" : "gap-2.5 px-2.5"
               } ${
@@ -551,7 +710,7 @@ export default function App() {
               }`}
             >
               <Home className={`h-4 w-4 shrink-0 ${activeTab === "home" ? "text-[#2F6BFF]" : ""}`} aria-hidden="true" />
-              {!sidebarCollapsed && <span>Hôm nay</span>}
+              {!sidebarCollapsed && <span>Tổng quan</span>}
             </button>
 
             <button
@@ -663,102 +822,31 @@ export default function App() {
               {!sidebarCollapsed && <span>Ghi chú</span>}
             </button>
           </div>
+        </nav>
 
-          <div className="space-y-0.5">
-            {!sidebarCollapsed && (
-              <div className="px-2.5 pb-1 text-[11px] font-medium text-zinc-500">
-                Hệ thống
-              </div>
-            )}
+        {/* Bottom Settings + Single Profile Card */}
+        <div className="shrink-0 space-y-2 border-t border-[#1D263B]/80 p-2.5">
+          <button
+            type="button"
+            onClick={() => useSettingsStore.getState().openSettings()}
+            title="Cài đặt hệ thống"
+            className={`flex h-8 w-full items-center rounded-lg border border-transparent text-xs font-medium text-zinc-400 transition-colors duration-150 hover:bg-[#151C2C] hover:text-zinc-200 cursor-pointer ${
+              sidebarCollapsed ? "justify-center px-0" : "gap-2.5 px-2.5"
+            }`}
+          >
+            <Settings className="h-4 w-4 shrink-0" aria-hidden="true" />
+            {!sidebarCollapsed && <span>Cài đặt</span>}
+          </button>
 
+          <div className="flex items-center gap-1 rounded-lg border border-[#1D263B] bg-[#0F1420] p-1">
             <button
               type="button"
               onClick={() => setIsSsoLoginOpen(true)}
               title="Tài khoản UIT SSO"
-              className={`flex h-8 w-full items-center rounded-lg border border-transparent text-xs font-medium text-zinc-400 transition-colors duration-150 hover:bg-[#151C2C] hover:text-zinc-200 cursor-pointer ${
-                sidebarCollapsed ? "justify-center px-0" : "justify-between px-2.5"
+              className={`flex h-8 min-w-0 flex-1 items-center rounded-md text-left transition-colors hover:bg-[#151C2C] cursor-pointer ${
+                sidebarCollapsed ? "justify-center px-0" : "gap-2 px-1.5"
               }`}
             >
-              <span className="flex items-center gap-2.5 min-w-0">
-                <ShieldCheck className="h-4 w-4 shrink-0" aria-hidden="true" />
-                {!sidebarCollapsed && <span className="truncate">Tài khoản SSO</span>}
-              </span>
-              {!sidebarCollapsed && (
-                <span
-                  className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                    ssoStatus?.has_password ? "bg-[#2F6BFF]" : "bg-zinc-600"
-                  }`}
-                />
-              )}
-            </button>
-
-            <button
-              type="button"
-              onClick={() => useSettingsStore.getState().openSettings()}
-              title="Cài đặt hệ thống"
-              className={`flex h-8 w-full items-center rounded-lg border border-transparent text-xs font-medium text-zinc-400 transition-colors duration-150 hover:bg-[#151C2C] hover:text-zinc-200 cursor-pointer ${
-                sidebarCollapsed ? "justify-center px-0" : "gap-2.5 px-2.5"
-              }`}
-            >
-              <Settings className="h-4 w-4 shrink-0" aria-hidden="true" />
-              {!sidebarCollapsed && <span>Cài đặt</span>}
-            </button>
-          </div>
-        </nav>
-
-        {/* Bottom SSO Status Card + User Profile Footer */}
-        <div className="shrink-0 space-y-2 border-t border-[#1D263B]/80 p-2.5">
-          {!sidebarCollapsed && (
-            <div className="space-y-2.5 rounded-xl border border-[#1D263B] bg-[#0F1420] p-3">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-[11px] font-medium text-zinc-300">
-                  {ssoStatus?.has_password ? "UIT SSO đã lưu" : "Chưa lưu SSO"}
-                </span>
-                <span
-                  className={`h-1.5 w-1.5 rounded-full ${
-                    ssoStatus?.has_password ? "bg-[#2F6BFF]" : "bg-amber-400"
-                  }`}
-                />
-              </div>
-              <p className="truncate font-mono text-[11px] text-zinc-500">
-                {ssoStatus?.username ? `MSSV: ${ssoStatus.username}` : "Đăng nhập một lần để đồng bộ tự động."}
-              </p>
-              <button
-                type="button"
-                onClick={() => {
-                  if (ssoStatus?.has_password) {
-                    void handleQuickPortalSync();
-                  } else {
-                    setIsSsoLoginOpen(true);
-                  }
-                }}
-                disabled={isPortalSyncing}
-                className="flex h-7 w-full items-center justify-center gap-1.5 rounded-lg border border-[#1D263B] bg-[#151C2C] text-[11px] font-medium text-zinc-100 transition-colors hover:border-[#2F6BFF]/30 hover:bg-[#1a2338] disabled:opacity-50 cursor-pointer"
-              >
-                {ssoStatus?.has_password ? (
-                  <>
-                    <RefreshCw className={`h-3 w-3 ${isPortalSyncing ? "animate-spin" : ""}`} />
-                    <span>{isPortalSyncing ? "Đang đồng bộ..." : "Đồng bộ Portal"}</span>
-                  </>
-                ) : (
-                  <>
-                    <LogIn className="h-3 w-3" />
-                    <span>Đăng nhập SSO</span>
-                  </>
-                )}
-              </button>
-            </div>
-          )}
-
-          <button
-            type="button"
-            onClick={() => setIsSsoLoginOpen(true)}
-            title="Mở cửa sổ đăng nhập UIT SSO"
-            className={`flex h-9 w-full items-center rounded-lg border border-[#1D263B] bg-[#0F1420] text-left transition-colors hover:border-[#2F6BFF]/30 hover:bg-[#151C2C] cursor-pointer ${
-              sidebarCollapsed ? "justify-center px-0" : "justify-between px-2.5"
-            }`}
-          >
-            <span className="flex items-center gap-2 min-w-0">
               <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-[#2F6BFF]/[0.18] text-[11px] font-semibold text-[#6B9BFF]">
                 {(ssoStatus?.username || profile.nickname || "U").slice(0, 2).toUpperCase()}
               </span>
@@ -768,13 +856,28 @@ export default function App() {
                     {profile.nickname}
                   </span>
                   <span className="block truncate font-mono text-[10px] text-zinc-500">
-                    {ssoStatus?.username || "UIT Student"}
+                    {ssoStatus?.username || "Chưa lưu SSO"}
                   </span>
                 </span>
               )}
-            </span>
-            {!sidebarCollapsed && <LogIn className="h-3.5 w-3.5 shrink-0 text-zinc-500" />}
-          </button>
+            </button>
+
+            {!sidebarCollapsed && (
+              <button
+                type="button"
+                onClick={() => void handleSyncCurrentTab()}
+                disabled={isCurrentTabSyncing}
+                title={`Làm mới ${pageTitle} (F5)`}
+                aria-label={`Làm mới ${pageTitle}`}
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-zinc-400 transition-colors hover:bg-[#151C2C] hover:text-[#6B9BFF] disabled:opacity-50 cursor-pointer"
+              >
+                <RefreshCw
+                  className={`h-3.5 w-3.5 ${isCurrentTabSyncing ? "animate-spin text-[#6B9BFF]" : ""}`}
+                  aria-hidden="true"
+                />
+              </button>
+            )}
+          </div>
         </div>
       </aside>
 
@@ -789,7 +892,7 @@ export default function App() {
             className="absolute inset-0"
             style={{
               background:
-                "radial-gradient(circle at 86% 84%, rgba(47,107,255,0.14) 0%, rgba(47,107,255,0.05) 36%, rgba(8,11,18,0) 70%)",
+                "radial-gradient(ellipse 75% 42% at 50% -8%, rgba(47,107,255,0.13) 0%, rgba(47,107,255,0.04) 45%, rgba(8,11,18,0) 78%), radial-gradient(circle at 86% 84%, rgba(47,107,255,0.14) 0%, rgba(47,107,255,0.05) 36%, rgba(8,11,18,0) 70%)",
             }}
           />
           <div
@@ -813,19 +916,26 @@ export default function App() {
           <h1 className="text-sm font-semibold tracking-tight text-zinc-100">{pageTitle}</h1>
 
           <div className="flex items-center gap-2">
-            <PortalQuickActionsPopover />
-
-            <button
-              type="button"
-              onClick={() => setIsSsoLoginOpen(true)}
-              className="flex h-8 items-center gap-1.5 rounded-lg border border-[#1D263B] bg-[#0F1420] px-2.5 text-xs font-medium text-zinc-300 transition-colors hover:border-[#2F6BFF]/30 hover:bg-[#151C2C] hover:text-white cursor-pointer"
-              title="Đăng nhập hoặc đổi tài khoản SSO UIT"
-            >
-              <LogIn className="h-3.5 w-3.5 text-zinc-400" aria-hidden="true" />
-              <span className="hidden sm:inline">
-                {ssoStatus?.has_password ? "Đổi SSO" : "Đăng nhập SSO"}
+            {isCurrentTabSyncing ? (
+              <span
+                role="status"
+                aria-live="polite"
+                className="inline-flex h-7 items-center gap-1.5 rounded-lg border border-[#2F6BFF]/35 bg-[#2F6BFF]/[0.12] px-2.5 text-[11px] font-medium text-[#6B9BFF]"
+              >
+                <RefreshCw className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                <span>Đang đồng bộ...</span>
               </span>
-            </button>
+            ) : justSynced ? (
+              <span
+                role="status"
+                aria-live="polite"
+                className="inline-flex h-7 items-center gap-1.5 rounded-lg border border-[#1D263B] bg-[#0F1420] px-2.5 text-[11px] font-medium text-zinc-300"
+              >
+                <Check className="h-3.5 w-3.5 text-emerald-400/80" aria-hidden="true" />
+                <span>Đã cập nhật</span>
+              </span>
+            ) : null}
+            <PortalQuickActionsPopover />
           </div>
         </header>
 
@@ -833,7 +943,7 @@ export default function App() {
         {activeTab === "home" ? (
           <HomeDashboard
             onNavigateTab={(tab) => setActiveTab(tab)}
-            onSyncPortal={() => void handleQuickPortalSync()}
+            onSyncPortal={() => void handleSyncCurrentTab()}
           />
         ) : activeTab === "schedule" ? (
           <ScheduleDashboard />
@@ -920,7 +1030,23 @@ export default function App() {
         prefill={quickCapturePrefill}
       />
 
-      <SettingsModal onResetGenesis={handleResetToGenesis} />
+      <SettingsModal
+        onResetGenesis={handleResetToGenesis}
+        onOpenSsoLogin={() => {
+          useSettingsStore.getState().closeSettings();
+          setIsSsoLoginOpen(true);
+        }}
+        onLogout={() => void handleLogout()}
+        updateStatus={updateStatus}
+        updateInfo={updateInfo}
+        updateError={updateError}
+        isCheckingUpdate={isCheckingUpdate}
+        autoCheckUpdates={autoCheckUpdates}
+        lastCheckedAt={lastCheckedAt}
+        onToggleAutoCheckUpdates={setAutoCheckUpdates}
+        onCheckUpdates={() => void checkForUpdates(true)}
+        onInstallUpdate={() => void installUpdate()}
+      />
       <DevControlDock onResetIdentity={handleResetIdentity} />
       <SyncPortalModal
         isOpen={isPortalSyncModalOpen}

@@ -44,10 +44,8 @@ export const SemesterGpaSimulator: React.FC<SemesterGpaSimulatorProps> = ({
   activeCourses,
   className = "",
 }) => {
-  // Initialize simulated courses from active courses
   const initialItems: SimulatedCourseState[] = useMemo(() => {
     if (!activeCourses || activeCourses.length === 0) {
-      // Fallback sample courses if semester courses aren't loaded yet
       return [
         { courseCode: "IT004", courseName: "Cơ sở dữ liệu", credits: 4, expectedScore10: 8.5 },
         { courseCode: "IT007", courseName: "Hệ điều hành", credits: 4, expectedScore10: 8.0 },
@@ -63,15 +61,15 @@ export const SemesterGpaSimulator: React.FC<SemesterGpaSimulatorProps> = ({
         courseCode: c.courseCode,
         courseName: c.courseName,
         credits: c.credits > 0 ? c.credits : 3,
-        expectedScore10: c.summaryScore10 !== null && c.summaryScore10 !== undefined && c.summaryScore10 > 0
-          ? c.summaryScore10
-          : 8.0,
+        expectedScore10:
+          c.summaryScore10 !== null && c.summaryScore10 !== undefined && c.summaryScore10 > 0
+            ? c.summaryScore10
+            : 8.0,
       }));
   }, [activeCourses]);
 
   const [simulatedCourses, setSimulatedCourses] = useState<SimulatedCourseState[]>(initialItems);
 
-  // Synchronize when activeCourses changes
   useEffect(() => {
     setSimulatedCourses(initialItems);
   }, [initialItems]);
@@ -92,7 +90,6 @@ export const SemesterGpaSimulator: React.FC<SemesterGpaSimulatorProps> = ({
         if (presetType === "8.5") return { ...item, expectedScore10: 8.5 };
         if (presetType === "9.0") return { ...item, expectedScore10: 9.0 };
         if (presetType === "leverage") {
-          // Focus effort on high-credit courses (>= 4 TC get 9.0, others 8.0)
           return { ...item, expectedScore10: item.credits >= 4 ? 9.0 : 8.0 };
         }
         return item;
@@ -104,7 +101,6 @@ export const SemesterGpaSimulator: React.FC<SemesterGpaSimulatorProps> = ({
     setSimulatedCourses(initialItems);
   };
 
-  // Calculations
   const calculations = useMemo(() => {
     let termCredits = 0;
     let termWeighted10 = 0;
@@ -124,18 +120,15 @@ export const SemesterGpaSimulator: React.FC<SemesterGpaSimulatorProps> = ({
     const termGpa10 = termCredits > 0 ? Number((termWeighted10 / termCredits).toFixed(2)) : 0;
     const termGpa4 = termCredits > 0 ? Number((termWeighted4 / termCredits).toFixed(2)) : 0;
 
-    // Cumulative calculations
     const newTotalCredits = currentGpaCredits + termCredits;
     const newTotalWeighted10 = currentTotalWeighted10 + termWeighted10;
     const newCgpa10 =
       newTotalCredits > 0 ? Number((newTotalWeighted10 / newTotalCredits).toFixed(2)) : currentGpa10;
     const deltaCgpa = Number((newCgpa10 - currentGpa10).toFixed(2));
 
-    // Distance to Honors (Loại Giỏi >= 8.0, Xuất sắc >= 9.0)
     const distanceToGioi = Number((8.0 - newCgpa10).toFixed(2));
     const distanceToXuatSac = Number((9.0 - newCgpa10).toFixed(2));
 
-    // UIT KKHT Scholarship Assessment (>= 14 TC, no score < 5.0, term GPA >= 8.0)
     const isScholarshipCreditEligible = termCredits >= 14;
     const isScholarshipGpaEligible = termGpa10 >= 8.0;
     const isScholarshipEligible =
@@ -157,18 +150,21 @@ export const SemesterGpaSimulator: React.FC<SemesterGpaSimulatorProps> = ({
     };
   }, [simulatedCourses, currentGpaCredits, currentTotalWeighted10, currentGpa10]);
 
+  const presetBtnCls =
+    "rounded-md border border-[#1D263B] bg-[#151C2C] px-2.5 py-1 font-mono text-[11px] text-zinc-200 transition-colors hover:border-[#2F6BFF]/50 hover:text-white cursor-pointer";
+
   return (
-    <div className={`space-y-5 rounded-xl border border-zinc-800 bg-zinc-900 p-5 shadow-sm ${className}`}>
+    <div className={`space-y-5 rounded-xl border border-[#1D263B] bg-[#0F1420] p-5 shadow-sm ${className}`}>
       {/* 1. Header & Presets */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-zinc-800/80 pb-3.5">
+      <div className="flex flex-col justify-between gap-3 border-b border-[#1D263B] pb-3.5 sm:flex-row sm:items-center">
         <div className="flex items-center gap-2.5">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#2F6BFF]/30 bg-[#2F6BFF]/[0.16] text-[#6B9BFF]">
             <Sliders className="h-4 w-4" />
           </div>
           <div>
-            <h3 className="text-sm font-bold text-white flex items-center gap-2">
+            <h3 className="flex items-center gap-2 text-sm font-bold text-white">
               <span>GPA Target Simulator</span>
-              <span className="text-[10px] font-mono font-medium px-2 py-0.5 rounded bg-indigo-950/60 text-indigo-300 border border-indigo-800/40">
+              <span className="rounded border border-[#2F6BFF]/35 bg-[#2F6BFF]/[0.16] px-2 py-0.5 font-mono text-[10px] font-medium text-[#6B9BFF]">
                 Chiến thuật kỳ này
               </span>
             </h3>
@@ -179,11 +175,11 @@ export const SemesterGpaSimulator: React.FC<SemesterGpaSimulatorProps> = ({
         </div>
 
         {/* Quick Presets */}
-        <div className="flex items-center gap-1.5 flex-wrap">
+        <div className="flex flex-wrap items-center gap-1.5">
           <button
             type="button"
             onClick={() => handlePresetApply("8.0")}
-            className="px-2 py-1 rounded text-[11px] font-mono bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 transition-colors cursor-pointer"
+            className={presetBtnCls}
             title="Đặt tất cả môn 8.0"
           >
             Đều 8.0
@@ -191,7 +187,7 @@ export const SemesterGpaSimulator: React.FC<SemesterGpaSimulatorProps> = ({
           <button
             type="button"
             onClick={() => handlePresetApply("8.5")}
-            className="px-2 py-1 rounded text-[11px] font-mono bg-indigo-950/60 hover:bg-indigo-900/80 text-indigo-300 border border-indigo-800/50 transition-colors cursor-pointer"
+            className={presetBtnCls}
             title="Đặt tất cả môn 8.5 (Chuẩn Giỏi)"
           >
             HB Giỏi (8.5)
@@ -199,7 +195,7 @@ export const SemesterGpaSimulator: React.FC<SemesterGpaSimulatorProps> = ({
           <button
             type="button"
             onClick={() => handlePresetApply("9.0")}
-            className="px-2 py-1 rounded text-[11px] font-mono bg-amber-950/60 hover:bg-amber-900/80 text-amber-300 border border-amber-800/50 transition-colors cursor-pointer"
+            className={presetBtnCls}
             title="Đặt tất cả môn 9.0 (Chuẩn Xuất sắc)"
           >
             HB X.Sắc (9.0)
@@ -207,16 +203,16 @@ export const SemesterGpaSimulator: React.FC<SemesterGpaSimulatorProps> = ({
           <button
             type="button"
             onClick={() => handlePresetApply("leverage")}
-            className="px-2 py-1 rounded text-[11px] font-mono bg-emerald-950/60 hover:bg-emerald-900/80 text-emerald-300 border border-emerald-800/50 transition-colors cursor-pointer"
+            className={presetBtnCls}
             title="Đẩy môn 4 tín chỉ lên 9.0, các môn khác 8.0"
           >
-            <Zap className="inline h-3 w-3 mr-0.5 text-emerald-400" />
+            <Zap className="mr-0.5 inline h-3 w-3 text-amber-400" />
             Đòn bẩy TC
           </button>
           <button
             type="button"
             onClick={handleReset}
-            className="p-1 rounded text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer"
+            className="rounded-md p-1.5 text-zinc-400 transition-colors hover:bg-[#151C2C] hover:text-white cursor-pointer"
             title="Đặt lại ban đầu"
           >
             <RotateCcw className="h-3.5 w-3.5" />
@@ -224,33 +220,33 @@ export const SemesterGpaSimulator: React.FC<SemesterGpaSimulatorProps> = ({
         </div>
       </div>
 
-      {/* 2. Impact Hero KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+      {/* 2. Impact Hero KPI Cards — 2x2 Grid so values never truncate */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         {/* Card A: GPA Dự kiến kỳ này */}
-        <div className="rounded-lg bg-zinc-950 border border-zinc-800/80 p-3 space-y-1">
-          <span className="text-[11px] text-zinc-400 font-medium">GPA Dự kiến kỳ này</span>
+        <div className="space-y-1 rounded-lg border border-[#1D263B] bg-[#080B12] p-3.5">
+          <span className="text-[11px] font-medium text-zinc-400">GPA Dự kiến kỳ này</span>
           <div className="flex items-baseline gap-2">
-            <span className="text-xl font-bold font-mono text-white">
+            <span className="font-mono text-xl font-bold text-white tabular-nums">
               {calculations.termGpa10.toFixed(2)}
             </span>
-            <span className="text-xs font-mono text-zinc-400">
+            <span className="font-mono text-xs text-zinc-400 tabular-nums">
               / 10 ({calculations.termGpa4.toFixed(2)} / 4)
             </span>
           </div>
-          <div className="text-[11px] text-zinc-500 font-mono">
+          <div className="font-mono text-[11px] text-zinc-500">
             Tổng {calculations.termCredits} tín chỉ mô phỏng
           </div>
         </div>
 
         {/* Card B: Bước nhảy cGPA toàn khóa */}
-        <div className="rounded-lg bg-zinc-950 border border-zinc-800/80 p-3 space-y-1">
-          <span className="text-[11px] text-zinc-400 font-medium">cGPA Tích lũy mới</span>
+        <div className="space-y-1 rounded-lg border border-[#1D263B] bg-[#080B12] p-3.5">
+          <span className="text-[11px] font-medium text-zinc-400">cGPA Tích lũy mới</span>
           <div className="flex items-baseline gap-2">
-            <span className="text-xl font-bold font-mono text-indigo-400">
+            <span className="font-mono text-xl font-bold text-[#6B9BFF] tabular-nums">
               {calculations.newCgpa10.toFixed(2)}
             </span>
             <span
-              className={`text-xs font-mono font-semibold ${
+              className={`font-mono text-xs font-semibold tabular-nums ${
                 calculations.deltaCgpa > 0
                   ? "text-emerald-400"
                   : calculations.deltaCgpa < 0
@@ -261,23 +257,23 @@ export const SemesterGpaSimulator: React.FC<SemesterGpaSimulatorProps> = ({
               {calculations.deltaCgpa > 0 ? `+${calculations.deltaCgpa}` : calculations.deltaCgpa}
             </span>
           </div>
-          <div className="text-[11px] text-zinc-500 font-mono">
+          <div className="font-mono text-[11px] text-zinc-500">
             Từ {currentGpa10.toFixed(2)} ({currentGpaCredits} TC)
           </div>
         </div>
 
         {/* Card C: Khoảng cách tới danh hiệu */}
-        <div className="rounded-lg bg-zinc-950 border border-zinc-800/80 p-3 space-y-1">
-          <span className="text-[11px] text-zinc-400 font-medium">Ngưỡng Danh Hiệu</span>
+        <div className="space-y-1 rounded-lg border border-[#1D263B] bg-[#080B12] p-3.5">
+          <span className="text-[11px] font-medium text-zinc-400">Ngưỡng Danh Hiệu</span>
           <div className="space-y-0.5 pt-0.5">
             <div className="flex items-center justify-between text-xs">
               <span className="text-zinc-400">Loại Giỏi (8.0):</span>
               {calculations.distanceToGioi <= 0 ? (
-                <span className="text-emerald-400 font-semibold font-mono text-[11px]">
+                <span className="font-mono text-[11px] font-semibold text-emerald-400">
                   ✓ Đã đạt
                 </span>
               ) : (
-                <span className="text-amber-400 font-mono text-[11px]">
+                <span className="font-mono text-[11px] text-amber-400">
                   Cần +{calculations.distanceToGioi}
                 </span>
               )}
@@ -285,11 +281,11 @@ export const SemesterGpaSimulator: React.FC<SemesterGpaSimulatorProps> = ({
             <div className="flex items-center justify-between text-xs">
               <span className="text-zinc-400">Xuất sắc (9.0):</span>
               {calculations.distanceToXuatSac <= 0 ? (
-                <span className="text-emerald-400 font-semibold font-mono text-[11px]">
-                  🏆 Đã đạt
+                <span className="font-mono text-[11px] font-semibold text-emerald-400">
+                  ✓ Đã đạt
                 </span>
               ) : (
-                <span className="text-zinc-400 font-mono text-[11px]">
+                <span className="font-mono text-[11px] text-zinc-400">
                   Cần +{calculations.distanceToXuatSac}
                 </span>
               )}
@@ -298,16 +294,16 @@ export const SemesterGpaSimulator: React.FC<SemesterGpaSimulatorProps> = ({
         </div>
 
         {/* Card D: Điều kiện xét học bổng KKHT UIT */}
-        <div className="rounded-lg bg-zinc-950 border border-zinc-800/80 p-3 space-y-1">
-          <span className="text-[11px] text-zinc-400 font-medium">Học bổng KKHT UIT</span>
+        <div className="space-y-1 rounded-lg border border-[#1D263B] bg-[#080B12] p-3.5">
+          <span className="text-[11px] font-medium text-zinc-400">Học bổng KKHT UIT</span>
           <div className="pt-0.5">
             {calculations.isScholarshipEligible ? (
-              <div className="flex items-center gap-1.5 text-xs text-emerald-400 font-semibold">
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400">
                 <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
                 <span>Đủ tiêu chuẩn xét HB</span>
               </div>
             ) : (
-              <div className="flex items-center gap-1.5 text-xs text-amber-400 font-medium">
+              <div className="flex items-center gap-1.5 text-xs font-medium text-amber-400">
                 <AlertTriangle className="h-4 w-4 shrink-0 text-amber-400" />
                 <span>
                   {!calculations.isScholarshipCreditEligible
@@ -319,7 +315,7 @@ export const SemesterGpaSimulator: React.FC<SemesterGpaSimulatorProps> = ({
               </div>
             )}
           </div>
-          <div className="text-[10px] text-zinc-500 font-mono truncate">
+          <div className="font-mono text-[11px] text-zinc-500">
             TC: {calculations.termCredits}/14 • GPA: {calculations.termGpa10.toFixed(1)}/8.0
           </div>
         </div>
@@ -327,9 +323,9 @@ export const SemesterGpaSimulator: React.FC<SemesterGpaSimulatorProps> = ({
 
       {/* 3. Course-level Target Sliders Table */}
       <div className="space-y-2.5">
-        <div className="flex items-center justify-between text-xs text-zinc-400 font-medium px-1">
+        <div className="flex items-center justify-between px-1 text-xs font-medium text-zinc-400">
           <span>Danh sách môn học kỳ này ({simulatedCourses.length} môn)</span>
-          <span className="text-[11px] font-mono text-zinc-500">
+          <span className="font-mono text-[11px] text-zinc-500">
             Kéo thanh trượt hoặc nhập trực tiếp điểm số
           </span>
         </div>
@@ -337,41 +333,42 @@ export const SemesterGpaSimulator: React.FC<SemesterGpaSimulatorProps> = ({
         <div className="space-y-2">
           {simulatedCourses.map((course) => {
             const { grade4, gradeChar } = score10ToScale4(course.expectedScore10);
-            const leverageRatio = calculations.newTotalCredits > 0
-              ? ((course.credits / calculations.newTotalCredits) * 100).toFixed(1)
-              : "0";
+            const leverageRatio =
+              calculations.newTotalCredits > 0
+                ? ((course.credits / calculations.newTotalCredits) * 100).toFixed(1)
+                : "0";
             const isHighCredit = course.credits >= 4;
 
             return (
               <div
                 key={course.courseCode}
-                className="group flex flex-col md:flex-row md:items-center justify-between p-3 rounded-lg border border-zinc-800/70 bg-zinc-950/60 hover:border-zinc-700 transition-colors gap-3"
+                className="group flex flex-col justify-between gap-3 rounded-lg border border-[#1D263B] bg-[#080B12] p-3 transition-colors hover:border-[#2F6BFF]/35 hover:bg-[#151C2C]/45 md:flex-row md:items-center"
               >
                 {/* Course Metadata */}
                 <div className="min-w-0 flex-1 space-y-0.5">
-                  <div className="flex items-center gap-2 flex-wrap">
+                  <div className="flex flex-wrap items-center gap-2">
                     <span className="font-mono text-xs font-semibold text-zinc-200">
                       {course.courseCode}
                     </span>
-                    <span className="text-xs text-zinc-300 font-medium truncate">
+                    <span className="truncate text-xs font-medium text-zinc-300">
                       {course.courseName}
                     </span>
-                    <span className="px-1.5 py-0.2 rounded text-[10px] font-mono bg-zinc-800 text-zinc-400 border border-zinc-700">
+                    <span className="rounded border border-[#1D263B] bg-[#151C2C] px-1.5 py-0.2 font-mono text-[10px] text-zinc-400">
                       {course.credits} TC
                     </span>
                     {isHighCredit && (
-                      <span className="px-1.5 py-0.2 rounded text-[10px] font-mono bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                      <span className="rounded border border-amber-500/25 bg-amber-500/10 px-1.5 py-0.2 font-mono text-[10px] text-amber-400">
                         Đòn bẩy cao ({leverageRatio}%)
                       </span>
                     )}
                   </div>
-                  <div className="text-[11px] font-mono text-zinc-500">
+                  <div className="font-mono text-[11px] text-zinc-500">
                     Quy đổi: <strong className="text-zinc-300">{gradeChar}</strong> ({grade4.toFixed(1)}/4.0)
                   </div>
                 </div>
 
                 {/* Score Controls: Slider + Number Input */}
-                <div className="flex items-center gap-3 shrink-0">
+                <div className="flex shrink-0 items-center gap-3">
                   <input
                     type="range"
                     min="0"
@@ -381,7 +378,7 @@ export const SemesterGpaSimulator: React.FC<SemesterGpaSimulatorProps> = ({
                     onChange={(e) =>
                       handleScoreChange(course.courseCode, parseFloat(e.target.value))
                     }
-                    className="w-28 sm:w-36 h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                    className="h-1.5 w-28 cursor-pointer appearance-none rounded-lg bg-[#1D263B] accent-[#2F6BFF] sm:w-36"
                   />
 
                   <div className="flex items-center gap-1.5">
@@ -394,9 +391,9 @@ export const SemesterGpaSimulator: React.FC<SemesterGpaSimulatorProps> = ({
                       onChange={(e) =>
                         handleScoreChange(course.courseCode, parseFloat(e.target.value) || 0)
                       }
-                      className="w-14 rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-center font-mono text-xs font-bold text-white focus:border-indigo-500 focus:outline-none"
+                      className="w-14 rounded-md border border-[#1D263B] bg-[#0F1420] px-2 py-1 text-center font-mono text-xs font-bold text-white focus:border-[#2F6BFF] focus:outline-none"
                     />
-                    <span className="text-xs font-mono text-zinc-500">/10</span>
+                    <span className="font-mono text-xs text-zinc-500">/10</span>
                   </div>
                 </div>
               </div>
