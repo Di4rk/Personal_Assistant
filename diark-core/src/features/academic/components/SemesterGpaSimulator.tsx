@@ -8,7 +8,10 @@ import {
   COMPONENT_LABELS,
   UIT_WEIGHT_PRESETS,
   calculateCourseTarget,
+  computeCourseCurrentAverage,
+  computeSemesterCurrentGpa,
   getDefaultWeightsForCourse,
+  solveSemesterTargetDistribution,
   type ComponentKey,
   type ComponentScores,
   type ComponentWeights,
@@ -73,17 +76,6 @@ function formatWeightBadge(weights: ComponentWeights): string {
   return `${weights.qt}/${weights.th}/${weights.gk}/${weights.ck}`;
 }
 
-function formatKnownComponentsSummary(scores: ComponentScores): string {
-  const parts: string[] = [];
-  for (const key of COMPONENT_KEYS) {
-    const v = scores[key];
-    if (v !== null && v !== undefined && Number.isFinite(v)) {
-      parts.push(`${COMPONENT_LABELS[key]} ${v.toFixed(1)}`);
-    }
-  }
-  return parts.join(" · ");
-}
-
 function score10ToScale4(score: number): { grade4: number; gradeChar: string } {
   if (score >= 9.0) return { grade4: 4.0, gradeChar: "A+" };
   if (score >= 8.5) return { grade4: 3.7, gradeChar: "A" };
@@ -103,7 +95,9 @@ export const SemesterGpaSimulator: React.FC<SemesterGpaSimulatorProps> = ({
   activeCourses,
   className = "",
 }) => {
-  const [syllabusWeightsMap, setSyllabusWeightsMap] = useState<Record<string, ComponentWeights>>({});
+  const [syllabusWeightsMap, setSyllabusWeightsMap] = useState<Record<string, ComponentWeights>>(
+    {}
+  );
 
   const loadOfficialSyllabusWeights = useCallback(async () => {
     try {
@@ -214,19 +208,52 @@ export const SemesterGpaSimulator: React.FC<SemesterGpaSimulatorProps> = ({
   }, [activeCourses, syllabusWeightsMap]);
 
   const [simulatedCourses, setSimulatedCourses] = useState<SimulatedCourseState[]>(initialItems);
-  const [expandedWeights, setExpandedWeights] = useState<Record<string, boolean>>({});
+  const [expandedWeightCode, setExpandedWeightCode] = useState<string | null>(null);
+  const [termTargetUnachievable, setTermTargetUnachievable] = useState<boolean>(false);
 
   useEffect(() => {
     setSimulatedCourses(initialItems);
+    setTermTargetUnachievable(false);
   }, [initialItems]);
 
-  const handleScoreChange = (courseCode: string, newScore: number) => {
-    const clamped = Math.min(10.0, Math.max(0.0, Number(newScore.toFixed(1))));
+  const handleExpectedScoreChange = (courseCode: string, newScore: number) => {
+    const clamped = Math.min(10.0, Math.max(0.0, Number(newScore.toFixed(2))));
+    setTermTargetUnachievable(false);
     setSimulatedCourses((prev) =>
       prev.map((item) =>
         item.courseCode === courseCode ? { ...item, expectedScore10: clamped } : item
       )
     );
+  };
+
+  const handleSemesterTargetInput = (rawVal: string) => {
+    const parsed = parseFloat(rawVal);
+    if (!Number.isFinite(parsed)) return;
+    const clampedTarget = Math.min(10.0, Math.max(0.0, parsed));
+
+    setSimulatedCourses((prev) => {
+      const dist = solveSemesterTargetDistribution(
+        prev.map((item) => {
+          const calc = calculateCourseTarget(item.scores, item.weights, item.expectedScore10);
+          const isLocked = calc.isValidWeightSum && calc.remainingWeight === 0;
+          return {
+            courseCode: item.courseCode,
+            credits: item.credits,
+            isLocked,
+            lockedScore: calc.projectedTotalScore ?? item.expectedScore10,
+            minPossible: calc.isValidWeightSum ? calc.minPossibleScore : 0,
+            maxPossible: calc.isValidWeightSum ? calc.maxPossibleScore : 10,
+          };
+        }),
+        clampedTarget
+      );
+
+      setTermTargetUnachievable(!dist.isAchievable);
+      return prev.map((item) => ({
+        ...item,
+        expectedScore10: dist.targetsByCode[item.courseCode] ?? item.expectedScore10,
+      }));
+    });
   };
 
   const handleComponentScoreChange = (
@@ -241,6 +268,7 @@ export const SemesterGpaSimulator: React.FC<SemesterGpaSimulatorProps> = ({
         ? Math.min(10.0, Math.max(0.0, Number(parsed.toFixed(2))))
         : null;
 
+    setTermTargetUnachievable(false);
     setSimulatedCourses((prev) =>
       prev.map((item) => {
         if (item.courseCode !== courseCode) return item;
@@ -258,6 +286,7 @@ export const SemesterGpaSimulator: React.FC<SemesterGpaSimulatorProps> = ({
 
   const handleWeightsChange = (courseCode: string, nextWeights: ComponentWeights) => {
     saveCourseWeights(courseCode, nextWeights);
+    setTermTargetUnachievable(false);
     setSimulatedCourses((prev) =>
       prev.map((item) => {
         if (item.courseCode !== courseCode) return item;
@@ -293,6 +322,7 @@ export const SemesterGpaSimulator: React.FC<SemesterGpaSimulatorProps> = ({
   };
 
   const handleResetCoursePortalScores = (courseCode: string) => {
+    setTermTargetUnachievable(false);
     setSimulatedCourses((prev) =>
       prev.map((item) => {
         if (item.courseCode !== courseCode) return item;
@@ -309,20 +339,30 @@ export const SemesterGpaSimulator: React.FC<SemesterGpaSimulatorProps> = ({
   };
 
   const handlePresetApply = (presetType: "8.0" | "8.5" | "9.0" | "leverage") => {
+    setTermTargetUnachievable(false);
     setSimulatedCourses((prev) =>
       prev.map((item) => {
-        if (presetType === "8.0") return { ...item, expectedScore10: 8.0 };
-        if (presetType === "8.5") return { ...item, expectedScore10: 8.5 };
-        if (presetType === "9.0") return { ...item, expectedScore10: 9.0 };
-        if (presetType === "leverage") {
-          return { ...item, expectedScore10: item.credits >= 4 ? 9.0 : 8.0 };
+        const calc = calculateCourseTarget(item.scores, item.weights, item.expectedScore10);
+        if (calc.isValidWeightSum && calc.remainingWeight === 0 && calc.projectedTotalScore !== null) {
+          return { ...item, expectedScore10: calc.projectedTotalScore };
         }
-        return item;
+        const desired =
+          presetType === "8.0"
+            ? 8.0
+            : presetType === "8.5"
+            ? 8.5
+            : presetType === "9.0"
+            ? 9.0
+            : item.credits >= 4
+            ? 9.0
+            : 8.0;
+        return { ...item, expectedScore10: desired };
       })
     );
   };
 
   const handleReset = () => {
+    setTermTargetUnachievable(false);
     setSimulatedCourses(initialItems);
   };
 
@@ -345,6 +385,8 @@ export const SemesterGpaSimulator: React.FC<SemesterGpaSimulatorProps> = ({
     const termGpa10 = termCredits > 0 ? Number((termWeighted10 / termCredits).toFixed(2)) : 0;
     const termGpa4 = termCredits > 0 ? Number((termWeighted4 / termCredits).toFixed(2)) : 0;
 
+    const currentTermSummary = computeSemesterCurrentGpa(simulatedCourses);
+
     const newTotalCredits = currentGpaCredits + termCredits;
     const newTotalWeighted10 = currentTotalWeighted10 + termWeighted10;
     const newCgpa10 =
@@ -363,6 +405,8 @@ export const SemesterGpaSimulator: React.FC<SemesterGpaSimulatorProps> = ({
       termCredits,
       termGpa10,
       termGpa4,
+      currentTermGpa10: currentTermSummary.currentGpa10,
+      gradedTermCredits: currentTermSummary.gradedCredits,
       newTotalCredits,
       newCgpa10,
       deltaCgpa,
@@ -379,17 +423,18 @@ export const SemesterGpaSimulator: React.FC<SemesterGpaSimulatorProps> = ({
     "rounded-md border border-[#1D263B] bg-[#151C2C] px-2.5 py-1 font-mono text-[11px] text-zinc-200 transition-colors hover:border-[#2F6BFF]/50 hover:text-white cursor-pointer";
 
   return (
-    <div className={`space-y-5 rounded-xl border border-[#1D263B] bg-[#0F1420] p-5 shadow-sm ${className}`}>
+    <div
+      className={`space-y-4 rounded-xl border border-[#1D263B] bg-[#0F1420] p-5 shadow-sm ${className}`}
+    >
       {/* 1. Header & Presets */}
       <div className="flex flex-col justify-between gap-3 border-b border-[#1D263B] pb-3.5 sm:flex-row sm:items-center">
         <div>
           <h3 className="text-sm font-bold text-white">GPA Target Simulator</h3>
           <p className="text-[11px] text-zinc-400">
-            Giả lập điểm thành phần theo trọng số &amp; tính điểm mục tiêu cần đạt cho học kỳ
+            Bảng tính xuôi/ngược: nhập điểm thành phần hoặc nhập điểm kỳ vọng để tự suy ra điểm cần đạt
           </p>
         </div>
 
-        {/* Quick Presets */}
         <div className="flex flex-wrap items-center gap-1.5">
           <button
             type="button"
@@ -434,26 +479,60 @@ export const SemesterGpaSimulator: React.FC<SemesterGpaSimulatorProps> = ({
         </div>
       </div>
 
-      {/* 2. Impact Hero KPI Cards — 2x2 Grid so values never truncate */}
+      {/* 2. Impact Hero KPI Cards — 2x2 Grid */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <div className="space-y-1 rounded-lg border border-[#1D263B] bg-[#080B12] p-3.5">
-          <span className="text-[11px] font-medium text-zinc-400">GPA Dự kiến kỳ này</span>
-          <div className="flex items-baseline gap-2">
-            <span className="font-mono text-xl font-bold text-white tabular-nums">
-              {calculations.termGpa10.toFixed(2)}
-            </span>
-            <span className="font-mono text-xs text-zinc-400 tabular-nums">
-              / 10 ({calculations.termGpa4.toFixed(2)} / 4)
+        {/* Card A: Bidirectional Semester Current vs Expected GPA */}
+        <div className="space-y-2 rounded-lg border border-[#1D263B] bg-[#080B12] p-3.5">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[11px] font-medium text-zinc-400">GPA kỳ này</span>
+            <span className="font-mono text-[10px] text-zinc-500">
+              {calculations.gradedTermCredits}/{calculations.termCredits} TC đã có điểm
             </span>
           </div>
-          <div className="font-mono text-[11px] text-zinc-500">
-            Tổng {calculations.termCredits} tín chỉ mô phỏng
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <div className="text-[10px] text-zinc-500">Hiện tại</div>
+              <div className="mt-0.5 font-mono text-lg font-bold text-zinc-100 tabular-nums">
+                {calculations.currentTermGpa10 !== null
+                  ? calculations.currentTermGpa10.toFixed(2)
+                  : "—"}
+              </div>
+            </div>
+
+            <div>
+              <label htmlFor="term-target-gpa-input" className="block text-[10px] text-[#6B9BFF]">
+                Kỳ vọng kỳ (nhập ngược)
+              </label>
+              <div className="mt-0.5 flex items-baseline gap-1">
+                <input
+                  id="term-target-gpa-input"
+                  type="number"
+                  min={0}
+                  max={10}
+                  step={0.1}
+                  value={calculations.termGpa10}
+                  onChange={(e) => handleSemesterTargetInput(e.target.value)}
+                  className="w-16 rounded border border-[#2F6BFF]/45 bg-[#0F1420] px-1.5 py-0.5 text-center font-mono text-base font-bold text-white focus:border-[#2F6BFF] focus:outline-none"
+                />
+                <span className="font-mono text-[11px] text-zinc-500">
+                  ({calculations.termGpa4.toFixed(2)}/4)
+                </span>
+              </div>
+            </div>
           </div>
+
+          {termTargetUnachievable && (
+            <div className="text-[10px] text-rose-400">
+              Mục tiêu kỳ vượt trần điểm tối đa dựa trên điểm đã có.
+            </div>
+          )}
         </div>
 
+        {/* Card B: Cumulative GPA */}
         <div className="space-y-1 rounded-lg border border-[#1D263B] bg-[#080B12] p-3.5">
           <span className="text-[11px] font-medium text-zinc-400">cGPA Tích lũy mới</span>
-          <div className="flex items-baseline gap-2">
+          <div className="flex items-baseline gap-2 pt-1">
             <span className="font-mono text-xl font-bold text-[#6B9BFF] tabular-nums">
               {calculations.newCgpa10.toFixed(2)}
             </span>
@@ -474,6 +553,7 @@ export const SemesterGpaSimulator: React.FC<SemesterGpaSimulatorProps> = ({
           </div>
         </div>
 
+        {/* Card C: Honors */}
         <div className="space-y-1 rounded-lg border border-[#1D263B] bg-[#080B12] p-3.5">
           <span className="text-[11px] font-medium text-zinc-400">Ngưỡng Danh Hiệu</span>
           <div className="space-y-0.5 pt-0.5">
@@ -504,13 +584,12 @@ export const SemesterGpaSimulator: React.FC<SemesterGpaSimulatorProps> = ({
           </div>
         </div>
 
+        {/* Card D: Scholarship */}
         <div className="space-y-1 rounded-lg border border-[#1D263B] bg-[#080B12] p-3.5">
           <span className="text-[11px] font-medium text-zinc-400">Học bổng KKHT UIT</span>
           <div className="pt-0.5">
             {calculations.isScholarshipEligible ? (
-              <div className="text-xs font-semibold text-emerald-400">
-                Đủ tiêu chuẩn xét HB
-              </div>
+              <div className="text-xs font-semibold text-emerald-400">Đủ tiêu chuẩn xét HB</div>
             ) : (
               <div className="text-xs font-medium text-amber-400">
                 {!calculations.isScholarshipCreditEligible
@@ -527,218 +606,280 @@ export const SemesterGpaSimulator: React.FC<SemesterGpaSimulatorProps> = ({
         </div>
       </div>
 
-      {/* 3. Course-level Target Sliders & Weighted Component Calculator */}
-      <div className="space-y-2.5">
-        <div className="flex items-center justify-between px-1 text-xs font-medium text-zinc-400">
-          <span>Danh sách môn học kỳ này ({simulatedCourses.length} môn)</span>
-          <span className="font-mono text-[11px] text-zinc-500">
-            Mục tiêu môn hoặc mở Trọng số QT/TH/GK/CK
-          </span>
-        </div>
+      {/* 3. Bidirectional Spreadsheet Table */}
+      <div className="overflow-x-auto rounded-lg border border-[#1D263B] bg-[#080B12]">
+        <table className="w-full min-w-[660px] border-collapse text-left text-xs">
+          <thead>
+            <tr className="border-b border-[#1D263B] bg-[#0F1420]/70 text-[11px] font-medium text-zinc-400">
+              <th className="py-2.5 pl-3 pr-2">Môn học &amp; Trọng số</th>
+              <th className="w-16 px-1.5 py-2.5 text-center">QT</th>
+              <th className="w-16 px-1.5 py-2.5 text-center">TH</th>
+              <th className="w-16 px-1.5 py-2.5 text-center">GK</th>
+              <th className="w-16 px-1.5 py-2.5 text-center">CK</th>
+              <th className="w-16 px-2 py-2.5 text-right">Hiện tại</th>
+              <th className="w-24 pl-2 pr-3 py-2.5 text-right">Kỳ vọng</th>
+            </tr>
+          </thead>
 
-        <div className="space-y-2">
-          {simulatedCourses.map((course) => {
-            const { grade4, gradeChar } = score10ToScale4(course.expectedScore10);
-            const leverageRatio =
-              calculations.newTotalCredits > 0
-                ? ((course.credits / calculations.newTotalCredits) * 100).toFixed(1)
-                : "0";
-            const isHighCredit = course.credits >= 4;
-            const isWeightOpen = Boolean(expandedWeights[course.courseCode]);
-            const portalSummary = formatKnownComponentsSummary(course.portalScores);
-            const targetCalc = calculateCourseTarget(
-              course.scores,
-              course.weights,
-              course.expectedScore10
-            );
-            const isComponentScoreLocked =
-              targetCalc.isValidWeightSum && targetCalc.remainingWeight === 0;
+          <tbody className="divide-y divide-[#1D263B]/80">
+            {simulatedCourses.map((course) => {
+              const targetCalc = calculateCourseTarget(
+                course.scores,
+                course.weights,
+                course.expectedScore10
+              );
+              const currentAvgInfo = computeCourseCurrentAverage(course.scores, course.weights);
+              const isWeightOpen = expandedWeightCode === course.courseCode;
+              const isComponentScoreLocked =
+                targetCalc.isValidWeightSum && targetCalc.remainingWeight === 0;
+              const { gradeChar } = score10ToScale4(course.expectedScore10);
 
-            return (
-              <div
-                key={course.courseCode}
-                className="rounded-lg border border-[#1D263B] bg-[#080B12] transition-colors hover:border-[#2F6BFF]/35"
-              >
-                <div className="flex flex-col justify-between gap-3 p-3 md:flex-row md:items-center">
-                  {/* Course Metadata */}
-                  <div className="min-w-0 flex-1 space-y-0.5">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-mono text-xs font-semibold text-zinc-200">
-                        {course.courseCode}
-                      </span>
-                      <span className="truncate text-xs font-medium text-zinc-300">
+              return (
+                <React.Fragment key={course.courseCode}>
+                  <tr className="transition-colors duration-100 hover:bg-[#151C2C]/60">
+                    {/* Col 1: Course Info + Weight Badge */}
+                    <td className="py-2.5 pl-3 pr-2 align-middle">
+                      <div className="max-w-[230px] truncate font-medium text-zinc-100" title={course.courseName}>
                         {course.courseName}
-                      </span>
-                      <span className="rounded border border-[#1D263B] bg-[#151C2C] px-1.5 py-0.2 font-mono text-[10px] text-zinc-400">
-                        {course.credits} TC
-                      </span>
-                      {isHighCredit && (
-                        <span className="rounded border border-amber-500/25 bg-amber-500/10 px-1.5 py-0.2 font-mono text-[10px] text-amber-400">
-                          Đòn bẩy cao ({leverageRatio}%)
-                        </span>
-                      )}
-                      {portalSummary && (
-                        <span className="rounded border border-[#2F6BFF]/30 bg-[#2F6BFF]/[0.12] px-1.5 py-0.2 font-mono text-[10px] text-[#6B9BFF]">
-                          {portalSummary}
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2 font-mono text-[11px] text-zinc-500">
-                      <span>
-                        Quy đổi: <strong className="text-zinc-300">{gradeChar}</strong> (
-                        {grade4.toFixed(1)}/4.0)
-                      </span>
-                      <span>·</span>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setExpandedWeights((prev) => ({
-                            ...prev,
-                            [course.courseCode]: !prev[course.courseCode],
-                          }))
-                        }
-                        className={`rounded border px-1.5 py-0.2 text-[10px] font-medium transition-colors cursor-pointer ${
-                          isWeightOpen
-                            ? "border-[#2F6BFF]/50 bg-[#2F6BFF]/[0.16] text-[#6B9BFF]"
-                            : "border-[#1D263B] bg-[#0F1420] text-zinc-400 hover:text-zinc-200"
-                        }`}
-                      >
-                        Trọng số ({formatWeightBadge(course.weights)})
-                      </button>
-                      {course.weightSource === "syllabus" && (
-                        <span className="rounded border border-emerald-500/25 bg-emerald-950/40 px-1.5 py-0.2 text-[10px] text-emerald-400">
-                          Đề cương UIT
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Target / Projected Score Controls */}
-                  <div className="flex shrink-0 items-center gap-3">
-                    <input
-                      type="range"
-                      min="0"
-                      max="10"
-                      step="0.1"
-                      disabled={isComponentScoreLocked}
-                      value={course.expectedScore10}
-                      onChange={(e) =>
-                        handleScoreChange(course.courseCode, parseFloat(e.target.value))
-                      }
-                      className="h-1.5 w-28 cursor-pointer appearance-none rounded-lg bg-[#1D263B] accent-[#2F6BFF] disabled:opacity-50 sm:w-36"
-                    />
-
-                    <div className="flex items-center gap-1.5">
-                      <input
-                        type="number"
-                        min="0"
-                        max="10"
-                        step="0.1"
-                        disabled={isComponentScoreLocked}
-                        value={course.expectedScore10}
-                        onChange={(e) =>
-                          handleScoreChange(course.courseCode, parseFloat(e.target.value) || 0)
-                        }
-                        className="w-14 rounded-md border border-[#1D263B] bg-[#0F1420] px-2 py-1 text-center font-mono text-xs font-bold text-white focus:border-[#2F6BFF] focus:outline-none disabled:opacity-70"
-                      />
-                      <span className="font-mono text-xs text-zinc-500">/10</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Expanded Weighted Component & Target Calculator */}
-                {isWeightOpen && (
-                  <div className="space-y-3 border-t border-[#1D263B] bg-[#0F1420]/70 px-3 py-3">
-                    {/* Preset Weights Row */}
-                    <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="text-zinc-500">Mẫu UIT:</span>
-                        {UIT_WEIGHT_PRESETS.map((preset) => {
-                          const isCurrentPreset =
-                            formatWeightBadge(course.weights) === formatWeightBadge(preset.weights);
-                          return (
-                            <button
-                              key={preset.id}
-                              type="button"
-                              onClick={() =>
-                                handleWeightsChange(course.courseCode, { ...preset.weights })
-                              }
-                              className={`rounded border px-2 py-0.5 font-mono text-[10px] transition-colors cursor-pointer ${
-                                isCurrentPreset
-                                  ? "border-[#2F6BFF]/50 bg-[#2F6BFF]/[0.16] text-[#6B9BFF]"
-                                  : "border-[#1D263B] bg-[#080B12] text-zinc-400 hover:text-zinc-200"
-                              }`}
-                            >
-                              {preset.label}
-                            </button>
-                          );
-                        })}
                       </div>
-
-                      <div className="flex items-center gap-2 font-mono text-[10px]">
-                        <span
-                          className={
-                            targetCalc.isValidWeightSum
-                              ? "text-zinc-400"
-                              : "font-semibold text-rose-400"
-                          }
-                        >
-                          Tổng: {targetCalc.totalWeight}%
+                      <div className="mt-1 flex flex-wrap items-center gap-1.5 font-mono text-[10px]">
+                        <span className="text-zinc-400">
+                          {course.courseCode} · {course.credits} TC
                         </span>
-                        {course.weightSource === "manual" &&
-                          syllabusWeightsMap[course.courseCode.trim().toUpperCase()] && (
-                            <button
-                              type="button"
-                              onClick={() => handleRestoreOfficialSyllabusWeights(course.courseCode)}
-                              className="rounded border border-[#2F6BFF]/35 bg-[#2F6BFF]/[0.12] px-2 py-0.5 text-[#6B9BFF] hover:bg-[#2F6BFF]/[0.2] cursor-pointer"
-                            >
-                              Về đề cương UIT
-                            </button>
-                          )}
                         <button
                           type="button"
-                          onClick={() => handleResetCoursePortalScores(course.courseCode)}
-                          className="rounded border border-[#1D263B] bg-[#080B12] px-2 py-0.5 text-zinc-400 hover:text-zinc-200 cursor-pointer"
+                          onClick={() =>
+                            setExpandedWeightCode((curr) =>
+                              curr === course.courseCode ? null : course.courseCode
+                            )
+                          }
+                          title="Bấm để chỉnh trọng số QT / TH / GK / CK"
+                          className={`rounded border px-1.5 py-0.2 transition-colors cursor-pointer ${
+                            isWeightOpen
+                              ? "border-[#2F6BFF]/50 bg-[#2F6BFF]/[0.16] text-[#6B9BFF]"
+                              : "border-[#1D263B] bg-[#0F1420] text-zinc-400 hover:text-zinc-200"
+                          }`}
                         >
-                          Khôi phục điểm Portal
+                          {formatWeightBadge(course.weights)}
                         </button>
+                        {course.weightSource === "syllabus" && (
+                          <span className="rounded border border-emerald-500/25 bg-emerald-950/40 px-1 py-0.2 text-[9px] text-emerald-400">
+                            Đề cương
+                          </span>
+                        )}
                       </div>
-                    </div>
+                    </td>
 
-                    {/* 4 Component Inputs: QT, TH, GK, CK */}
-                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                      {COMPONENT_KEYS.map((key) => {
-                        const weightVal = course.weights[key];
-                        const scoreVal = course.scores[key];
-                        const portalVal = course.portalScores[key];
-                        const hasPortalVal = portalVal !== null && portalVal !== undefined;
-                        return (
-                          <div
-                            key={key}
-                            className="space-y-1.5 rounded-lg border border-[#1D263B] bg-[#080B12] p-2"
-                          >
-                            <div className="flex items-center justify-between text-[11px]">
-                              <span className="font-mono font-semibold text-zinc-200">
-                                {COMPONENT_LABELS[key]}
-                              </span>
-                              {hasPortalVal ? (
-                                <span className="font-mono text-[10px] text-[#6B9BFF]">
-                                  Portal: {portalVal.toFixed(1)}
-                                </span>
-                              ) : (
-                                <span className="text-[10px] text-zinc-600">Chưa có</span>
-                              )}
+                    {/* Cols 2-5: QT, TH, GK, CK */}
+                    {COMPONENT_KEYS.map((key) => {
+                      const weightVal = course.weights[key];
+                      const scoreVal = course.scores[key];
+                      const portalVal = course.portalScores[key];
+                      const hasPortalVal = portalVal !== null && portalVal !== undefined;
+                      const isDisabled = weightVal <= 0;
+
+                      let hintText = "";
+                      let hintTone = "text-[#6B9BFF]/80";
+                      if (
+                        !isDisabled &&
+                        scoreVal === null &&
+                        targetCalc.isValidWeightSum &&
+                        targetCalc.requiredScore !== null
+                      ) {
+                        if (targetCalc.isAlreadyGuaranteed) {
+                          hintText = "Đã đạt";
+                          hintTone = "text-emerald-400/80";
+                        } else if (!targetCalc.isAchievable) {
+                          hintText = `>${targetCalc.requiredScore.toFixed(1)}`;
+                          hintTone = "text-rose-400/90";
+                        } else {
+                          hintText = `≈${targetCalc.requiredScore.toFixed(1)}`;
+                        }
+                      }
+
+                      return (
+                        <td key={key} className="px-1 py-2 text-center align-middle">
+                          <div className="flex flex-col items-center gap-0.5">
+                            {isDisabled ? (
+                              <div
+                                title={`${COMPONENT_LABELS[key]} không có trọng số (0%)`}
+                                className="flex h-7 w-14 items-center justify-center rounded border border-[#1D263B]/50 bg-[#080B12] font-mono text-[11px] text-zinc-600 select-none"
+                              >
+                                —
+                              </div>
+                            ) : (
+                              <input
+                                type="number"
+                                min={0}
+                                max={10}
+                                step={0.1}
+                                aria-label={`${course.courseCode} ${COMPONENT_LABELS[key]}`}
+                                placeholder={
+                                  targetCalc.isValidWeightSum &&
+                                  targetCalc.requiredScore !== null &&
+                                  targetCalc.requiredScore > 0 &&
+                                  targetCalc.requiredScore <= 10
+                                    ? targetCalc.requiredScore.toFixed(1)
+                                    : "—"
+                                }
+                                value={scoreVal === null ? "" : scoreVal}
+                                onChange={(e) =>
+                                  handleComponentScoreChange(
+                                    course.courseCode,
+                                    key,
+                                    e.target.value
+                                  )
+                                }
+                                className={`h-7 w-14 rounded border px-1 text-center font-mono text-xs tabular-nums focus:border-[#2F6BFF] focus:outline-none ${
+                                  hasPortalVal && scoreVal === portalVal
+                                    ? "border-[#2F6BFF]/40 bg-[#2F6BFF]/[0.12] font-semibold text-white"
+                                    : scoreVal !== null
+                                    ? "border-[#1D263B] bg-[#0F1420] font-semibold text-white"
+                                    : "border-[#1D263B] bg-[#0F1420]/60 text-zinc-200 placeholder:text-[#6B9BFF]/65"
+                                }`}
+                              />
+                            )}
+                            <span
+                              className={`font-mono text-[9px] tabular-nums ${
+                                isDisabled ? "text-zinc-700" : hintText ? hintTone : "text-zinc-500"
+                              }`}
+                            >
+                              {isDisabled ? "0%" : hintText ? `${weightVal}% · ${hintText}` : `${weightVal}%`}
+                            </span>
+                          </div>
+                        </td>
+                      );
+                    })}
+
+                    {/* Col 6: Current Weighted Average */}
+                    <td className="px-2 py-2 text-right align-middle font-mono tabular-nums">
+                      {currentAvgInfo.currentAvg !== null ? (
+                        <div>
+                          <div className="text-xs font-semibold text-zinc-200">
+                            {currentAvgInfo.currentAvg.toFixed(2)}
+                          </div>
+                          <div className="text-[9px] text-zinc-500">
+                            {currentAvgInfo.knownWeight}%
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="text-zinc-600">—</span>
+                      )}
+                    </td>
+
+                    {/* Col 7: Expected Score (Editable -> Reverse Solves Row) */}
+                    <td className="pl-2 pr-3 py-2 text-right align-middle">
+                      <div className="inline-flex flex-col items-end gap-0.5">
+                        <input
+                          type="number"
+                          min={0}
+                          max={10}
+                          step={0.1}
+                          disabled={isComponentScoreLocked}
+                          aria-label={`${course.courseCode} Kỳ vọng`}
+                          value={course.expectedScore10}
+                          onChange={(e) =>
+                            handleExpectedScoreChange(
+                              course.courseCode,
+                              parseFloat(e.target.value) || 0
+                            )
+                          }
+                          className={`h-7 w-14 rounded border px-1.5 text-center font-mono text-xs font-bold tabular-nums focus:border-[#2F6BFF] focus:outline-none ${
+                            isComponentScoreLocked
+                              ? "border-[#2F6BFF]/35 bg-[#2F6BFF]/[0.1] text-[#6B9BFF]"
+                              : !targetCalc.isAchievable
+                              ? "border-rose-500/50 bg-rose-950/30 text-rose-300"
+                              : "border-[#1D263B] bg-[#0F1420] text-white"
+                          }`}
+                        />
+                        <span className="font-mono text-[9px] text-zinc-500">
+                          {gradeChar} ·{" "}
+                          {targetCalc.isValidWeightSum
+                            ? `${targetCalc.minPossibleScore.toFixed(1)}–${targetCalc.maxPossibleScore.toFixed(1)}`
+                            : "!%"}
+                        </span>
+                      </div>
+                    </td>
+                  </tr>
+
+                  {/* Expandable Weight Config Sub-row */}
+                  {isWeightOpen && (
+                    <tr className="bg-[#0F1420]/90">
+                      <td colSpan={7} className="px-3 py-2.5">
+                        <div className="space-y-2">
+                          <div className="flex flex-wrap items-center justify-between gap-2 text-[10px]">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="text-zinc-500">Mẫu UIT:</span>
+                              {UIT_WEIGHT_PRESETS.map((preset) => {
+                                const isCurrent =
+                                  formatWeightBadge(course.weights) ===
+                                  formatWeightBadge(preset.weights);
+                                return (
+                                  <button
+                                    key={preset.id}
+                                    type="button"
+                                    onClick={() =>
+                                      handleWeightsChange(course.courseCode, { ...preset.weights })
+                                    }
+                                    className={`rounded border px-2 py-0.5 font-mono transition-colors cursor-pointer ${
+                                      isCurrent
+                                        ? "border-[#2F6BFF]/50 bg-[#2F6BFF]/[0.16] text-[#6B9BFF]"
+                                        : "border-[#1D263B] bg-[#080B12] text-zinc-400 hover:text-zinc-200"
+                                    }`}
+                                  >
+                                    {preset.label}
+                                  </button>
+                                );
+                              })}
                             </div>
 
-                            <div className="grid grid-cols-2 gap-1.5">
-                              <label className="block space-y-0.5">
-                                <span className="block text-[9px] text-zinc-500">Trọng số %</span>
+                            <div className="flex items-center gap-2 font-mono">
+                              <span
+                                className={
+                                  targetCalc.isValidWeightSum
+                                    ? "text-zinc-400"
+                                    : "font-semibold text-rose-400"
+                                }
+                              >
+                                Tổng: {targetCalc.totalWeight}%
+                              </span>
+                              {course.weightSource === "manual" &&
+                                syllabusWeightsMap[course.courseCode.trim().toUpperCase()] && (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      handleRestoreOfficialSyllabusWeights(course.courseCode)
+                                    }
+                                    className="rounded border border-[#2F6BFF]/35 bg-[#2F6BFF]/[0.12] px-2 py-0.5 text-[#6B9BFF] hover:bg-[#2F6BFF]/[0.2] cursor-pointer"
+                                  >
+                                    Về đề cương UIT
+                                  </button>
+                                )}
+                              <button
+                                type="button"
+                                onClick={() => handleResetCoursePortalScores(course.courseCode)}
+                                className="rounded border border-[#1D263B] bg-[#080B12] px-2 py-0.5 text-zinc-400 hover:text-zinc-200 cursor-pointer"
+                              >
+                                Khôi phục điểm Portal
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-4 gap-2">
+                            {COMPONENT_KEYS.map((key) => (
+                              <label
+                                key={key}
+                                className="flex items-center justify-between rounded border border-[#1D263B] bg-[#080B12] px-2 py-1 text-[11px]"
+                              >
+                                <span className="font-mono text-zinc-400">
+                                  {COMPONENT_LABELS[key]} %
+                                </span>
                                 <input
                                   type="number"
                                   min={0}
                                   max={100}
                                   step={5}
-                                  value={weightVal}
+                                  value={course.weights[key]}
                                   onChange={(e) => {
                                     const nextW = Math.min(
                                       100,
@@ -749,123 +890,20 @@ export const SemesterGpaSimulator: React.FC<SemesterGpaSimulatorProps> = ({
                                       [key]: nextW,
                                     });
                                   }}
-                                  className="w-full rounded border border-[#1D263B] bg-[#0F1420] px-1.5 py-1 text-center font-mono text-[11px] text-zinc-300 focus:border-[#2F6BFF] focus:outline-none"
+                                  className="w-12 rounded border border-[#1D263B] bg-[#0F1420] px-1 py-0.5 text-center font-mono text-xs text-white focus:border-[#2F6BFF] focus:outline-none"
                                 />
                               </label>
-
-                              <label className="block space-y-0.5">
-                                <span className="block text-[9px] text-zinc-500">Điểm</span>
-                                <input
-                                  type="number"
-                                  min={0}
-                                  max={10}
-                                  step={0.1}
-                                  disabled={weightVal <= 0}
-                                  placeholder={weightVal <= 0 ? "—" : "Trống"}
-                                  value={scoreVal === null ? "" : scoreVal}
-                                  onChange={(e) =>
-                                    handleComponentScoreChange(
-                                      course.courseCode,
-                                      key,
-                                      e.target.value
-                                    )
-                                  }
-                                  className="w-full rounded border border-[#1D263B] bg-[#0F1420] px-1.5 py-1 text-center font-mono text-[11px] font-semibold text-white placeholder:text-zinc-600 focus:border-[#2F6BFF] focus:outline-none disabled:opacity-40"
-                                />
-                              </label>
-                            </div>
+                            ))}
                           </div>
-                        );
-                      })}
-                    </div>
-
-                    {/* Live Target Calculation & Quick Target Chips */}
-                    <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[#1D263B] bg-[#080B12] px-3 py-2 text-xs">
-                      <div className="min-w-0 flex-1">
-                        {!targetCalc.isValidWeightSum ? (
-                          <span className="text-amber-400">
-                            Tổng trọng số hiện là {targetCalc.totalWeight}% — cần điều chỉnh đúng 100% để tính điểm mục tiêu.
-                          </span>
-                        ) : targetCalc.remainingWeight === 0 ? (
-                          <span className="text-zinc-300">
-                            Tổng kết theo trọng số:{" "}
-                            <span className="font-mono font-bold text-[#6B9BFF]">
-                              {targetCalc.projectedTotalScore?.toFixed(2)} / 10
-                            </span>{" "}
-                            <span className="text-zinc-500">(đã đồng bộ lên giả lập kỳ)</span>
-                          </span>
-                        ) : targetCalc.isAlreadyGuaranteed ? (
-                          <span className="text-emerald-400">
-                            Đã chắc chắn đạt mục tiêu {course.expectedScore10.toFixed(1)} (tối thiểu đạt{" "}
-                            <span className="font-mono font-semibold">
-                              {targetCalc.minPossibleScore.toFixed(2)}
-                            </span>
-                            ).
-                          </span>
-                        ) : !targetCalc.isAchievable ? (
-                          <span className="text-rose-400">
-                            Mục tiêu {course.expectedScore10.toFixed(1)} vượt trần (cần{" "}
-                            <span className="font-mono font-semibold">
-                              {targetCalc.requiredScore?.toFixed(2)}
-                            </span>
-                            /10 cho phần còn lại; tối đa đạt{" "}
-                            <span className="font-mono font-semibold">
-                              {targetCalc.maxPossibleScore.toFixed(2)}
-                            </span>
-                            ).
-                          </span>
-                        ) : (
-                          <span className="text-zinc-300">
-                            Để đạt{" "}
-                            <span className="font-mono font-semibold text-white">
-                              {course.expectedScore10.toFixed(1)}
-                            </span>
-                            , cần trung bình{" "}
-                            <span className="font-mono font-bold text-[#6B9BFF]">
-                              {targetCalc.requiredScore?.toFixed(2)}
-                            </span>{" "}
-                            ở{" "}
-                            <span className="font-mono text-zinc-200">
-                              {targetCalc.missingComponents
-                                .map((k) => COMPONENT_LABELS[k])
-                                .join(", ")}{" "}
-                              ({targetCalc.remainingWeight}%)
-                            </span>
-                            <span className="text-zinc-500">
-                              {" "}
-                              · Biên độ: {targetCalc.minPossibleScore.toFixed(1)}–
-                              {targetCalc.maxPossibleScore.toFixed(1)}
-                            </span>
-                          </span>
-                        )}
-                      </div>
-
-                      {!isComponentScoreLocked && (
-                        <div className="flex shrink-0 items-center gap-1 font-mono text-[10px]">
-                          <span className="text-zinc-500">Mục tiêu:</span>
-                          {[8.0, 8.5, 9.0].map((target) => (
-                            <button
-                              key={target}
-                              type="button"
-                              onClick={() => handleScoreChange(course.courseCode, target)}
-                              className={`rounded border px-1.5 py-0.5 transition-colors cursor-pointer ${
-                                Math.abs(course.expectedScore10 - target) < 0.05
-                                  ? "border-[#2F6BFF]/50 bg-[#2F6BFF]/[0.16] text-[#6B9BFF]"
-                                  : "border-[#1D263B] bg-[#0F1420] text-zinc-400 hover:text-zinc-200"
-                              }`}
-                            >
-                              {target.toFixed(1)}
-                            </button>
-                          ))}
                         </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
     </div>
   );

@@ -2,7 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   calculateCourseTarget,
+  computeCourseCurrentAverage,
+  computeSemesterCurrentGpa,
   getDefaultWeightsForCourse,
+  solveSemesterTargetDistribution,
 } from "../src/features/academic/utils/courseTargetEngine.ts";
 
 test("calculateCourseTarget flags invalid weight sums", () => {
@@ -92,4 +95,62 @@ test("getDefaultWeightsForCourse selects theory-only vs lab presets", () => {
     gk: 20,
     ck: 40,
   });
+});
+
+test("computeCourseCurrentAverage and computeSemesterCurrentGpa ignore missing cells", () => {
+  const it004 = computeCourseCurrentAverage(
+    { qt: null, th: null, gk: 8.0, ck: null },
+    { qt: 0, th: 30, gk: 20, ck: 50 }
+  );
+  assert.equal(it004.knownWeight, 20);
+  assert.equal(it004.currentAvg, 8.0);
+
+  const cs115 = computeCourseCurrentAverage(
+    { qt: null, th: null, gk: null, ck: null },
+    { qt: 40, th: 0, gk: 0, ck: 60 }
+  );
+  assert.equal(cs115.knownWeight, 0);
+  assert.equal(cs115.currentAvg, null);
+
+  const sem = computeSemesterCurrentGpa([
+    { credits: 4, scores: { qt: null, th: null, gk: 8.0, ck: null }, weights: { qt: 0, th: 30, gk: 20, ck: 50 } },
+    { credits: 4, scores: { qt: null, th: null, gk: null, ck: null }, weights: { qt: 40, th: 0, gk: 0, ck: 60 } },
+    { credits: 2, scores: { qt: 9.0, th: null, gk: 9.0, ck: null }, weights: { qt: 20, th: 0, gk: 30, ck: 50 } },
+  ]);
+  assert.equal(sem.totalCredits, 10);
+  assert.equal(sem.gradedCredits, 6);
+  assert.equal(sem.currentGpa10, 8.33);
+});
+
+test("solveSemesterTargetDistribution distributes remaining points and respects bounds", () => {
+  const basic = solveSemesterTargetDistribution(
+    [
+      { courseCode: "A", credits: 4, isLocked: true, lockedScore: 7.5, minPossible: 7.5, maxPossible: 7.5 },
+      { courseCode: "B", credits: 4, isLocked: false, lockedScore: 8.0, minPossible: 0, maxPossible: 10 },
+    ],
+    8.5
+  );
+  assert.equal(basic.isAchievable, true);
+  assert.equal(basic.targetsByCode.A, 7.5);
+  assert.equal(basic.targetsByCode.B, 9.5);
+
+  const bounded = solveSemesterTargetDistribution(
+    [
+      { courseCode: "A", credits: 4, isLocked: false, lockedScore: 0, minPossible: 1.0, maxPossible: 8.0 },
+      { courseCode: "B", credits: 4, isLocked: false, lockedScore: 0, minPossible: 0, maxPossible: 10 },
+    ],
+    8.5
+  );
+  assert.equal(bounded.isAchievable, true);
+  assert.equal(bounded.targetsByCode.A, 8.0);
+  assert.equal(bounded.targetsByCode.B, 9.0);
+
+  const impossible = solveSemesterTargetDistribution(
+    [
+      { courseCode: "A", credits: 4, isLocked: true, lockedScore: 7.0, minPossible: 7.0, maxPossible: 7.0 },
+      { courseCode: "B", credits: 4, isLocked: false, lockedScore: 0, minPossible: 0, maxPossible: 9.5 },
+    ],
+    9.0
+  );
+  assert.equal(impossible.isAchievable, false);
 });

@@ -157,3 +157,171 @@ export function calculateCourseTarget(
     projectedTotalScore: null,
   };
 }
+
+export interface CourseCurrentAverage {
+  currentAvg: number | null;
+  knownWeight: number;
+  weightedPoints: number;
+}
+
+export function computeCourseCurrentAverage(
+  scores: ComponentScores,
+  weights: ComponentWeights
+): CourseCurrentAverage {
+  let knownWeight = 0;
+  let weightedPoints = 0;
+
+  for (const key of COMPONENT_KEYS) {
+    const w = Math.max(0, weights[key]);
+    if (w <= 0) continue;
+    const score = scores[key];
+    if (score !== null && score !== undefined && Number.isFinite(score)) {
+      knownWeight += w;
+      weightedPoints += (Math.min(10, Math.max(0, score)) * w) / 100;
+    }
+  }
+
+  return {
+    currentAvg: knownWeight > 0 ? round2(weightedPoints / (knownWeight / 100)) : null,
+    knownWeight,
+    weightedPoints: round2(weightedPoints),
+  };
+}
+
+export interface SemesterCurrentGpaSummary {
+  currentGpa10: number | null;
+  gradedCredits: number;
+  totalCredits: number;
+}
+
+export function computeSemesterCurrentGpa(
+  items: ReadonlyArray<{ credits: number; scores: ComponentScores; weights: ComponentWeights }>
+): SemesterCurrentGpaSummary {
+  let gradedCredits = 0;
+  let totalCredits = 0;
+  let weightedSum = 0;
+
+  for (const item of items) {
+    const cred = Math.max(0, item.credits);
+    totalCredits += cred;
+    if (cred <= 0) continue;
+    const avg = computeCourseCurrentAverage(item.scores, item.weights);
+    if (avg.currentAvg !== null) {
+      gradedCredits += cred;
+      weightedSum += avg.currentAvg * cred;
+    }
+  }
+
+  return {
+    currentGpa10: gradedCredits > 0 ? round2(weightedSum / gradedCredits) : null,
+    gradedCredits,
+    totalCredits,
+  };
+}
+
+export interface CourseDistributionInput {
+  courseCode: string;
+  credits: number;
+  isLocked: boolean;
+  lockedScore: number;
+  minPossible: number;
+  maxPossible: number;
+}
+
+export interface SemesterTargetDistribution {
+  targetsByCode: Record<string, number>;
+  isAchievable: boolean;
+  requiredFlexAvg: number | null;
+}
+
+export function solveSemesterTargetDistribution(
+  items: ReadonlyArray<CourseDistributionInput>,
+  targetTermGpa: number
+): SemesterTargetDistribution {
+  const clampedTarget = Math.min(10, Math.max(0, targetTermGpa));
+  const targetsByCode: Record<string, number> = {};
+  let totalCredits = 0;
+
+  const states = items.map((item) => {
+    const cred = Math.max(0, item.credits);
+    totalCredits += cred;
+    const minP = Math.min(10, Math.max(0, item.minPossible));
+    const maxP = Math.max(minP, Math.min(10, item.maxPossible));
+    const locked = item.isLocked || cred <= 0;
+    const fixedVal = round2(Math.min(10, Math.max(0, item.lockedScore)));
+    if (locked) {
+      targetsByCode[item.courseCode] = fixedVal;
+    }
+    return {
+      courseCode: item.courseCode,
+      credits: cred,
+      fixed: locked,
+      assigned: fixedVal,
+      minPossible: minP,
+      maxPossible: maxP,
+    };
+  });
+
+  if (totalCredits <= 0) {
+    return { targetsByCode, isAchievable: true, requiredFlexAvg: null };
+  }
+
+  const desiredTotalPoints = clampedTarget * totalCredits;
+  let requiredFlexAvg: number | null = null;
+
+  for (let iter = 0; iter < states.length + 1; iter += 1) {
+    let fixedPoints = 0;
+    let flexCredits = 0;
+    for (const s of states) {
+      if (s.fixed) {
+        fixedPoints += s.assigned * s.credits;
+      } else {
+        flexCredits += s.credits;
+      }
+    }
+
+    if (flexCredits <= 0) {
+      requiredFlexAvg = null;
+      break;
+    }
+
+    const rawFlex = (desiredTotalPoints - fixedPoints) / flexCredits;
+    requiredFlexAvg = round2(rawFlex);
+
+    let clampedAny = false;
+    for (const s of states) {
+      if (s.fixed) continue;
+      if (rawFlex < s.minPossible - 1e-6) {
+        s.fixed = true;
+        s.assigned = round2(s.minPossible);
+        targetsByCode[s.courseCode] = s.assigned;
+        clampedAny = true;
+      } else if (rawFlex > s.maxPossible + 1e-6) {
+        s.fixed = true;
+        s.assigned = round2(s.maxPossible);
+        targetsByCode[s.courseCode] = s.assigned;
+        clampedAny = true;
+      }
+    }
+
+    if (!clampedAny) {
+      const clampedFlex = round2(Math.min(10, Math.max(0, rawFlex)));
+      for (const s of states) {
+        if (!s.fixed) {
+          s.assigned = clampedFlex;
+          targetsByCode[s.courseCode] = clampedFlex;
+        }
+      }
+      break;
+    }
+  }
+
+  const achievedPoints = states.reduce((sum, s) => sum + s.assigned * s.credits, 0);
+  const isAchievable = achievedPoints + 0.05 >= desiredTotalPoints;
+
+  return {
+    targetsByCode,
+    isAchievable,
+    requiredFlexAvg,
+  };
+}
