@@ -47,7 +47,9 @@ export const COMPONENT_LABELS: Record<ComponentKey, string> = {
 export const UIT_WEIGHT_PRESETS: readonly WeightPreset[] = [
   { id: "20-20-20-40", label: "20 / 20 / 20 / 40", weights: { qt: 20, th: 20, gk: 20, ck: 40 } },
   { id: "10-20-20-50", label: "10 / 20 / 20 / 50", weights: { qt: 10, th: 20, gk: 20, ck: 50 } },
+  { id: "0-30-20-50", label: "0 / 30 / 20 / 50", weights: { qt: 0, th: 30, gk: 20, ck: 50 } },
   { id: "20-0-30-50", label: "20 / 0 / 30 / 50", weights: { qt: 20, th: 0, gk: 30, ck: 50 } },
+  { id: "40-0-0-60", label: "40 / 0 / 0 / 60", weights: { qt: 40, th: 0, gk: 0, ck: 60 } },
   { id: "0-0-30-70", label: "0 / 0 / 30 / 70", weights: { qt: 0, th: 0, gk: 30, ck: 70 } },
 ];
 

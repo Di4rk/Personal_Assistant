@@ -209,6 +209,7 @@ export const SemesterGpaSimulator: React.FC<SemesterGpaSimulatorProps> = ({
 
   const [simulatedCourses, setSimulatedCourses] = useState<SimulatedCourseState[]>(initialItems);
   const [expandedWeightCode, setExpandedWeightCode] = useState<string | null>(null);
+  const [isEditingAllWeights, setIsEditingAllWeights] = useState<boolean>(false);
   const [termTargetUnachievable, setTermTargetUnachievable] = useState<boolean>(false);
 
   useEffect(() => {
@@ -479,8 +480,8 @@ export const SemesterGpaSimulator: React.FC<SemesterGpaSimulatorProps> = ({
         </div>
       </div>
 
-      {/* 2. Impact Hero KPI Cards — 2x2 Grid */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      {/* 2. Impact Hero KPI Cards — 4 Columns on Wide View */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {/* Card A: Bidirectional Semester Current vs Expected GPA */}
         <div className="space-y-2 rounded-lg border border-[#1D263B] bg-[#080B12] p-3.5">
           <div className="flex items-center justify-between gap-2">
@@ -607,95 +608,148 @@ export const SemesterGpaSimulator: React.FC<SemesterGpaSimulatorProps> = ({
       </div>
 
       {/* 3. Bidirectional Spreadsheet Table */}
-      <div className="overflow-x-auto rounded-lg border border-[#1D263B] bg-[#080B12]">
-        <table className="w-full min-w-[660px] border-collapse text-left text-xs">
-          <thead>
-            <tr className="border-b border-[#1D263B] bg-[#0F1420]/70 text-[11px] font-medium text-zinc-400">
-              <th className="py-2.5 pl-3 pr-2">Môn học &amp; Trọng số</th>
-              <th className="w-16 px-1.5 py-2.5 text-center">QT</th>
-              <th className="w-16 px-1.5 py-2.5 text-center">TH</th>
-              <th className="w-16 px-1.5 py-2.5 text-center">GK</th>
-              <th className="w-16 px-1.5 py-2.5 text-center">CK</th>
-              <th className="w-16 px-2 py-2.5 text-right">Hiện tại</th>
-              <th className="w-24 pl-2 pr-3 py-2.5 text-right">Kỳ vọng</th>
-            </tr>
-          </thead>
+      <div className="space-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-400">
+            <span className="font-medium text-zinc-200">
+              Bảng điểm kỳ này ({simulatedCourses.length} môn)
+            </span>
+            <span className="text-[11px] text-zinc-500">
+              Ô trống tự tính điểm cần đạt theo Kỳ vọng
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsEditingAllWeights((prev) => !prev)}
+            className={`rounded-md border px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer ${
+              isEditingAllWeights
+                ? "border-[#2F6BFF]/50 bg-[#2F6BFF]/[0.16] text-[#6B9BFF]"
+                : "border-[#1D263B] bg-[#080B12] text-zinc-300 hover:border-[#2F6BFF]/40 hover:text-white"
+            }`}
+          >
+            {isEditingAllWeights ? "Xong chỉnh trọng số" : "Chỉnh trọng số (%)"}
+          </button>
+        </div>
 
-          <tbody className="divide-y divide-[#1D263B]/80">
-            {simulatedCourses.map((course) => {
-              const targetCalc = calculateCourseTarget(
-                course.scores,
-                course.weights,
-                course.expectedScore10
-              );
-              const currentAvgInfo = computeCourseCurrentAverage(course.scores, course.weights);
-              const isWeightOpen = expandedWeightCode === course.courseCode;
-              const isComponentScoreLocked =
-                targetCalc.isValidWeightSum && targetCalc.remainingWeight === 0;
-              const { gradeChar } = score10ToScale4(course.expectedScore10);
+        <div className="overflow-x-auto rounded-lg border border-[#1D263B] bg-[#080B12]">
+          <table className="w-full min-w-[700px] border-collapse text-left text-xs">
+            <thead>
+              <tr className="border-b border-[#1D263B] bg-[#0F1420]/70 text-[11px] font-medium text-zinc-400">
+                <th className="py-2.5 pl-3 pr-2">Môn học &amp; Trọng số</th>
+                <th className="w-16 px-1.5 py-2.5 text-center">QT</th>
+                <th className="w-16 px-1.5 py-2.5 text-center">TH</th>
+                <th className="w-16 px-1.5 py-2.5 text-center">GK</th>
+                <th className="w-16 px-1.5 py-2.5 text-center">CK</th>
+                <th className="w-20 px-2 py-2.5 text-right">Hiện tại</th>
+                <th className="w-24 pl-2 pr-3 py-2.5 text-right">Kỳ vọng</th>
+              </tr>
+            </thead>
 
-              return (
-                <React.Fragment key={course.courseCode}>
-                  <tr className="transition-colors duration-100 hover:bg-[#151C2C]/60">
-                    {/* Col 1: Course Info + Weight Badge */}
-                    <td className="py-2.5 pl-3 pr-2 align-middle">
-                      <div className="max-w-[230px] truncate font-medium text-zinc-100" title={course.courseName}>
-                        {course.courseName}
-                      </div>
-                      <div className="mt-1 flex flex-wrap items-center gap-1.5 font-mono text-[10px]">
-                        <span className="text-zinc-400">
-                          {course.courseCode} · {course.credits} TC
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setExpandedWeightCode((curr) =>
-                              curr === course.courseCode ? null : course.courseCode
-                            )
-                          }
-                          title="Bấm để chỉnh trọng số QT / TH / GK / CK"
-                          className={`rounded border px-1.5 py-0.2 transition-colors cursor-pointer ${
-                            isWeightOpen
-                              ? "border-[#2F6BFF]/50 bg-[#2F6BFF]/[0.16] text-[#6B9BFF]"
-                              : "border-[#1D263B] bg-[#0F1420] text-zinc-400 hover:text-zinc-200"
-                          }`}
-                        >
-                          {formatWeightBadge(course.weights)}
-                        </button>
-                        {course.weightSource === "syllabus" && (
-                          <span className="rounded border border-emerald-500/25 bg-emerald-950/40 px-1 py-0.2 text-[9px] text-emerald-400">
-                            Đề cương
+            <tbody className="divide-y divide-[#1D263B]/80">
+              {simulatedCourses.map((course) => {
+                const targetCalc = calculateCourseTarget(
+                  course.scores,
+                  course.weights,
+                  course.expectedScore10
+                );
+                const currentAvgInfo = computeCourseCurrentAverage(course.scores, course.weights);
+                const isWeightOpen = expandedWeightCode === course.courseCode;
+                const showWeightEditor = isWeightOpen || isEditingAllWeights;
+                const isComponentScoreLocked =
+                  targetCalc.isValidWeightSum && targetCalc.remainingWeight === 0;
+                const { gradeChar } = score10ToScale4(course.expectedScore10);
+
+                return (
+                  <React.Fragment key={course.courseCode}>
+                    <tr className="transition-colors duration-100 hover:bg-[#151C2C]/60">
+                      {/* Col 1: Course Info + Weight Badge */}
+                      <td className="py-2.5 pl-3 pr-2 align-middle">
+                        <div className="max-w-[260px] truncate font-medium text-zinc-100" title={course.courseName}>
+                          {course.courseName}
+                        </div>
+                        <div className="mt-1 flex flex-wrap items-center gap-1.5 font-mono text-[10px]">
+                          <span className="text-zinc-400">
+                            {course.courseCode} · {course.credits} TC
                           </span>
-                        )}
-                      </div>
-                    </td>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (isEditingAllWeights) {
+                                setIsEditingAllWeights(false);
+                                setExpandedWeightCode(course.courseCode);
+                              } else {
+                                setExpandedWeightCode((curr) =>
+                                  curr === course.courseCode ? null : course.courseCode
+                                );
+                              }
+                            }}
+                            title="Bấm để chỉnh trọng số QT / TH / GK / CK"
+                            className={`rounded border px-1.5 py-0.5 transition-colors cursor-pointer ${
+                              showWeightEditor
+                                ? "border-[#2F6BFF]/50 bg-[#2F6BFF]/[0.16] text-[#6B9BFF]"
+                                : "border-[#1D263B] bg-[#0F1420] text-zinc-400 hover:text-zinc-200"
+                            }`}
+                          >
+                            {formatWeightBadge(course.weights)}
+                          </button>
+                          <span
+                            className={`rounded border px-1.5 py-0.5 text-[9px] ${
+                              course.weightSource === "syllabus"
+                                ? "border-emerald-500/25 bg-emerald-950/40 text-emerald-400"
+                                : course.weightSource === "manual"
+                                ? "border-[#2F6BFF]/35 bg-[#2F6BFF]/[0.12] text-[#6B9BFF]"
+                                : "border-[#1D263B] bg-[#0F1420] text-zinc-500"
+                            }`}
+                          >
+                            {course.weightSource === "syllabus"
+                              ? "Đề cương UIT"
+                              : course.weightSource === "manual"
+                              ? "Tự chỉnh"
+                              : "Mặc định"}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (isEditingAllWeights) {
+                                setIsEditingAllWeights(false);
+                                setExpandedWeightCode(course.courseCode);
+                              } else {
+                                setExpandedWeightCode((curr) =>
+                                  curr === course.courseCode ? null : course.courseCode
+                                );
+                              }
+                            }}
+                            className="rounded border border-[#1D263B] bg-[#0F1420] px-1.5 py-0.5 text-[10px] text-zinc-300 transition-colors hover:border-[#2F6BFF]/40 hover:text-white cursor-pointer"
+                          >
+                            {isWeightOpen && !isEditingAllWeights ? "Thu gọn" : "Sửa %"}
+                          </button>
+                        </div>
+                      </td>
 
-                    {/* Cols 2-5: QT, TH, GK, CK */}
-                    {COMPONENT_KEYS.map((key) => {
-                      const weightVal = course.weights[key];
-                      const scoreVal = course.scores[key];
-                      const portalVal = course.portalScores[key];
-                      const hasPortalVal = portalVal !== null && portalVal !== undefined;
-                      const isDisabled = weightVal <= 0;
+                      {/* Cols 2-5: QT, TH, GK, CK */}
+                      {COMPONENT_KEYS.map((key) => {
+                        const weightVal = course.weights[key];
+                        const scoreVal = course.scores[key];
+                        const portalVal = course.portalScores[key];
+                        const hasPortalVal = portalVal !== null && portalVal !== undefined;
+                        const isDisabled = weightVal <= 0;
 
-                      let hintText = "";
-                      let hintTone = "text-[#6B9BFF]/80";
-                      if (
-                        !isDisabled &&
-                        scoreVal === null &&
-                        targetCalc.isValidWeightSum &&
-                        targetCalc.requiredScore !== null
-                      ) {
-                        if (targetCalc.isAlreadyGuaranteed) {
-                          hintText = "Đã đạt";
-                          hintTone = "text-emerald-400/80";
-                        } else if (!targetCalc.isAchievable) {
-                          hintText = `>${targetCalc.requiredScore.toFixed(1)}`;
-                          hintTone = "text-rose-400/90";
-                        } else {
-                          hintText = `≈${targetCalc.requiredScore.toFixed(1)}`;
+                        let hintText = "";
+                        let hintTone = "text-zinc-500";
+                        if (
+                          !isDisabled &&
+                          scoreVal === null &&
+                          targetCalc.isValidWeightSum &&
+                          targetCalc.requiredScore !== null
+                        ) {
+                          if (targetCalc.isAlreadyGuaranteed) {
+                            hintText = "Đạt";
+                            hintTone = "text-emerald-400/80";
+                          } else if (!targetCalc.isAchievable) {
+                            hintText = `>${targetCalc.requiredScore.toFixed(1)}`;
+                            hintTone = "text-rose-400/90";
+                          }
                         }
-                      }
 
                       return (
                         <td key={key} className="px-1 py-2 text-center align-middle">
@@ -803,7 +857,7 @@ export const SemesterGpaSimulator: React.FC<SemesterGpaSimulatorProps> = ({
                   </tr>
 
                   {/* Expandable Weight Config Sub-row */}
-                  {isWeightOpen && (
+                  {showWeightEditor && (
                     <tr className="bg-[#0F1420]/90">
                       <td colSpan={7} className="px-3 py-2.5">
                         <div className="space-y-2">
@@ -904,6 +958,7 @@ export const SemesterGpaSimulator: React.FC<SemesterGpaSimulatorProps> = ({
             })}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   );

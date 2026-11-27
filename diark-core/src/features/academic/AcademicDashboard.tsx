@@ -572,76 +572,75 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
               void handleRefresh();
             }}
           />
-          <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-12">
-            {/* Sticky Left Radar Column */}
-            <div className="rounded-xl border border-[#1D263B] bg-[#0F1420] p-4 xl:sticky xl:top-4 xl:col-span-5 xl:self-start">
-              <div className="mb-3 flex items-center justify-between border-b border-[#1D263B] pb-3">
-                <div>
-                  <h3 className="text-xs font-semibold text-zinc-100">Phân bố khối kiến thức</h3>
-                  <p className="text-[11px] text-zinc-500">4 nhóm chuẩn CTĐT UIT</p>
-                </div>
-                <div className="flex items-center rounded-md border border-[#1D263B] bg-[#080B12] p-0.5 text-xs">
-                  <button
-                    type="button"
-                    onClick={() => setRadarScope("all")}
-                    className={`rounded px-2 py-1 text-xs transition-colors cursor-pointer ${
-                      radarScope === "all"
-                        ? "bg-[#2F6BFF]/[0.16] font-medium text-[#6B9BFF]"
-                        : "text-zinc-500 hover:text-zinc-300"
-                    }`}
-                  >
-                    Toàn khóa
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setRadarScope("semester")}
-                    className={`rounded px-2 py-1 text-xs transition-colors cursor-pointer ${
-                      radarScope === "semester"
-                        ? "bg-[#2F6BFF]/[0.16] font-medium text-[#6B9BFF]"
-                        : "text-zinc-500 hover:text-zinc-300"
-                    }`}
-                  >
-                    Kỳ này
-                  </button>
-                </div>
+
+          <GpaSimulatorCard
+            currentGpaCredits={cumulativeStats.currentGpaCredits}
+            currentEarnedCredits={cumulativeStats.currentEarnedCredits}
+            currentTotalWeighted10={cumulativeStats.currentTotalWeighted10}
+            currentGpa10={cumulativeStats.cGpa10}
+            completedTermsCount={
+              macroMetrics.length > 0
+                ? macroMetrics.filter((m) => m.termGpa > 0).length
+                : overview.filter((s) => s.isCompleted).length
+            }
+            totalDegreeCredits={curriculumCredits}
+            activeCourses={courses}
+            activeSemesterId={selectedSemesterId || undefined}
+          />
+
+          <div className="rounded-xl border border-[#1D263B] bg-[#0F1420] p-4">
+            <div className="mb-4 flex items-center justify-between border-b border-[#1D263B] pb-3">
+              <div>
+                <h3 className="text-xs font-semibold text-zinc-100">Phân bố khối kiến thức</h3>
+                <p className="text-[11px] text-zinc-500">4 nhóm chuẩn CTĐT UIT</p>
               </div>
-              <div className="flex min-h-[280px] items-center justify-center">
+              <div className="flex items-center rounded-md border border-[#1D263B] bg-[#080B12] p-0.5 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setRadarScope("all")}
+                  className={`rounded px-2.5 py-1 text-xs transition-colors cursor-pointer ${
+                    radarScope === "all"
+                      ? "bg-[#2F6BFF]/[0.16] font-medium text-[#6B9BFF]"
+                      : "text-zinc-500 hover:text-zinc-300"
+                  }`}
+                >
+                  Toàn khóa
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRadarScope("semester")}
+                  className={`rounded px-2.5 py-1 text-xs transition-colors cursor-pointer ${
+                    radarScope === "semester"
+                      ? "bg-[#2F6BFF]/[0.16] font-medium text-[#6B9BFF]"
+                      : "text-zinc-500 hover:text-zinc-300"
+                  }`}
+                >
+                  Kỳ này
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 items-center gap-4 lg:grid-cols-12">
+              <div className="flex min-h-[260px] items-center justify-center lg:col-span-5">
                 {(radarScope === "all" ? isLoadingAllCourses : isLoadingCourses) ? (
                   <span className="text-xs text-zinc-500">Đang tải...</span>
                 ) : (
-                  <AcademicRadarChart data={radarData} size={280} />
+                  <AcademicRadarChart data={radarData} size={260} />
                 )}
               </div>
-              <div className="mt-3 grid grid-cols-2 gap-2 border-t border-[#1D263B] pt-3 text-xs">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:col-span-7">
                 {radarData.map((item) => (
                   <div
                     key={item.category}
-                    className="flex items-center justify-between rounded-lg border border-[#1D263B] bg-[#080B12] px-2.5 py-1.5"
+                    className="flex h-full flex-col justify-between rounded-lg border border-[#1D263B] bg-[#080B12] p-3.5"
                   >
-                    <span className="truncate text-zinc-400">{item.shortLabel}</span>
-                    <span className="font-mono font-semibold tabular-nums text-zinc-200">
+                    <span className="text-xs text-zinc-400">{item.shortLabel}</span>
+                    <span className="mt-2 font-mono text-lg font-semibold tabular-nums text-zinc-100">
                       {item.averageScore10 > 0 ? item.averageScore10.toFixed(2) : "—"}
                     </span>
                   </div>
                 ))}
               </div>
-            </div>
-
-            <div className="xl:col-span-7">
-              <GpaSimulatorCard
-                currentGpaCredits={cumulativeStats.currentGpaCredits}
-                currentEarnedCredits={cumulativeStats.currentEarnedCredits}
-                currentTotalWeighted10={cumulativeStats.currentTotalWeighted10}
-                currentGpa10={cumulativeStats.cGpa10}
-                completedTermsCount={
-                  macroMetrics.length > 0
-                    ? macroMetrics.filter((m) => m.termGpa > 0).length
-                    : overview.filter((s) => s.isCompleted).length
-                }
-                totalDegreeCredits={curriculumCredits}
-                activeCourses={courses}
-                activeSemesterId={selectedSemesterId || undefined}
-              />
             </div>
           </div>
         </div>
