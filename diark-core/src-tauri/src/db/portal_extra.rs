@@ -58,7 +58,13 @@ where
     Ok(match val {
         serde_json::Value::String(s) => s,
         serde_json::Value::Number(n) => n.to_string(),
-        serde_json::Value::Bool(b) => b.to_string(),
+        serde_json::Value::Bool(b) => {
+            if b {
+                "true".to_string()
+            } else {
+                String::new()
+            }
+        }
         _ => String::new(),
     })
 }
@@ -216,13 +222,13 @@ pub struct PortalTuitionRecord {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PortalTuitionInput {
     pub id: i64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_flexible_string")]
     pub period: String,
     #[serde(default, deserialize_with = "de_flexible_string")]
     pub semester: String,
     #[serde(default, deserialize_with = "de_flexible_string")]
     pub year_id_name: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_flexible_string")]
     pub subject_codes: String,
     #[serde(default, deserialize_with = "de_flexible_i64")]
     pub tuition_amount: i64,
@@ -232,19 +238,27 @@ pub struct PortalTuitionInput {
     pub paid: i64,
     #[serde(default, deserialize_with = "de_flexible_i64")]
     pub remaining: i64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_flexible_string")]
     pub payment_status: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_flexible_string")]
     pub payment_status_label: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_flexible_string")]
     pub tuition_status: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_flexible_string")]
     pub tuition_status_label: String,
-    #[serde(default, alias = "period_1_due_date_formatted")]
+    #[serde(
+        default,
+        alias = "period_1_due_date_formatted",
+        deserialize_with = "de_flexible_string"
+    )]
     pub period_1_due_date: String,
-    #[serde(default, alias = "period_2_due_date_formatted")]
+    #[serde(
+        default,
+        alias = "period_2_due_date_formatted",
+        deserialize_with = "de_flexible_string"
+    )]
     pub period_2_due_date: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_flexible_string")]
     pub paid_time_formatted: String,
     #[serde(default)]
     pub detail_ids: Vec<serde_json::Value>,
@@ -265,21 +279,21 @@ pub struct PortalCertificateRecord {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PortalCertificateInput {
-    #[serde(deserialize_with = "de_flexible_string")]
+    #[serde(default, deserialize_with = "de_flexible_string")]
     pub id: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_flexible_string")]
     pub cert_type: String,
     #[serde(default, deserialize_with = "de_flexible_f64")]
     pub tongdiem: f64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_flexible_string")]
     pub capdo: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_flexible_string")]
     pub ngaythi: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_flexible_string")]
     pub status: String,
     #[serde(default, deserialize_with = "de_flexible_bool_int")]
     pub output_standard: bool,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_flexible_string")]
     pub create_date: String,
 }
 
@@ -298,21 +312,21 @@ pub struct PortalClassActivityRecord {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PortalClassActivityInput {
-    #[serde(deserialize_with = "de_flexible_string")]
+    #[serde(default, deserialize_with = "de_flexible_string")]
     pub id: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_flexible_string")]
     pub ngay: String,
     #[serde(default, alias = "tietBatDau")]
     pub tiet_bat_dau: i64,
     #[serde(default, alias = "tietKetThuc")]
     pub tiet_ket_thuc: i64,
-    #[serde(default, alias = "noiDung")]
+    #[serde(default, alias = "noiDung", deserialize_with = "de_flexible_string")]
     pub noi_dung: String,
-    #[serde(default, alias = "diaDiem")]
+    #[serde(default, alias = "diaDiem", deserialize_with = "de_flexible_string")]
     pub dia_diem: String,
-    #[serde(default, alias = "gvChuTri")]
+    #[serde(default, alias = "gvChuTri", deserialize_with = "de_flexible_string")]
     pub gv_chu_tri: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_flexible_string")]
     pub status: String,
 }
 

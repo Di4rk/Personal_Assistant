@@ -254,6 +254,31 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
     return overview.find((s) => s.id === selectedSemesterId) ?? null;
   }, [overview, selectedSemesterId]);
 
+  const simulatorSemesters = useMemo(() => {
+    if (macroMetrics.length > 0) {
+      return macroMetrics.map((m) => {
+        const parts = m.semesterId.split(".");
+        const termNum = parts.length > 1 ? parts[1] : "1";
+        let label =
+          m.semesterLabel && m.semesterLabel.trim().length > 0
+            ? m.semesterLabel
+            : `Học kỳ ${termNum}/${m.yearName}`;
+        label = label
+          .replace(/Học kỳ\s+Học[_\s]kỳ/gi, "Học kỳ")
+          .replace(/Học_kỳ_/gi, "Học kỳ ")
+          .replace(/_/g, " ");
+        if (m.termGpa <= 0) {
+          label = `${label} (Đang học)`;
+        }
+        return { id: m.semesterId, label };
+      });
+    }
+    return overview.map((s) => ({
+      id: s.id,
+      label: `Học kỳ ${s.semesterTerm}/${s.academicYear}${s.isCompleted ? "" : " (Đang học)"}`,
+    }));
+  }, [macroMetrics, overview]);
+
   const handleRefresh = useCallback(async () => {
     await Promise.all([refetchOverview(), loadMacroMetrics()]);
   }, [refetchOverview, loadMacroMetrics]);
@@ -586,6 +611,8 @@ export const AcademicDashboard: React.FC<AcademicDashboardProps> = ({
             totalDegreeCredits={curriculumCredits}
             activeCourses={courses}
             activeSemesterId={selectedSemesterId || undefined}
+            semesters={simulatorSemesters}
+            onSelectSemester={selectSemester}
           />
 
           <div className="rounded-xl border border-[#1D263B] bg-[#0F1420] p-4">

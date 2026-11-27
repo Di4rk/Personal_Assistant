@@ -32,10 +32,15 @@ interface SimulatedCourseState {
   courseName: string;
   credits: number;
   expectedScore10: number;
+  portalSummaryScore10: number | null;
   portalScores: ComponentScores;
   scores: ComponentScores;
   weights: ComponentWeights;
   weightSource: "manual" | "syllabus" | "default";
+}
+
+function areScoresEqual(a: ComponentScores, b: ComponentScores): boolean {
+  return a.qt === b.qt && a.th === b.th && a.gk === b.gk && a.ck === b.ck;
 }
 
 const WEIGHTS_STORAGE_KEY = "diark_course_weights_v1";
@@ -163,6 +168,7 @@ export const SemesterGpaSimulator: React.FC<SemesterGpaSimulatorProps> = ({
         );
         return {
           ...item,
+          portalSummaryScore10: null,
           portalScores: emptyScores,
           scores: { ...emptyScores },
           weights,
@@ -187,9 +193,13 @@ export const SemesterGpaSimulator: React.FC<SemesterGpaSimulatorProps> = ({
           portalScores.th !== null && portalScores.th !== undefined
         );
         const calc = calculateCourseTarget(portalScores, weights, 8.0);
-        const expectedScore10 =
+        const portalSummaryScore10 =
           c.summaryScore10 !== null && c.summaryScore10 !== undefined && c.summaryScore10 > 0
             ? c.summaryScore10
+            : null;
+        const expectedScore10 =
+          portalSummaryScore10 !== null
+            ? portalSummaryScore10
             : calc.projectedTotalScore !== null
             ? calc.projectedTotalScore
             : 8.0;
@@ -199,6 +209,7 @@ export const SemesterGpaSimulator: React.FC<SemesterGpaSimulatorProps> = ({
           courseName: c.courseName,
           credits,
           expectedScore10,
+          portalSummaryScore10,
           portalScores,
           scores: { ...portalScores },
           weights,
@@ -386,10 +397,29 @@ export const SemesterGpaSimulator: React.FC<SemesterGpaSimulatorProps> = ({
     const termGpa10 = termCredits > 0 ? Number((termWeighted10 / termCredits).toFixed(2)) : 0;
     const termGpa4 = termCredits > 0 ? Number((termWeighted4 / termCredits).toFixed(2)) : 0;
 
-    const currentTermSummary = computeSemesterCurrentGpa(simulatedCourses);
+    const currentTermSummary = computeSemesterCurrentGpa(
+      simulatedCourses.map((item) => ({
+        credits: item.credits,
+        scores: item.scores,
+        weights: item.weights,
+        officialScore10: areScoresEqual(item.scores, item.portalScores)
+          ? item.portalSummaryScore10
+          : null,
+      }))
+    );
 
-    const newTotalCredits = currentGpaCredits + termCredits;
-    const newTotalWeighted10 = currentTotalWeighted10 + termWeighted10;
+    let alreadyCountedCredits = 0;
+    let alreadyCountedWeighted10 = 0;
+    for (const item of simulatedCourses) {
+      if (item.portalSummaryScore10 !== null && item.portalSummaryScore10 > 0) {
+        alreadyCountedCredits += item.credits;
+        alreadyCountedWeighted10 += item.portalSummaryScore10 * item.credits;
+      }
+    }
+    const baseCredits = Math.max(0, currentGpaCredits - alreadyCountedCredits);
+    const baseWeighted10 = Math.max(0, currentTotalWeighted10 - alreadyCountedWeighted10);
+    const newTotalCredits = baseCredits + termCredits;
+    const newTotalWeighted10 = baseWeighted10 + termWeighted10;
     const newCgpa10 =
       newTotalCredits > 0 ? Number((newTotalWeighted10 / newTotalCredits).toFixed(2)) : currentGpa10;
     const deltaCgpa = Number((newCgpa10 - currentGpa10).toFixed(2));
@@ -503,9 +533,9 @@ export const SemesterGpaSimulator: React.FC<SemesterGpaSimulatorProps> = ({
 
             <div>
               <label htmlFor="term-target-gpa-input" className="block text-[10px] text-[#6B9BFF]">
-                Kỳ vọng kỳ (nhập ngược)
+                Kỳ vọng
               </label>
-              <div className="mt-0.5 flex items-baseline gap-1">
+              <div className="mt-0.5 flex flex-col items-start gap-0.5">
                 <input
                   id="term-target-gpa-input"
                   type="number"
@@ -516,7 +546,7 @@ export const SemesterGpaSimulator: React.FC<SemesterGpaSimulatorProps> = ({
                   onChange={(e) => handleSemesterTargetInput(e.target.value)}
                   className="w-16 rounded border border-[#2F6BFF]/45 bg-[#0F1420] px-1.5 py-0.5 text-center font-mono text-base font-bold text-white focus:border-[#2F6BFF] focus:outline-none"
                 />
-                <span className="font-mono text-[11px] text-zinc-500">
+                <span className="font-mono text-[10px] text-zinc-500">
                   ({calculations.termGpa4.toFixed(2)}/4)
                 </span>
               </div>
@@ -693,12 +723,12 @@ export const SemesterGpaSimulator: React.FC<SemesterGpaSimulatorProps> = ({
                             {formatWeightBadge(course.weights)}
                           </button>
                           <span
-                            className={`rounded border px-1.5 py-0.5 text-[9px] ${
+                            className={`text-[10px] ${
                               course.weightSource === "syllabus"
-                                ? "border-emerald-500/25 bg-emerald-950/40 text-emerald-400"
+                                ? "text-emerald-400/90"
                                 : course.weightSource === "manual"
-                                ? "border-[#2F6BFF]/35 bg-[#2F6BFF]/[0.12] text-[#6B9BFF]"
-                                : "border-[#1D263B] bg-[#0F1420] text-zinc-500"
+                                ? "text-[#6B9BFF]"
+                                : "text-zinc-500"
                             }`}
                           >
                             {course.weightSource === "syllabus"
@@ -807,7 +837,15 @@ export const SemesterGpaSimulator: React.FC<SemesterGpaSimulatorProps> = ({
 
                     {/* Col 6: Current Weighted Average */}
                     <td className="px-2 py-2 text-right align-middle font-mono tabular-nums">
-                      {currentAvgInfo.currentAvg !== null ? (
+                      {areScoresEqual(course.scores, course.portalScores) &&
+                      course.portalSummaryScore10 !== null ? (
+                        <div>
+                          <div className="text-xs font-semibold text-zinc-200">
+                            {course.portalSummaryScore10.toFixed(2)}
+                          </div>
+                          <div className="text-[9px] text-zinc-500">100%</div>
+                        </div>
+                      ) : currentAvgInfo.currentAvg !== null ? (
                         <div>
                           <div className="text-xs font-semibold text-zinc-200">
                             {currentAvgInfo.currentAvg.toFixed(2)}

@@ -197,7 +197,12 @@ export interface SemesterCurrentGpaSummary {
 }
 
 export function computeSemesterCurrentGpa(
-  items: ReadonlyArray<{ credits: number; scores: ComponentScores; weights: ComponentWeights }>
+  items: ReadonlyArray<{
+    credits: number;
+    scores: ComponentScores;
+    weights: ComponentWeights;
+    officialScore10?: number | null;
+  }>
 ): SemesterCurrentGpaSummary {
   let gradedCredits = 0;
   let totalCredits = 0;
@@ -207,6 +212,16 @@ export function computeSemesterCurrentGpa(
     const cred = Math.max(0, item.credits);
     totalCredits += cred;
     if (cred <= 0) continue;
+    if (
+      item.officialScore10 !== null &&
+      item.officialScore10 !== undefined &&
+      Number.isFinite(item.officialScore10) &&
+      item.officialScore10 > 0
+    ) {
+      gradedCredits += cred;
+      weightedSum += item.officialScore10 * cred;
+      continue;
+    }
     const avg = computeCourseCurrentAverage(item.scores, item.weights);
     if (avg.currentAvg !== null) {
       gradedCredits += cred;

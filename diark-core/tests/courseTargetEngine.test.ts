@@ -154,3 +154,23 @@ test("solveSemesterTargetDistribution distributes remaining points and respects 
   );
   assert.equal(impossible.isAchievable, false);
 });
+
+test("computeSemesterCurrentGpa prioritizes officialScore10 over component fallback when unmodified", () => {
+  const summary = computeSemesterCurrentGpa([
+    {
+      credits: 4,
+      scores: { qt: 8.5, th: null, gk: 8.0, ck: 8.5 },
+      weights: { qt: 20, th: 20, gk: 20, ck: 40 },
+      officialScore10: 8.55,
+    },
+    {
+      credits: 4,
+      scores: { qt: 9.0, th: null, gk: 8.0, ck: null },
+      weights: { qt: 20, th: 20, gk: 20, ck: 40 },
+      officialScore10: null,
+    },
+  ]);
+
+  assert.equal(summary.gradedCredits, 8);
+  assert.equal(summary.currentGpa10, 8.53);
+});

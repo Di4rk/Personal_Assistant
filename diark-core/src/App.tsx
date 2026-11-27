@@ -37,6 +37,7 @@ import { useAppStore } from "./stores/useAppStore";
 import { useAcademicStore } from "./stores/useAcademicStore";
 import { useWecodeStore } from "./stores/useWecodeStore";
 import { usePrivacyStore } from "./stores/usePrivacyStore";
+import { maskStudentId } from "./utils/masking";
 import { usePluginStore } from "./stores/usePluginStore";
 import {
   Code2,
@@ -75,6 +76,7 @@ type ProfileState =
 
 export default function App() {
   const [profileState, setProfileState] = useState<ProfileState>({ status: "loading" });
+  const isDemoMode = usePrivacyStore((s) => s.isDemoMode);
   const [activeTab, setActiveTab] = useState<string>("home");
   const [academicSubTabReq, setAcademicSubTabReq] = useState<{
     tab: AcademicSubTab;
@@ -884,7 +886,11 @@ export default function App() {
                     {profile.nickname}
                   </span>
                   <span className="block truncate font-mono text-[10px] text-zinc-500">
-                    {ssoStatus?.username || "Chưa lưu SSO"}
+                    {ssoStatus?.username
+                      ? isDemoMode
+                        ? maskStudentId(ssoStatus.username)
+                        : ssoStatus.username
+                      : "Chưa lưu SSO"}
                   </span>
                 </span>
               )}

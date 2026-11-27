@@ -16,6 +16,8 @@ interface GpaSimulatorCardProps {
   totalDegreeCredits?: number;
   activeCourses?: AcademicCourseRecord[];
   activeSemesterId?: string;
+  semesters?: Array<{ id: string; label: string }>;
+  onSelectSemester?: (semesterId: string) => void;
   className?: string;
 }
 
@@ -33,6 +35,8 @@ export const GpaSimulatorCard: React.FC<GpaSimulatorCardProps> = ({
   totalDegreeCredits = 126,
   activeCourses = EMPTY_ACTIVE_COURSES,
   activeSemesterId,
+  semesters,
+  onSelectSemester,
   className = "",
 }) => {
   const [scope, setScope] = useState<SimulatorScope>("semester");
@@ -157,11 +161,27 @@ export const GpaSimulatorCard: React.FC<GpaSimulatorCardProps> = ({
             Hạng: {degreeRank.label}
           </div>
         ) : (
-          <div className="font-mono text-xs text-zinc-400">
-            cGPA hiện tại:{" "}
-            <span className="font-bold text-[#6B9BFF]">
-              {currentGpa10 > 0 ? currentGpa10.toFixed(2) : "0.00"}
-            </span>
+          <div className="flex flex-wrap items-center gap-3">
+            {semesters && semesters.length > 1 && onSelectSemester && (
+              <select
+                aria-label="Chọn học kỳ mô phỏng"
+                value={activeSemesterId ?? semesters[0].id}
+                onChange={(e) => onSelectSemester(e.target.value)}
+                className="cursor-pointer rounded-md border border-[#1D263B] bg-[#080B12] px-2.5 py-1 text-xs font-medium text-zinc-200 focus:border-[#2F6BFF] focus:outline-none"
+              >
+                {semesters.map((sem) => (
+                  <option key={sem.id} value={sem.id}>
+                    {sem.label}
+                  </option>
+                ))}
+              </select>
+            )}
+            <div className="font-mono text-xs text-zinc-400">
+              cGPA hiện tại:{" "}
+              <span className="font-bold text-[#6B9BFF]">
+                {currentGpa10 > 0 ? currentGpa10.toFixed(2) : "0.00"}
+              </span>
+            </div>
           </div>
         )}
       </div>
