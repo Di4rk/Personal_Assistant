@@ -1,9 +1,10 @@
 use axum::{
-    extract::State,
+    body::Bytes,
+    extract::{DefaultBodyLimit, Query, State},
     http::{header, HeaderMap, HeaderName, HeaderValue, Method, Request, StatusCode},
     middleware::{self, Next},
     response::{IntoResponse, Json, Response},
-    routing::post,
+    routing::{get, post},
     Router,
 };
 use serde::{Deserialize, Serialize};
@@ -523,6 +524,100 @@ async fn handle_sync_sso_credentials(
     }
 }
 
+#[derive(Deserialize)]
+struct SyllabusPdfQuery {
+    subject_code: String,
+    #[serde(default)]
+    subject_id: i64,
+}
+
+/// Handler: GET /api/v1/sync/syllabus-weights/known
+async fn handle_get_known_syllabus_weights(State(state): State<ServerState>) -> impl IntoResponse {
+    let res = state.db.read(|conn| {
+        crate::db::portal_extra::get_known_syllabus_subject_codes(conn)
+            .map_err(|e| crate::error::AppError::Sync(e.to_string()))
+    });
+
+    match res {
+        Ok(codes) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "status": "ok", "codes": codes })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "status": "error", "message": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+/// Handler: POST /api/v1/sync/syllabus-pdf?subject_code=...&subject_id=...
+async fn handle_sync_syllabus_pdf(
+    State(state): State<ServerState>,
+    Query(params): Query<SyllabusPdfQuery>,
+    body: Bytes,
+) -> impl IntoResponse {
+    let clean_code = params.subject_code.trim().to_uppercase();
+    if clean_code.is_empty() || body.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "status": "error", "message": "Missing subject_code or PDF body" })),
+        )
+            .into_response();
+    }
+
+    let Some(weights) = crate::services::syllabus_parser::parse_weights_from_syllabus_pdf(&body)
+    else {
+        return (
+            StatusCode::OK,
+            Json(serde_json::json!({ "status": "ok", "parsed": false })),
+        )
+            .into_response();
+    };
+
+    let weights_clone = weights.clone();
+    let code_clone = clean_code.clone();
+    let subject_id = params.subject_id;
+    let res = state
+        .db
+        .write(move |conn| {
+            crate::db::portal_extra::upsert_course_syllabus_weight(
+                conn,
+                &code_clone,
+                subject_id,
+                &weights_clone,
+            )
+            .map_err(|e| crate::error::AppError::Sync(e.to_string()))
+        })
+        .await;
+
+    match res {
+        Ok(_) => {
+            println!(
+                "[SyncSyllabus] Parsed weights for {}: QT={}% TH={}% GK={}% CK={}%",
+                clean_code, weights.qt, weights.th, weights.gk, weights.ck
+            );
+            let _ = state.app.emit("portal-extra-synced", ());
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "status": "ok",
+                    "parsed": true,
+                    "subject_code": clean_code,
+                    "weights": weights
+                })),
+            )
+                .into_response()
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "status": "error", "message": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
 /// Handler: POST /api/v1/sync/portal-extra
 async fn handle_sync_portal_extra(
     State(state): State<ServerState>,
@@ -626,7 +721,7 @@ fn build_strict_cors_layer() -> CorsLayer {
 
     CorsLayer::new()
         .allow_origin(allowed_origins)
-        .allow_methods([Method::POST, Method::OPTIONS])
+        .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
         .allow_headers([
             header::CONTENT_TYPE,
             HeaderName::from_static("x-diark-sync-token"),
@@ -650,6 +745,11 @@ fn build_router(state: ServerState) -> Router {
         .route("/api/v1/academic/drl", post(handle_academic_drl))
         .route("/api/v1/sync/portal", post(handle_sync_portal))
         .route("/api/v1/sync/portal-extra", post(handle_sync_portal_extra))
+        .route("/api/v1/sync/syllabus-weights/known", get(handle_get_known_syllabus_weights))
+        .route(
+            "/api/v1/sync/syllabus-pdf",
+            post(handle_sync_syllabus_pdf).layer(DefaultBodyLimit::max(8 * 1024 * 1024)),
+        )
         .route("/api/v1/sync/sso-credentials", post(handle_sync_sso_credentials))
         .route("/api/v1/sync/wecode", post(handle_sync_wecode))
         .route("/api/v1/sync/moodle", post(handle_sync_moodle))

@@ -379,6 +379,18 @@ pub struct MoodleGradeRecord {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CourseSyllabusWeightDto {
+    pub subject_code: String,
+    pub subject_id: i64,
+    pub qt_weight: i32,
+    pub th_weight: i32,
+    pub gk_weight: i32,
+    pub ck_weight: i32,
+    pub source: String,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MoodleNotificationRecord {
     pub id: i64,
     pub subject: String,
@@ -463,6 +475,17 @@ pub fn ensure_portal_extra_schema(conn: &Connection) -> SqlResult<()> {
             status TEXT NOT NULL DEFAULT '',
             output_standard INTEGER NOT NULL DEFAULT 0,
             create_date TEXT NOT NULL DEFAULT '',
+            updated_at INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS course_syllabus_weights (
+            subject_code TEXT PRIMARY KEY,
+            subject_id INTEGER NOT NULL DEFAULT 0,
+            qt_weight INTEGER NOT NULL DEFAULT 0,
+            th_weight INTEGER NOT NULL DEFAULT 0,
+            gk_weight INTEGER NOT NULL DEFAULT 0,
+            ck_weight INTEGER NOT NULL DEFAULT 0,
+            source TEXT NOT NULL DEFAULT 'syllabus_pdf',
             updated_at INTEGER NOT NULL
         );
 
@@ -804,6 +827,80 @@ pub fn commit_portal_extra_payload(
 
     tx.commit().map_err(|e| format!("Commit tx error: {e}"))?;
     Ok(stats)
+}
+
+pub fn upsert_course_syllabus_weight(
+    conn: &Connection,
+    subject_code: &str,
+    subject_id: i64,
+    weights: &crate::services::syllabus_parser::ParsedSyllabusWeights,
+) -> SqlResult<()> {
+    ensure_portal_extra_schema(conn)?;
+    let now_ts = chrono::Utc::now().timestamp();
+    let clean_code = subject_code.trim().to_uppercase();
+    conn.execute(
+        r#"
+        INSERT INTO course_syllabus_weights (
+            subject_code, subject_id, qt_weight, th_weight, gk_weight, ck_weight, source, updated_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'syllabus_pdf', ?7)
+        ON CONFLICT(subject_code) DO UPDATE SET
+            subject_id = excluded.subject_id,
+            qt_weight = excluded.qt_weight,
+            th_weight = excluded.th_weight,
+            gk_weight = excluded.gk_weight,
+            ck_weight = excluded.ck_weight,
+            source = excluded.source,
+            updated_at = excluded.updated_at
+        "#,
+        params![
+            clean_code,
+            subject_id,
+            weights.qt,
+            weights.th,
+            weights.gk,
+            weights.ck,
+            now_ts
+        ],
+    )?;
+    Ok(())
+}
+
+pub fn get_all_course_syllabus_weights(conn: &Connection) -> SqlResult<Vec<CourseSyllabusWeightDto>> {
+    ensure_portal_extra_schema(conn)?;
+    let mut stmt = conn.prepare(
+        "SELECT subject_code, subject_id, qt_weight, th_weight, gk_weight, ck_weight, source, updated_at
+         FROM course_syllabus_weights
+         ORDER BY subject_code ASC",
+    )?;
+    let rows = stmt.query_map([], |r| {
+        Ok(CourseSyllabusWeightDto {
+            subject_code: r.get(0)?,
+            subject_id: r.get(1)?,
+            qt_weight: r.get(2)?,
+            th_weight: r.get(3)?,
+            gk_weight: r.get(4)?,
+            ck_weight: r.get(5)?,
+            source: r.get(6)?,
+            updated_at: r.get(7)?,
+        })
+    })?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row?);
+    }
+    Ok(out)
+}
+
+pub fn get_known_syllabus_subject_codes(conn: &Connection) -> SqlResult<Vec<String>> {
+    ensure_portal_extra_schema(conn)?;
+    let mut stmt =
+        conn.prepare("SELECT subject_code FROM course_syllabus_weights ORDER BY subject_code ASC")?;
+    let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row?);
+    }
+    Ok(out)
 }
 
 pub fn get_registered_classes(conn: &Connection) -> SqlResult<Vec<PortalRegisteredClassRecord>> {

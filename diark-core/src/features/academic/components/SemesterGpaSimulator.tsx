@@ -1,6 +1,8 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useCallback } from "react";
 import { RotateCcw } from "lucide-react";
 import type { AcademicCourseRecord } from "../types";
+import { getCourseSyllabusWeights } from "../../../lib/tauri-client";
+import { useTauriEvent } from "../../../hooks/useTauriEvent";
 import {
   COMPONENT_KEYS,
   COMPONENT_LABELS,
@@ -30,6 +32,7 @@ interface SimulatedCourseState {
   portalScores: ComponentScores;
   scores: ComponentScores;
   weights: ComponentWeights;
+  weightSource: "manual" | "syllabus" | "default";
 }
 
 const WEIGHTS_STORAGE_KEY = "diark_course_weights_v1";
@@ -50,6 +53,16 @@ function saveCourseWeights(courseCode: string, weights: ComponentWeights): void 
   try {
     const current = loadSavedWeightsMap();
     current[courseCode] = weights;
+    window.localStorage.setItem(WEIGHTS_STORAGE_KEY, JSON.stringify(current));
+  } catch {
+    // ignore storage quota errors
+  }
+}
+
+function clearCourseWeightsOverride(courseCode: string): void {
+  try {
+    const current = loadSavedWeightsMap();
+    delete current[courseCode];
     window.localStorage.setItem(WEIGHTS_STORAGE_KEY, JSON.stringify(current));
   } catch {
     // ignore storage quota errors
@@ -90,8 +103,54 @@ export const SemesterGpaSimulator: React.FC<SemesterGpaSimulatorProps> = ({
   activeCourses,
   className = "",
 }) => {
+  const [syllabusWeightsMap, setSyllabusWeightsMap] = useState<Record<string, ComponentWeights>>({});
+
+  const loadOfficialSyllabusWeights = useCallback(async () => {
+    try {
+      const list = await getCourseSyllabusWeights();
+      const map: Record<string, ComponentWeights> = {};
+      for (const item of list) {
+        map[item.subject_code.trim().toUpperCase()] = {
+          qt: item.qt_weight,
+          th: item.th_weight,
+          gk: item.gk_weight,
+          ck: item.ck_weight,
+        };
+      }
+      setSyllabusWeightsMap(map);
+    } catch {
+      // ignore if outside Tauri runtime
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadOfficialSyllabusWeights();
+  }, [loadOfficialSyllabusWeights]);
+
+  useTauriEvent("portal-extra-synced", () => {
+    void loadOfficialSyllabusWeights();
+  });
+
   const initialItems: SimulatedCourseState[] = useMemo(() => {
     const savedWeights = loadSavedWeightsMap();
+
+    const resolveCourseWeights = (
+      courseCode: string,
+      credits: number,
+      hasPractice: boolean
+    ): { weights: ComponentWeights; weightSource: "manual" | "syllabus" | "default" } => {
+      const upper = courseCode.trim().toUpperCase();
+      if (savedWeights[courseCode]) {
+        return { weights: savedWeights[courseCode], weightSource: "manual" };
+      }
+      if (syllabusWeightsMap[upper]) {
+        return { weights: syllabusWeightsMap[upper], weightSource: "syllabus" };
+      }
+      return {
+        weights: getDefaultWeightsForCourse(courseCode, credits, hasPractice),
+        weightSource: "default",
+      };
+    };
 
     if (!activeCourses || activeCourses.length === 0) {
       const fallbacks = [
@@ -103,14 +162,17 @@ export const SemesterGpaSimulator: React.FC<SemesterGpaSimulatorProps> = ({
       ];
       return fallbacks.map((item) => {
         const emptyScores: ComponentScores = { qt: null, th: null, gk: null, ck: null };
-        const weights =
-          savedWeights[item.courseCode] ??
-          getDefaultWeightsForCourse(item.courseCode, item.credits, false);
+        const { weights, weightSource } = resolveCourseWeights(
+          item.courseCode,
+          item.credits,
+          false
+        );
         return {
           ...item,
           portalScores: emptyScores,
           scores: { ...emptyScores },
           weights,
+          weightSource,
         };
       });
     }
@@ -125,13 +187,11 @@ export const SemesterGpaSimulator: React.FC<SemesterGpaSimulatorProps> = ({
           gk: c.midtermScore ?? null,
           ck: c.finalPoint ?? c.finalScore ?? null,
         };
-        const weights =
-          savedWeights[c.courseCode] ??
-          getDefaultWeightsForCourse(
-            c.courseCode,
-            credits,
-            portalScores.th !== null && portalScores.th !== undefined
-          );
+        const { weights, weightSource } = resolveCourseWeights(
+          c.courseCode,
+          credits,
+          portalScores.th !== null && portalScores.th !== undefined
+        );
         const calc = calculateCourseTarget(portalScores, weights, 8.0);
         const expectedScore10 =
           c.summaryScore10 !== null && c.summaryScore10 !== undefined && c.summaryScore10 > 0
@@ -148,9 +208,10 @@ export const SemesterGpaSimulator: React.FC<SemesterGpaSimulatorProps> = ({
           portalScores,
           scores: { ...portalScores },
           weights,
+          weightSource,
         };
       });
-  }, [activeCourses]);
+  }, [activeCourses, syllabusWeightsMap]);
 
   const [simulatedCourses, setSimulatedCourses] = useState<SimulatedCourseState[]>(initialItems);
   const [expandedWeights, setExpandedWeights] = useState<Record<string, boolean>>({});
@@ -204,6 +265,26 @@ export const SemesterGpaSimulator: React.FC<SemesterGpaSimulatorProps> = ({
         return {
           ...item,
           weights: nextWeights,
+          weightSource: "manual",
+          expectedScore10:
+            calc.projectedTotalScore !== null ? calc.projectedTotalScore : item.expectedScore10,
+        };
+      })
+    );
+  };
+
+  const handleRestoreOfficialSyllabusWeights = (courseCode: string) => {
+    const official = syllabusWeightsMap[courseCode.trim().toUpperCase()];
+    if (!official) return;
+    clearCourseWeightsOverride(courseCode);
+    setSimulatedCourses((prev) =>
+      prev.map((item) => {
+        if (item.courseCode !== courseCode) return item;
+        const calc = calculateCourseTarget(item.scores, official, item.expectedScore10);
+        return {
+          ...item,
+          weights: { ...official },
+          weightSource: "syllabus",
           expectedScore10:
             calc.projectedTotalScore !== null ? calc.projectedTotalScore : item.expectedScore10,
         };
@@ -524,6 +605,11 @@ export const SemesterGpaSimulator: React.FC<SemesterGpaSimulatorProps> = ({
                       >
                         Trọng số ({formatWeightBadge(course.weights)})
                       </button>
+                      {course.weightSource === "syllabus" && (
+                        <span className="rounded border border-emerald-500/25 bg-emerald-950/40 px-1.5 py-0.2 text-[10px] text-emerald-400">
+                          Đề cương UIT
+                        </span>
+                      )}
                     </div>
                   </div>
 
@@ -599,6 +685,16 @@ export const SemesterGpaSimulator: React.FC<SemesterGpaSimulatorProps> = ({
                         >
                           Tổng: {targetCalc.totalWeight}%
                         </span>
+                        {course.weightSource === "manual" &&
+                          syllabusWeightsMap[course.courseCode.trim().toUpperCase()] && (
+                            <button
+                              type="button"
+                              onClick={() => handleRestoreOfficialSyllabusWeights(course.courseCode)}
+                              className="rounded border border-[#2F6BFF]/35 bg-[#2F6BFF]/[0.12] px-2 py-0.5 text-[#6B9BFF] hover:bg-[#2F6BFF]/[0.2] cursor-pointer"
+                            >
+                              Về đề cương UIT
+                            </button>
+                          )}
                         <button
                           type="button"
                           onClick={() => handleResetCoursePortalScores(course.courseCode)}

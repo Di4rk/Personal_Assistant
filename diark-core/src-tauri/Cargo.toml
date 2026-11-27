@@ -72,6 +72,7 @@ urlencoding = "2.1"
 # --- Remote Plugin verification and extraction ---
 sha2 = "0.10"
 zip = "2"
+flate2 = "1"
 
 # --- Chỉ dùng cho mock data seeder (dev-only, xem cfg(debug_assertions)) ---
 rand = "0.8"

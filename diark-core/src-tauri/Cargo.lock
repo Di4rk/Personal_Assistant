@@ -1242,6 +1242,7 @@ dependencies = [
  "chrono",
  "chrono-tz",
  "fastembed",
+ "flate2",
  "httparse",
  "notify",
  "open",

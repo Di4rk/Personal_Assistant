@@ -5,6 +5,7 @@ pub mod wecode_harvester;
 pub mod moodle_harvester;
 pub mod curriculum_harvester;
 pub mod uit_catalog_harvester;
+pub mod syllabus_parser;
 pub mod gcal_ics;
 pub mod gcal_oauth;
 pub mod gemini;

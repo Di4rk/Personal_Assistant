@@ -5,15 +5,15 @@ use uuid::Uuid;
 use crate::db::exam::get_all_exam_schedules;
 use crate::db::portal_extra::{
     delete_google_calendar, delete_oauth_calendars, delete_single_calendar_event,
-    get_calendar_events_range, get_certificates, get_class_activities,
-    get_google_calendar_by_id, get_moodle_grades as db_get_moodle_grades,
+    get_all_course_syllabus_weights, get_calendar_events_range, get_certificates,
+    get_class_activities, get_google_calendar_by_id, get_moodle_grades as db_get_moodle_grades,
     get_moodle_notifications as db_get_moodle_notifications, get_registered_classes,
     get_timetable_range, get_tuition_records, list_google_calendars as db_list_google_calendars,
     replace_calendar_events, set_google_calendar_enabled, upsert_google_calendar,
     upsert_oauth_google_calendar, upsert_single_calendar_event, CalendarEventRecord,
-    GoogleCalendarConfig, MoodleGradeRecord, MoodleNotificationRecord, PortalCertificateRecord,
-    PortalClassActivityRecord, PortalRegisteredClassRecord, PortalTimetableRecord,
-    PortalTuitionRecord,
+    CourseSyllabusWeightDto, GoogleCalendarConfig, MoodleGradeRecord, MoodleNotificationRecord,
+    PortalCertificateRecord, PortalClassActivityRecord, PortalRegisteredClassRecord,
+    PortalTimetableRecord, PortalTuitionRecord,
 };
 use crate::db::SharedDb;
 use crate::services::gcal_ics::{export_uit_schedule_to_ics, fetch_and_parse_ics};
@@ -27,6 +27,15 @@ pub fn get_portal_registered_classes(
 ) -> Result<Vec<PortalRegisteredClassRecord>, String> {
     let conn = db.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
     get_registered_classes(&conn).map_err(|e| format!("Lỗi đọc lớp học phần: {e}"))
+}
+
+#[tauri::command]
+pub fn get_course_syllabus_weights(
+    db: State<'_, SharedDb>,
+) -> Result<Vec<CourseSyllabusWeightDto>, String> {
+    let conn = db.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
+    get_all_course_syllabus_weights(&conn)
+        .map_err(|e| format!("Lỗi đọc trọng số đề cương môn học: {e}"))
 }
 
 #[tauri::command]

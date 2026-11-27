@@ -77,6 +77,7 @@ macro_rules! registered_commands {
             commands::academic::sync_uit_training_catalog,
             // Portal Extra & Google Calendar ICS
             commands::portal_extra::get_portal_registered_classes,
+            commands::portal_extra::get_course_syllabus_weights,
             commands::portal_extra::get_portal_timetable,
             commands::portal_extra::get_portal_tuition,
             commands::portal_extra::get_portal_certificates,

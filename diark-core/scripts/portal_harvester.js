@@ -318,6 +318,53 @@
                 headers: LOCAL_JSON_HEADERS,
                 body: JSON.stringify(extraPayload)
             }).catch(() => {});
+
+            // 4.6. Auto-harvest missing course syllabus PDFs for official grading weights (QT/TH/GK/CK)
+            if (Array.isArray(dangKyRes?.rows) && dangKyRes.rows.length > 0) {
+                try {
+                    const knownRes = await fetch("http://127.0.0.1:3030/api/v1/sync/syllabus-weights/known", {
+                        headers: { "X-Diark-Sync-Token": SYNC_TOKEN }
+                    }).then(r => r.ok ? r.json() : null).catch(() => null);
+                    const knownCodes = new Set(
+                        Array.isArray(knownRes?.codes) ? knownRes.codes.map(c => String(c).trim().toUpperCase()) : []
+                    );
+                    const seenSubjects = new Set();
+                    const syllabusTargets = [];
+                    for (const row of dangKyRes.rows) {
+                        const code = String(row?.subjectCode || "").trim().toUpperCase();
+                        const sid = Number(row?.subjectId) || 0;
+                        if (!row?.hasSyllabus || !code || sid <= 0 || knownCodes.has(code) || seenSubjects.has(code)) {
+                            continue;
+                        }
+                        seenSubjects.add(code);
+                        syllabusTargets.push({ code, sid });
+                        if (syllabusTargets.length >= 10) break;
+                    }
+                    if (syllabusTargets.length > 0) {
+                        await Promise.allSettled(
+                            syllabusTargets.map(async ({ code, sid }) => {
+                                const pdfRes = await fetch(`/api/sv/tkb/syllabus/${sid}`, { credentials: "include" });
+                                if (!pdfRes.ok) return;
+                                const buf = await pdfRes.arrayBuffer();
+                                if (!buf || buf.byteLength < 512) return;
+                                await fetch(
+                                    `http://127.0.0.1:3030/api/v1/sync/syllabus-pdf?subject_code=${encodeURIComponent(code)}&subject_id=${sid}`,
+                                    {
+                                        method: "POST",
+                                        headers: {
+                                            "Content-Type": "application/pdf",
+                                            "X-Diark-Sync-Token": SYNC_TOKEN
+                                        },
+                                        body: buf
+                                    }
+                                );
+                            })
+                        );
+                    }
+                } catch (sylErr) {
+                    console.warn("[Diark OS] Syllabus weight harvest partial error:", sylErr);
+                }
+            }
         } catch (extraErr) {
             console.warn("[Diark OS] Extended Portal harvest partial error:", extraErr);
         }

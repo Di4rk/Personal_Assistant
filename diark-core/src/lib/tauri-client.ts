@@ -1101,3 +1101,18 @@ export async function syncUitTrainingCatalog(
   });
 }
 
+export interface CourseSyllabusWeightDto {
+  subject_code: string;
+  subject_id: number;
+  qt_weight: number;
+  th_weight: number;
+  gk_weight: number;
+  ck_weight: number;
+  source: string;
+  updated_at: number;
+}
+
+export async function getCourseSyllabusWeights(): Promise<CourseSyllabusWeightDto[]> {
+  return invoke<CourseSyllabusWeightDto[]>("get_course_syllabus_weights");
+}
+
