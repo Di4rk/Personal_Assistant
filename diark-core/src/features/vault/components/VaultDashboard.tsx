@@ -40,6 +40,7 @@ import {
 import {
   buildVaultTree,
   getAncestorFolderPaths,
+  getDescendantFolderPaths,
   type VaultTreeNode,
 } from "../utils/vaultTree";
 import {
@@ -737,25 +738,39 @@ export const VaultDashboard: React.FC = () => {
     });
   }, [activeNoteId]);
 
-  const handleToggleFolder = useCallback((folderPath: string) => {
-    setSelectedFolderPath(folderPath);
-    setExpandedFolders((prev) => {
-      const next = new Set(prev);
-      if (next.has(folderPath)) {
-        next.delete(folderPath);
-      } else {
-        next.add(folderPath);
-      }
-      return next;
-    });
-  }, []);
+  const vaultTree = useMemo(() => buildVaultTree(notes), [notes]);
+
+  const noteTagsById = useMemo(
+    () => new Map<string, readonly string[]>(notes.map((n) => [n.id, n.tags])),
+    [notes]
+  );
+
+  const handleToggleFolder = useCallback(
+    (folderPath: string) => {
+      setSelectedFolderPath(folderPath);
+      const subtreePaths = getDescendantFolderPaths(vaultTree, folderPath);
+      const targetPaths = subtreePaths.length > 0 ? subtreePaths : [folderPath];
+      setExpandedFolders((prev) => {
+        const next = new Set(prev);
+        if (prev.has(folderPath)) {
+          for (const path of targetPaths) {
+            next.delete(path);
+          }
+        } else {
+          for (const path of targetPaths) {
+            next.add(path);
+          }
+        }
+        return next;
+      });
+    },
+    [vaultTree]
+  );
 
   const handleCollapseAllFolders = useCallback(() => {
     setExpandedFolders(new Set());
     setSelectedFolderPath(null);
   }, []);
-
-  const vaultTree = useMemo(() => buildVaultTree(notes), [notes]);
 
   return (
     <div className="mx-auto max-w-7xl space-y-3">
@@ -1396,6 +1411,7 @@ export const VaultDashboard: React.FC = () => {
               ref={graphViewRef}
               graph={vaultGraph}
               activeNoteId={activeNoteId}
+              noteTagsById={noteTagsById}
               mode="global"
               hideFloatingControls
               onSelectNode={(node) => {

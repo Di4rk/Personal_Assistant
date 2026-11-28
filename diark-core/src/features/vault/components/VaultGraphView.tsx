@@ -6,8 +6,14 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { RotateCcw, ZoomIn, ZoomOut } from "lucide-react";
+import { RotateCcw, Search, SlidersHorizontal, X, ZoomIn, ZoomOut } from "lucide-react";
 import type { VaultGraphDto, VaultGraphNodeDto } from "../types";
+import {
+  buildDisplayGraph,
+  FOLDER_NODE_FOLDER,
+  isVirtualGraphNode,
+  TAG_NODE_FOLDER,
+} from "../utils/vaultGraphTransform";
 
 export interface VaultGraphViewHandle {
   zoomIn: () => void;
@@ -20,9 +26,12 @@ interface VaultGraphViewProps {
   activeNoteId: string | null;
   mode: "local" | "global";
   onSelectNode: (node: VaultGraphNodeDto) => void;
+  noteTagsById?: ReadonlyMap<string, readonly string[]>;
   hideFloatingControls?: boolean;
   className?: string;
 }
+
+const EMPTY_TAGS_MAP: ReadonlyMap<string, readonly string[]> = new Map();
 
 interface SimNode {
   data: VaultGraphNodeDto;
@@ -45,6 +54,8 @@ const FOLDER_COLORS = [
 
 function colorForNode(node: VaultGraphNodeDto, isActive: boolean): string {
   if (isActive) return "#2F6BFF";
+  if (node.folder === TAG_NODE_FOLDER) return "#34D399";
+  if (node.folder === FOLDER_NODE_FOLDER) return "#818CF8";
   if (node.isUnresolved) return "#64748B";
   let hash = 0;
   for (let i = 0; i < node.folder.length; i += 1) {
@@ -55,13 +66,43 @@ function colorForNode(node: VaultGraphNodeDto, isActive: boolean): string {
 
 export const VaultGraphView = forwardRef<VaultGraphViewHandle, VaultGraphViewProps>(
   (
-    { graph, activeNoteId, mode, onSelectNode, hideFloatingControls = false, className = "" },
+    {
+      graph,
+      activeNoteId,
+      mode,
+      onSelectNode,
+      noteTagsById,
+      hideFloatingControls = false,
+      className = "",
+    },
     ref
   ) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
   const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
+  const [showOrphans, setShowOrphans] = useState<boolean>(true);
+  const [showTagNodes, setShowTagNodes] = useState<boolean>(false);
+  const [groupByFolder, setGroupByFolder] = useState<boolean>(false);
+  const [showLabels, setShowLabels] = useState<boolean>(true);
+  const [filterQuery, setFilterQuery] = useState<string>("");
+  const [repulsionScale, setRepulsionScale] = useState<number>(1);
+  const [springLenScale, setSpringLenScale] = useState<number>(1);
+  const [gravityScale, setGravityScale] = useState<number>(1);
+
+  const forcesRef = useRef({
+    repulsionScale: 1,
+    springLenScale: 1,
+    gravityScale: 1,
+    showLabels: true,
+  });
+  forcesRef.current = {
+    repulsionScale,
+    springLenScale,
+    gravityScale,
+    showLabels,
+  };
   const [size, setSize] = useState<{ width: number; height: number }>({
     width: mode === "local" ? 280 : 800,
     height: mode === "local" ? 260 : 540,
@@ -107,21 +148,41 @@ export const VaultGraphView = forwardRef<VaultGraphViewHandle, VaultGraphViewPro
   hoveredIdRef.current = hoveredId;
 
   const filtered = useMemo(() => {
+    const baseGraph =
+      mode === "global"
+        ? buildDisplayGraph(graph, noteTagsById ?? EMPTY_TAGS_MAP, {
+            showOrphans,
+            showTagNodes,
+            groupByFolder,
+            searchQuery: filterQuery,
+            keepNodeId: activeNoteId,
+          })
+        : graph;
+
     if (mode === "global" || !activeNoteId) {
-      return graph;
+      return baseGraph;
     }
 
     const neighborIds = new Set<string>([activeNoteId]);
-    for (const edge of graph.edges) {
+    for (const edge of baseGraph.edges) {
       if (edge.source === activeNoteId) neighborIds.add(edge.target);
       if (edge.target === activeNoteId) neighborIds.add(edge.source);
     }
 
-    const nodes = graph.nodes.filter((n) => neighborIds.has(n.id));
+    const nodes = baseGraph.nodes.filter((n) => neighborIds.has(n.id));
     const nodeIds = new Set(nodes.map((n) => n.id));
-    const edges = graph.edges.filter((e) => nodeIds.has(e.source) && nodeIds.has(e.target));
+    const edges = baseGraph.edges.filter((e) => nodeIds.has(e.source) && nodeIds.has(e.target));
     return { nodes, edges };
-  }, [activeNoteId, graph, mode]);
+  }, [
+    activeNoteId,
+    filterQuery,
+    graph,
+    groupByFolder,
+    mode,
+    noteTagsById,
+    showOrphans,
+    showTagNodes,
+  ]);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -251,20 +312,29 @@ export const VaultGraphView = forwardRef<VaultGraphViewHandle, VaultGraphViewPro
         const isDimmed = activeHovered !== null && !focusNeighbors.has(node.data.id);
 
         const baseRadius = Math.min(
-          11,
-          (isCurrent ? 6.5 : 4) + Math.sqrt(node.data.linkCount) * 1.15
+          20,
+          (isCurrent ? 6.5 : 4) + Math.sqrt(node.data.linkCount) * 2.0
         );
         const radius = isHovered ? baseRadius + 1.8 : baseRadius;
         const fill = colorForNode(node.data, isCurrent);
+        const isVirtual = isVirtualGraphNode(node.data);
 
         ctx.globalAlpha = isDimmed ? 0.28 : 1;
 
-        if (isCurrent || isHovered) {
+        if (isCurrent || isHovered || isVirtual) {
           ctx.beginPath();
-          ctx.arc(node.x, node.y, radius + 4.5, 0, Math.PI * 2);
+          ctx.arc(
+            node.x,
+            node.y,
+            radius + (isCurrent || isHovered ? 4.5 : 3),
+            0,
+            Math.PI * 2
+          );
           ctx.fillStyle = isCurrent
             ? "rgba(47, 107, 255, 0.22)"
-            : "rgba(107, 155, 255, 0.16)";
+            : isHovered
+            ? "rgba(107, 155, 255, 0.16)"
+            : "rgba(129, 140, 248, 0.14)";
           ctx.fill();
         }
 
@@ -284,11 +354,10 @@ export const VaultGraphView = forwardRef<VaultGraphViewHandle, VaultGraphViewPro
         }
 
         const showLabel =
-          mode === "local" ||
-          sim.zoom >= 0.85 ||
           isCurrent ||
           isHovered ||
-          node.data.linkCount >= 2;
+          (forcesRef.current.showLabels &&
+            (mode === "local" || sim.zoom >= 0.85 || node.data.linkCount >= 2));
         if (showLabel) {
           const fontSize = Math.max(9.5, Math.min(12.5, 11 / Math.sqrt(sim.zoom)));
           ctx.font = `${isCurrent || isHovered ? "600" : "500"} ${fontSize}px ui-sans-serif, system-ui, sans-serif`;
@@ -319,10 +388,15 @@ export const VaultGraphView = forwardRef<VaultGraphViewHandle, VaultGraphViewPro
         return;
       }
 
-      const repulsion = mode === "local" ? 2600 : 6800;
-      const springLen = mode === "local" ? 95 : 135;
+      const {
+        repulsionScale: rScale,
+        springLenScale: sScale,
+        gravityScale: gScale,
+      } = forcesRef.current;
+      const repulsion = (mode === "local" ? 2600 : 6800) * rScale;
+      const springLen = (mode === "local" ? 95 : 135) * sScale;
       const springK = 0.04;
-      const gravity = mode === "local" ? 0.012 : 0.0085;
+      const gravity = (mode === "local" ? 0.012 : 0.0085) * gScale;
       const damping = 0.86;
       const minSpacing = mode === "local" ? 76 : 108;
       const maxSpeedCap = 14;
@@ -420,7 +494,11 @@ export const VaultGraphView = forwardRef<VaultGraphViewHandle, VaultGraphViewPro
 
   useEffect(() => {
     drawRef.current();
-  }, [hoveredId]);
+  }, [hoveredId, showLabels]);
+
+  useEffect(() => {
+    reheatRef.current();
+  }, [repulsionScale, springLenScale, gravityScale]);
 
   const toWorld = (clientX: number, clientY: number) => {
     const canvas = canvasRef.current;
@@ -520,7 +598,9 @@ export const VaultGraphView = forwardRef<VaultGraphViewHandle, VaultGraphViewPro
     if (drag.kind === "node" && drag.node) {
       drag.node.pinned = false;
       if (!drag.moved) {
-        onSelectNode(drag.node.data);
+        if (!isVirtualGraphNode(drag.node.data)) {
+          onSelectNode(drag.node.data);
+        }
       } else {
         reheatRef.current();
       }
@@ -573,6 +653,155 @@ export const VaultGraphView = forwardRef<VaultGraphViewHandle, VaultGraphViewPro
           hoveredId ? "cursor-pointer" : "cursor-grab active:cursor-grabbing"
         }`}
       />
+
+      {mode === "global" && (
+        <div className="pointer-events-auto absolute right-3 top-3 z-10 flex flex-col items-end gap-2">
+          <button
+            type="button"
+            onClick={() => setIsSettingsOpen((prev) => !prev)}
+            title="Tùy chỉnh đồ thị"
+            aria-label="Tùy chỉnh đồ thị"
+            className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors cursor-pointer ${
+              isSettingsOpen
+                ? "border-[#2F6BFF]/60 bg-[#151C2C] text-[#6B9BFF]"
+                : "border-[#1D263B] bg-[#0F1420] text-zinc-300 hover:bg-[#151C2C]"
+            }`}
+          >
+            <SlidersHorizontal className="h-3.5 w-3.5" />
+            <span>Bộ lọc &amp; Lực</span>
+          </button>
+
+          {isSettingsOpen && (
+            <div className="w-64 rounded-xl border border-[#1D263B] bg-[#0F1420] p-3 text-xs text-zinc-300 shadow-xl space-y-3">
+              <div className="flex items-center justify-between border-b border-[#1D263B] pb-2">
+                <span className="font-semibold text-zinc-100">Tùy chỉnh đồ thị</span>
+                <button
+                  type="button"
+                  onClick={() => setIsSettingsOpen(false)}
+                  className="rounded p-0.5 text-zinc-400 hover:bg-[#151C2C] hover:text-zinc-100 cursor-pointer"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-zinc-500" />
+                <input
+                  type="text"
+                  value={filterQuery}
+                  onChange={(e) => setFilterQuery(e.target.value)}
+                  placeholder="Lọc theo tên hoặc thư mục..."
+                  className="w-full rounded-md border border-[#1D263B] bg-[#080B12] pl-7 pr-2 py-1 text-[11px] text-zinc-200 placeholder-zinc-500 focus:border-[#2F6BFF] focus:outline-none"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="flex items-center justify-between cursor-pointer">
+                  <span>Hiện ghi chú lẻ</span>
+                  <input
+                    type="checkbox"
+                    checked={showOrphans}
+                    onChange={(e) => setShowOrphans(e.target.checked)}
+                    className="accent-[#2F6BFF] cursor-pointer"
+                  />
+                </label>
+                <label className="flex items-center justify-between cursor-pointer">
+                  <span>Gom cụm theo #tag</span>
+                  <input
+                    type="checkbox"
+                    checked={showTagNodes}
+                    onChange={(e) => setShowTagNodes(e.target.checked)}
+                    className="accent-[#2F6BFF] cursor-pointer"
+                  />
+                </label>
+                <label className="flex items-center justify-between cursor-pointer">
+                  <span>Gom cụm theo thư mục</span>
+                  <input
+                    type="checkbox"
+                    checked={groupByFolder}
+                    onChange={(e) => setGroupByFolder(e.target.checked)}
+                    className="accent-[#2F6BFF] cursor-pointer"
+                  />
+                </label>
+                <label className="flex items-center justify-between cursor-pointer">
+                  <span>Hiện tên ghi chú</span>
+                  <input
+                    type="checkbox"
+                    checked={showLabels}
+                    onChange={(e) => setShowLabels(e.target.checked)}
+                    className="accent-[#2F6BFF] cursor-pointer"
+                  />
+                </label>
+              </div>
+
+              <div className="space-y-2 border-t border-[#1D263B] pt-2">
+                <label className="block space-y-1">
+                  <div className="flex justify-between text-[11px] text-zinc-400">
+                    <span>Lực đẩy</span>
+                    <span className="font-mono">{repulsionScale.toFixed(1)}x</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0.4"
+                    max="2.0"
+                    step="0.1"
+                    value={repulsionScale}
+                    onChange={(e) => setRepulsionScale(Number(e.target.value))}
+                    className="w-full accent-[#2F6BFF] cursor-pointer"
+                  />
+                </label>
+                <label className="block space-y-1">
+                  <div className="flex justify-between text-[11px] text-zinc-400">
+                    <span>Khoảng cách dây</span>
+                    <span className="font-mono">{springLenScale.toFixed(1)}x</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0.5"
+                    max="2.0"
+                    step="0.1"
+                    value={springLenScale}
+                    onChange={(e) => setSpringLenScale(Number(e.target.value))}
+                    className="w-full accent-[#2F6BFF] cursor-pointer"
+                  />
+                </label>
+                <label className="block space-y-1">
+                  <div className="flex justify-between text-[11px] text-zinc-400">
+                    <span>Lực hút tâm</span>
+                    <span className="font-mono">{gravityScale.toFixed(1)}x</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0.3"
+                    max="2.0"
+                    step="0.1"
+                    value={gravityScale}
+                    onChange={(e) => setGravityScale(Number(e.target.value))}
+                    className="w-full accent-[#2F6BFF] cursor-pointer"
+                  />
+                </label>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setFilterQuery("");
+                  setShowOrphans(true);
+                  setShowTagNodes(false);
+                  setGroupByFolder(false);
+                  setShowLabels(true);
+                  setRepulsionScale(1);
+                  setSpringLenScale(1);
+                  setGravityScale(1);
+                }}
+                className="w-full rounded-md border border-[#1D263B] bg-[#080B12] py-1 text-[11px] text-zinc-300 hover:bg-[#151C2C] transition-colors cursor-pointer"
+              >
+                Mặc định
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {!hideFloatingControls && (
         <div className="pointer-events-auto absolute right-2 top-2 flex items-center gap-1 rounded-md border border-[#1D263B] bg-[#0F1420]/90 p-0.5">

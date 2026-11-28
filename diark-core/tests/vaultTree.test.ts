@@ -1,7 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import type { VaultNoteSummaryDto } from "../src/features/vault/types.ts";
-import { buildVaultTree, getAncestorFolderPaths } from "../src/features/vault/utils/vaultTree.ts";
+import {
+  buildVaultTree,
+  getAncestorFolderPaths,
+  getDescendantFolderPaths,
+} from "../src/features/vault/utils/vaultTree.ts";
 
 function makeNote(id: string, title?: string): VaultNoteSummaryDto {
   const parts = id.split("/");
@@ -92,5 +96,38 @@ describe("getAncestorFolderPaths", () => {
     assert.deepEqual(getAncestorFolderPaths("README.md"), []);
     assert.deepEqual(getAncestorFolderPaths(null), []);
     assert.deepEqual(getAncestorFolderPaths(""), []);
+  });
+});
+
+describe("getDescendantFolderPaths", () => {
+  it("returns parent folder plus all nested descendant subfolder paths", () => {
+    const tree = buildVaultTree([
+      makeNote("01_DaiHoc_UIT/2025-2026_HK2/IT005/00_IT005_Index.md"),
+      makeNote("01_DaiHoc_UIT/2025-2026_HK2/IT007/00_IT007_Index.md"),
+      makeNote("Other/note.md"),
+    ]);
+
+    assert.deepEqual(getDescendantFolderPaths(tree, "01_DaiHoc_UIT"), [
+      "01_DaiHoc_UIT",
+      "01_DaiHoc_UIT/2025-2026_HK2",
+      "01_DaiHoc_UIT/2025-2026_HK2/IT005",
+      "01_DaiHoc_UIT/2025-2026_HK2/IT007",
+    ]);
+  });
+
+  it("returns only the leaf folder path when no subfolders exist inside", () => {
+    const tree = buildVaultTree([
+      makeNote("01_DaiHoc_UIT/2025-2026_HK2/IT005/00_IT005_Index.md"),
+    ]);
+
+    assert.deepEqual(
+      getDescendantFolderPaths(tree, "01_DaiHoc_UIT/2025-2026_HK2/IT005"),
+      ["01_DaiHoc_UIT/2025-2026_HK2/IT005"],
+    );
+  });
+
+  it("returns empty array when target folder path is not found", () => {
+    const tree = buildVaultTree([makeNote("01_DaiHoc_UIT/note.md")]);
+    assert.deepEqual(getDescendantFolderPaths(tree, "Missing/Folder"), []);
   });
 });

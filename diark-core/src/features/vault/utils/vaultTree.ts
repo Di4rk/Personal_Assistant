@@ -120,3 +120,41 @@ export function getAncestorFolderPaths(noteId: string | null | undefined): strin
   }
   return ancestors;
 }
+
+function collectFolderSubtreePaths(folder: VaultTreeFolderNode, out: string[]): void {
+  out.push(folder.path);
+  for (const child of folder.children) {
+    if (child.kind === "folder") {
+      collectFolderSubtreePaths(child, out);
+    }
+  }
+}
+
+function findFolderNode(
+  nodes: readonly VaultTreeNode[],
+  targetPath: string,
+): VaultTreeFolderNode | null {
+  for (const node of nodes) {
+    if (node.kind !== "folder") continue;
+    if (node.path === targetPath) return node;
+    if (targetPath.startsWith(`${node.path}/`)) {
+      const nested = findFolderNode(node.children, targetPath);
+      if (nested) return nested;
+    }
+  }
+  return null;
+}
+
+/**
+ * Return targetPath followed by all descendant subfolder paths in its subtree.
+ */
+export function getDescendantFolderPaths(
+  nodes: readonly VaultTreeNode[],
+  targetPath: string,
+): string[] {
+  const folder = findFolderNode(nodes, targetPath);
+  if (!folder) return [];
+  const paths: string[] = [];
+  collectFolderSubtreePaths(folder, paths);
+  return paths;
+}
