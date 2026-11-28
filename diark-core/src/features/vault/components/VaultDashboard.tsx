@@ -29,6 +29,7 @@ import { matchesShortcut } from "../utils/vaultShortcuts";
 import {
   VAULT_TEMPLATES,
   formatTodayShort,
+  type VaultTemplateCategory,
   type VaultTemplateSpec,
 } from "../utils/vaultTemplates";
 import {
@@ -112,6 +113,7 @@ export const VaultDashboard: React.FC = () => {
   const [showGraphInspector, setShowGraphInspector] = useState<boolean>(true);
   const [isGlobalGraphOpen, setIsGlobalGraphOpen] = useState<boolean>(false);
   const [isTemplateModalOpen, setIsTemplateModalOpen] = useState<boolean>(false);
+  const [templateCategory, setTemplateCategory] = useState<"all" | VaultTemplateCategory>("all");
   const [vaultGraph, setVaultGraph] = useState<VaultGraphDto>({ nodes: [], edges: [] });
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
@@ -1096,7 +1098,7 @@ export const VaultDashboard: React.FC = () => {
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-2xl overflow-hidden rounded-xl border border-[#2B3957] bg-[#0F1420] shadow-2xl"
+            className="flex max-h-[86vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-[#2B3957] bg-[#0F1420] shadow-2xl"
           >
             <div className="flex items-center justify-between border-b border-[#1D263B] px-5 py-3.5">
               <div>
@@ -1104,7 +1106,7 @@ export const VaultDashboard: React.FC = () => {
                   Tạo ghi chú từ mẫu học tập UIT
                 </h3>
                 <p className="text-[11px] text-zinc-400">
-                  Chọn cấu trúc sẵn để ghi nhanh bài giảng, code, việc nhóm, ôn thi hoặc báo cáo Lab.
+                  Chọn cấu trúc sẵn cho việc học trên lớp, làm lab, đồ án hoặc báo cáo chuẩn UIT.
                 </p>
               </div>
               <button
@@ -1116,8 +1118,39 @@ export const VaultDashboard: React.FC = () => {
               </button>
             </div>
 
-            <div className="grid grid-cols-1 gap-2.5 p-4 sm:grid-cols-2">
-              {VAULT_TEMPLATES.map((tpl) => (
+            <div className="flex items-center gap-1.5 border-b border-[#1D263B] bg-[#080B12]/70 px-5 py-2">
+              {(
+                [
+                  { id: "all", label: `Tất cả (${VAULT_TEMPLATES.length})` },
+                  {
+                    id: "study",
+                    label: `Học tập (${VAULT_TEMPLATES.filter((t) => t.category === "study").length})`,
+                  },
+                  {
+                    id: "report",
+                    label: `Báo cáo UIT (${VAULT_TEMPLATES.filter((t) => t.category === "report").length})`,
+                  },
+                ] as const
+              ).map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setTemplateCategory(tab.id)}
+                  className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer ${
+                    templateCategory === tab.id
+                      ? "bg-[#2F6BFF]/20 text-[#6B9BFF]"
+                      : "text-zinc-400 hover:bg-[#151C2C] hover:text-zinc-200"
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-1 gap-2.5 overflow-y-auto p-4 sm:grid-cols-2">
+              {VAULT_TEMPLATES.filter(
+                (tpl) => templateCategory === "all" || tpl.category === templateCategory
+              ).map((tpl) => (
                 <button
                   key={tpl.id}
                   type="button"
@@ -1147,6 +1180,18 @@ export const VaultDashboard: React.FC = () => {
                   )}
                 </button>
               ))}
+            </div>
+
+            <div className="flex items-center justify-between border-t border-[#1D263B] bg-[#080B12] px-5 py-2.5 text-[11px] text-zinc-400">
+              <span>Cần file Word (.docx) hoặc LaTeX gốc chuẩn UIT?</span>
+              <button
+                type="button"
+                onClick={() => void openExternalUrl("https://svuit.org/mmtt/docs/Templates/")}
+                className="inline-flex items-center gap-1 font-medium text-[#6B9BFF] hover:underline cursor-pointer"
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+                <span>Mở kho mẫu SVUIT</span>
+              </button>
             </div>
           </div>
         </div>

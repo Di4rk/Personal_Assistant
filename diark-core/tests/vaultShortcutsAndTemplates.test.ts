@@ -81,15 +81,28 @@ describe("vaultShortcuts", () => {
 });
 
 describe("vaultTemplates", () => {
-  it("provides all UIT templates with valid default folders and markdown bodies", () => {
+  it("provides all UIT study and report templates with valid default folders and markdown bodies", () => {
     const today = formatTodayShort(new Date("2026-11-28T08:00:00Z"));
     assert.equal(today, "28/11");
-    assert.equal(VAULT_TEMPLATES.length, 6);
+    assert.equal(VAULT_TEMPLATES.length, 9);
 
     const ids = new Set(VAULT_TEMPLATES.map((t) => t.id));
-    for (const expected of ["blank", "lecture", "code", "teamwork", "exam", "lab"]) {
+    for (const expected of [
+      "blank",
+      "lecture",
+      "code",
+      "teamwork",
+      "exam",
+      "lab",
+      "course-project",
+      "thesis",
+      "internship",
+    ]) {
       assert.equal(ids.has(expected), true);
     }
+
+    assert.ok(VAULT_TEMPLATES.some((t) => t.category === "study"));
+    assert.ok(VAULT_TEMPLATES.some((t) => t.category === "report"));
 
     for (const tpl of VAULT_TEMPLATES) {
       if (tpl.id === "blank") continue;

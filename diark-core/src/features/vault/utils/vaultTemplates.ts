@@ -1,7 +1,19 @@
-export type VaultTemplateId = "blank" | "lecture" | "code" | "teamwork" | "exam" | "lab";
+export type VaultTemplateId =
+  | "blank"
+  | "lecture"
+  | "code"
+  | "teamwork"
+  | "exam"
+  | "lab"
+  | "course-project"
+  | "thesis"
+  | "internship";
+
+export type VaultTemplateCategory = "study" | "report";
 
 export interface VaultTemplateSpec {
   id: VaultTemplateId;
+  category: VaultTemplateCategory;
   name: string;
   shortLabel: string;
   description: string;
@@ -21,6 +33,7 @@ export function formatTodayShort(date: Date = new Date()): string {
 export const VAULT_TEMPLATES: VaultTemplateSpec[] = [
   {
     id: "lecture",
+    category: "study",
     name: "Bài giảng (Lecture)",
     shortLabel: "Bài giảng",
     description: "Tóm tắt ý chính, công thức LaTeX, ví dụ và câu hỏi cần xem lại.",
@@ -55,6 +68,7 @@ export const VAULT_TEMPLATES: VaultTemplateSpec[] = [
   },
   {
     id: "code",
+    category: "study",
     name: "Code & Thuật toán",
     shortLabel: "Code / DSA",
     description: "Phân tích hướng giải, độ phức tạp Time/Space, code mẫu và test biên.",
@@ -96,6 +110,7 @@ export const VAULT_TEMPLATES: VaultTemplateSpec[] = [
   },
   {
     id: "teamwork",
+    category: "study",
     name: "Việc nhóm & Đồ án",
     shortLabel: "Việc nhóm",
     description: "Biên bản họp, bảng phân công thành viên, deadline và các đầu việc.",
@@ -131,6 +146,7 @@ export const VAULT_TEMPLATES: VaultTemplateSpec[] = [
   },
   {
     id: "exam",
+    category: "study",
     name: "Ôn thi Giữa kỳ / Cuối kỳ",
     shortLabel: "Ôn thi",
     description: "Đề cương từng chương, bảng công thức nhanh và danh sách dạng bài.",
@@ -162,6 +178,7 @@ export const VAULT_TEMPLATES: VaultTemplateSpec[] = [
   },
   {
     id: "lab",
+    category: "study",
     name: "Báo cáo Thực hành / Lab",
     shortLabel: "Thực hành / Lab",
     description: "Mục tiêu bài thực hành, môi trường, các bước thực hiện và kết quả.",
@@ -195,7 +212,157 @@ export const VAULT_TEMPLATES: VaultTemplateSpec[] = [
       ].join("\n"),
   },
   {
+    id: "course-project",
+    category: "report",
+    name: "Đồ án môn học (UIT)",
+    shortLabel: "Đồ án môn học",
+    description: "Dàn ý chuẩn 5 chương (SVUIT), bảng phân công và quy chuẩn trình bày báo cáo.",
+    defaultFolder: "academic",
+    defaultTags: ["uit", "do-an-mon-hoc"],
+    noteType: "ACADEMIC_SUMMARY",
+    buildTitle: (dateLabel) => `Báo cáo Đồ án môn học ${dateLabel}`,
+    buildContent: () =>
+      [
+        "# BÁO CÁO ĐỒ ÁN MÔN HỌC",
+        "",
+        "> [!note] Quy chuẩn định dạng Word UIT (tham khảo SVUIT)",
+        "> Font Times New Roman cỡ 13, Heading 1 cho tên chương (cỡ 16, căn giữa), Heading 2 cỡ 15, Heading 3 cỡ 14; căn giữa hình/bảng có chú thích, căn đều đoạn văn và cập nhật bảng mục lục trước khi xuất nộp.",
+        "",
+        "| Thông tin | Nội dung |",
+        "| --- | --- |",
+        "| Môn học | Mã môn - Tên môn học |",
+        "| Giảng viên hướng dẫn | Thầy/Cô ... |",
+        "| Nhóm thực hiện | Họ tên - MSSV |",
+        "",
+        "## Chương 1. Tổng quan đề tài",
+        "",
+        "- Đặt vấn đề và lý do chọn đề tài",
+        "- Mục tiêu và phạm vi thực hiện",
+        "",
+        "## Chương 2. Cơ sở lý thuyết",
+        "",
+        "- Kiến thức nền tảng và công nghệ sử dụng",
+        "",
+        "## Chương 3. Phân tích & Thiết kế hệ thống",
+        "",
+        "- Kiến trúc tổng thể, lược đồ dữ liệu / thuật toán",
+        "",
+        "## Chương 4. Cài đặt & Kết quả thực nghiệm",
+        "",
+        "- Ảnh chụp màn hình demo, kịch bản kiểm thử và đánh giá kết quả",
+        "",
+        "## Chương 5. Kết luận & Hướng phát triển",
+        "",
+        "- Các hạng mục đã hoàn thành và hạn chế cần khắc phục",
+        "",
+        "## Tài liệu tham khảo",
+        "",
+        "1. [Tên tài liệu / Bài báo / Tài nguyên]",
+        "",
+      ].join("\n"),
+  },
+  {
+    id: "thesis",
+    category: "report",
+    name: "Đồ án chuyên ngành / KLTN",
+    shortLabel: "ĐACN / KLTN",
+    description: "Cấu trúc chuẩn HCMUIT (Lời cảm ơn, Từ viết tắt, Tóm tắt, Chương 1-5, Tài liệu).",
+    defaultFolder: "academic",
+    defaultTags: ["uit", "dacn", "kltn"],
+    noteType: "ACADEMIC_SUMMARY",
+    buildTitle: (dateLabel) => `Đề cương ĐACN / KLTN ${dateLabel}`,
+    buildContent: () =>
+      [
+        "# ĐỒ ÁN CHUYÊN NGÀNH / KHÓA LUẬN TỐT NGHIỆP",
+        "",
+        "> [!tip] Tham khảo cấu trúc LaTeX (HCMUIT / SVUIT)",
+        "> Bố cục bám sát cấu trúc `chapters/front` (lời cảm ơn, từ viết tắt), `chapters/main` (intro, chapter-1..n, summary, conclusion) và `ref.bib`.",
+        "",
+        "## Lời cảm ơn & Tóm tắt (Abstract)",
+        "",
+        "Tóm tắt ngắn gọn bài toán, phương pháp đề xuất và đóng góp chính trong 150-250 từ.",
+        "",
+        "## Danh mục từ viết tắt",
+        "",
+        "| Từ viết tắt | Diễn giải đầy đủ |",
+        "| --- | --- |",
+        "| UIT | Trường Đại học Công nghệ Thông tin - ĐHQG TP.HCM |",
+        "",
+        "## Chương 1. Giới thiệu (Introduction)",
+        "",
+        "- Bối cảnh, câu hỏi nghiên cứu và đóng góp của đề tài",
+        "",
+        "## Chương 2. Cơ sở lý thuyết & Nghiên cứu liên quan",
+        "",
+        "- Khảo sát các hướng tiếp cận hiện có và mô hình toán nền tảng:",
+        "",
+        "$$",
+        "\\mathcal{L}(\\theta) = \\frac{1}{N} \\sum_{i=1}^{N} \\ell(f_\\theta(x_i), y_i)",
+        "$$",
+        "",
+        "## Chương 3. Phương pháp đề xuất",
+        "",
+        "- Kiến trúc chi tiết, quy trình huấn luyện / thuật toán",
+        "",
+        "## Chương 4. Thực nghiệm & Đánh giá",
+        "",
+        "| Mô hình / Cấu hình | Độ đo chính | Ghi chú |",
+        "| --- | --- | --- |",
+        "| Baseline | - | Tham chiếu |",
+        "| Đề xuất | - | Kết quả tốt nhất |",
+        "",
+        "## Chương 5. Kết luận",
+        "",
+        "- Tổng kết kết quả và hướng nghiên cứu mở rộng",
+        "",
+      ].join("\n"),
+  },
+  {
+    id: "internship",
+    category: "report",
+    name: "Thực tập doanh nghiệp",
+    shortLabel: "Thực tập DN",
+    description: "Khung báo cáo thực tập UIT: đơn vị thực tập, nhật ký theo tuần và sản phẩm.",
+    defaultFolder: "academic",
+    defaultTags: ["uit", "thuc-tap"],
+    noteType: "ACADEMIC_SUMMARY",
+    buildTitle: (dateLabel) => `Báo cáo Thực tập DN ${dateLabel}`,
+    buildContent: () =>
+      [
+        "# BÁO CÁO THỰC TẬP DOANH NGHIỆP",
+        "",
+        "| Mục | Chi tiết |",
+        "| --- | --- |",
+        "| Đơn vị thực tập | Tên công ty / phòng ban |",
+        "| Vị trí thực tập | Backend / Frontend / AI / Security / Network |",
+        "| Người hướng dẫn (Mentor) | Họ tên - Chức vụ |",
+        "| Thời gian thực tập | Từ ngày ... đến ngày ... |",
+        "",
+        "## Chương 1. Giới thiệu đơn vị thực tập",
+        "",
+        "- Lĩnh vực hoạt động, quy trình làm việc (Agile/Scrum, Git flow, CI/CD) và công nghệ sử dụng",
+        "",
+        "## Chương 2. Nhật ký công việc theo tuần",
+        "",
+        "| Tuần | Đầu việc chính | Kết quả đạt được |",
+        "| --- | --- | --- |",
+        "| Tuần 1-2 | Onboarding, tìm hiểu codebase & quy trình | Dựng xong môi trường dev |",
+        "| Tuần 3-4 | Tham gia module / ticket thực tế | Hoàn thành PR được merge |",
+        "",
+        "## Chương 3. Nội dung dự án & Sản phẩm tham gia",
+        "",
+        "- Mô tả chức năng tự thiết kế, triển khai và các lỗi kỹ thuật đã xử lý",
+        "",
+        "## Chương 4. Tự đánh giá & Bài học kinh nghiệm",
+        "",
+        "- [ ] Hoàn thiện sổ nhật ký và phiếu nhận xét của doanh nghiệp",
+        "- [ ] Nộp báo cáo đúng hạn cho khoa/trường",
+        "",
+      ].join("\n"),
+  },
+  {
     id: "blank",
+    category: "study",
     name: "Ghi chú trống",
     shortLabel: "Trang trống",
     description: "Trang trắng gọn gàng để viết tự do.",
