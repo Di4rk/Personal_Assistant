@@ -46,7 +46,7 @@ const NAV_COMMANDS: Array<{ id: string; title: string; subtitle: string; tab: st
 export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
   onNavigateTab,
 }) => {
-  const { isOpen, setIsOpen, inputRef, hideHud } = useCommandPalette();
+  const { isOpen, setIsOpen, inputRef } = useCommandPalette();
   const [query, setQuery] = useState<string>("");
   const [selectedIndex, setSelectedIndex] = useState<number>(0);
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -214,9 +214,10 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
       } catch (err) {
         console.error("Failed to open OneNote link:", err);
       }
+    } else {
+      onNavigateTab?.("vault");
     }
     setIsOpen(false);
-    void hideHud();
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -244,10 +245,7 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
   return (
     <div
       className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 p-4"
-      onClick={() => {
-        setIsOpen(false);
-        void hideHud();
-      }}
+      onClick={() => setIsOpen(false)}
     >
       <div
         className="fixed left-1/2 top-[14%] z-50 flex max-h-[70vh] w-full max-w-2xl -translate-x-1/2 flex-col overflow-hidden rounded-lg border border-zinc-800 bg-zinc-900 shadow-2xl"
