@@ -25,6 +25,8 @@ import {
   ZoomIn,
   ZoomOut,
   RotateCcw,
+  Folder,
+  ChevronsDownUp,
 } from "lucide-react";
 import { useSettingsStore } from "@/stores/useSettingsStore";
 import { useVaultShortcutsStore } from "@/stores/useVaultShortcutsStore";
@@ -35,6 +37,11 @@ import {
   type VaultTemplateCategory,
   type VaultTemplateSpec,
 } from "../utils/vaultTemplates";
+import {
+  buildVaultTree,
+  getAncestorFolderPaths,
+  type VaultTreeNode,
+} from "../utils/vaultTree";
 import {
   ensureDefaultVaultPath,
   listVaultNotes,
@@ -93,10 +100,157 @@ function shortenFolderPath(folder: string): string {
   return parts.slice(-2).join(" / ");
 }
 
+const DEPTH_PL = ["pl-2", "pl-4", "pl-6", "pl-8", "pl-10", "pl-12"] as const;
+
+interface VaultTreeBranchProps {
+  nodes: VaultTreeNode[];
+  depth: number;
+  expandedFolders: Set<string>;
+  selectedFolderPath: string | null;
+  activeNoteId: string | null;
+  confirmDeleteId: string | null;
+  onToggleFolder: (folderPath: string) => void;
+  onOpenNote: (noteId: string) => void;
+  onRequestDelete: (noteId: string) => void;
+  onConfirmDelete: (noteId: string) => void;
+  onCancelDelete: () => void;
+}
+
+const VaultTreeBranch: React.FC<VaultTreeBranchProps> = ({
+  nodes,
+  depth,
+  expandedFolders,
+  selectedFolderPath,
+  activeNoteId,
+  confirmDeleteId,
+  onToggleFolder,
+  onOpenNote,
+  onRequestDelete,
+  onConfirmDelete,
+  onCancelDelete,
+}) => {
+  const indentClass = DEPTH_PL[Math.min(depth, DEPTH_PL.length - 1)];
+
+  return (
+    <>
+      {nodes.map((node) => {
+        if (node.kind === "folder") {
+          const isExpanded = expandedFolders.has(node.path);
+          const isFolderSelected = selectedFolderPath === node.path;
+          return (
+            <div key={`folder:${node.path}`}>
+              <button
+                type="button"
+                onClick={() => onToggleFolder(node.path)}
+                title={node.path}
+                aria-expanded={isExpanded}
+                className={`w-full flex items-center gap-1.5 rounded-md ${indentClass} pr-2 py-1.5 text-left text-xs transition-colors cursor-pointer ${
+                  isFolderSelected
+                    ? "bg-[#2F6BFF]/[0.12] text-zinc-100"
+                    : "text-zinc-300 hover:bg-[#151C2C]"
+                }`}
+              >
+                <ChevronRight
+                  className={`h-3.5 w-3.5 shrink-0 transition-transform duration-150 ${
+                    isExpanded ? "rotate-90 text-zinc-300" : "text-zinc-500"
+                  }`}
+                />
+                {isExpanded ? (
+                  <FolderOpen className="h-3.5 w-3.5 shrink-0 text-[#6B9BFF]" />
+                ) : (
+                  <Folder className="h-3.5 w-3.5 shrink-0 text-[#6B9BFF]/80" />
+                )}
+                <span className="min-w-0 flex-1 truncate font-medium">{node.name}</span>
+                <span className="shrink-0 text-[10px] font-mono text-zinc-500">
+                  {node.noteCount}
+                </span>
+              </button>
+              {isExpanded && (
+                <div className="mt-0.5 space-y-0.5">
+                  <VaultTreeBranch
+                    nodes={node.children}
+                    depth={depth + 1}
+                    expandedFolders={expandedFolders}
+                    selectedFolderPath={selectedFolderPath}
+                    activeNoteId={activeNoteId}
+                    confirmDeleteId={confirmDeleteId}
+                    onToggleFolder={onToggleFolder}
+                    onOpenNote={onOpenNote}
+                    onRequestDelete={onRequestDelete}
+                    onConfirmDelete={onConfirmDelete}
+                    onCancelDelete={onCancelDelete}
+                  />
+                </div>
+              )}
+            </div>
+          );
+        }
+
+        const isSelected = activeNoteId === node.note.id;
+        const isConfirming = confirmDeleteId === node.note.id;
+        return (
+          <div
+            key={`file:${node.note.id}`}
+            className={`group flex items-center gap-1.5 rounded-md border-l-2 ${indentClass} pr-1.5 py-1 transition-colors ${
+              isSelected
+                ? "border-l-[#2F6BFF] bg-[#2F6BFF]/[0.16] text-zinc-100"
+                : "border-l-transparent text-zinc-300 hover:bg-[#151C2C]"
+            }`}
+          >
+            <button
+              type="button"
+              onClick={() => onOpenNote(node.note.id)}
+              title={node.note.id}
+              className="min-w-0 flex-1 flex items-center gap-1.5 py-0.5 text-left cursor-pointer"
+            >
+              <FileText
+                className={`h-3.5 w-3.5 shrink-0 ${
+                  isSelected ? "text-[#6B9BFF]" : "text-zinc-500"
+                }`}
+              />
+              <span className="min-w-0 flex-1 truncate text-xs">{node.name}</span>
+            </button>
+
+            {isConfirming ? (
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => onConfirmDelete(node.note.id)}
+                  className="rounded bg-rose-600 px-1.5 py-0.5 text-[10px] font-semibold text-white hover:bg-rose-500 cursor-pointer"
+                >
+                  Xóa
+                </button>
+                <button
+                  type="button"
+                  onClick={onCancelDelete}
+                  className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-300 hover:bg-zinc-700 cursor-pointer"
+                >
+                  Hủy
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => onRequestDelete(node.note.id)}
+                className="opacity-0 group-hover:opacity-100 rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-rose-400 transition-opacity cursor-pointer shrink-0"
+                title="Xóa ghi chú"
+              >
+                <Trash2 className="h-3 w-3" />
+              </button>
+            )}
+          </div>
+        );
+      })}
+    </>
+  );
+};
+
 export const VaultDashboard: React.FC = () => {
   const [vaultPath, setVaultPath] = useState<string>("");
   const [notes, setNotes] = useState<VaultNoteSummaryDto[]>([]);
-  const [selectedFolder, setSelectedFolder] = useState<string>("all");
+  const [sidebarView, setSidebarView] = useState<"tree" | "recent">("tree");
+  const [selectedFolderPath, setSelectedFolderPath] = useState<string | null>(null);
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => new Set());
   const [isLoadingList, setIsLoadingList] = useState<boolean>(true);
 
   // Active note editor state
@@ -323,7 +477,7 @@ export const VaultDashboard: React.FC = () => {
     }
     setActiveNoteId(null);
     setTitle("");
-    setFolder(selectedFolder !== "all" ? selectedFolder : "notes");
+    setFolder(selectedFolderPath ?? "notes");
     setTagsInput("");
     setNoteType("GENERAL");
     setExternalUri("");
@@ -332,7 +486,7 @@ export const VaultDashboard: React.FC = () => {
     setSaveState("dirty");
     setEditorError(null);
     setViewMode("wysiwyg");
-  }, [selectedFolder]);
+  }, [selectedFolderPath]);
 
   const handleCreateFromTemplate = useCallback(
     (tpl: VaultTemplateSpec) => {
@@ -343,9 +497,7 @@ export const VaultDashboard: React.FC = () => {
       const today = formatTodayShort();
       setActiveNoteId(null);
       setTitle(tpl.buildTitle(today));
-      setFolder(
-        selectedFolder !== "all" ? selectedFolder : tpl.defaultFolder || "notes"
-      );
+      setFolder(selectedFolderPath ?? tpl.defaultFolder ?? "notes");
       setTagsInput(tpl.defaultTags.join(", "));
       setNoteType(tpl.noteType);
       setExternalUri("");
@@ -356,7 +508,7 @@ export const VaultDashboard: React.FC = () => {
       setViewMode("wysiwyg");
       setIsTemplateModalOpen(false);
     },
-    [selectedFolder]
+    [selectedFolderPath]
   );
 
   // Customizable Vault keyboard shortcuts
@@ -568,31 +720,42 @@ export const VaultDashboard: React.FC = () => {
     }
   };
 
-  const folderOptions = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const n of notes) {
-      const key = n.folder || "notes";
-      counts.set(key, (counts.get(key) ?? 0) + 1);
-    }
-    if (!counts.has("notes")) counts.set("notes", 0);
+  useEffect(() => {
+    if (!activeNoteId) return;
+    const ancestors = getAncestorFolderPaths(activeNoteId);
+    if (ancestors.length === 0) return;
+    setExpandedFolders((prev) => {
+      let changed = false;
+      const next = new Set(prev);
+      for (const ancestor of ancestors) {
+        if (!next.has(ancestor)) {
+          next.add(ancestor);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [activeNoteId]);
 
-    return Array.from(counts.entries())
-      .map(([key, count]) => ({
-        folder: key,
-        label: shortenFolderPath(key),
-        count,
-      }))
-      .sort((a, b) => {
-        if (a.folder === "notes") return -1;
-        if (b.folder === "notes") return 1;
-        return a.label.localeCompare(b.label, "vi");
-      });
-  }, [notes]);
+  const handleToggleFolder = useCallback((folderPath: string) => {
+    setSelectedFolderPath(folderPath);
+    setExpandedFolders((prev) => {
+      const next = new Set(prev);
+      if (next.has(folderPath)) {
+        next.delete(folderPath);
+      } else {
+        next.add(folderPath);
+      }
+      return next;
+    });
+  }, []);
 
-  const visibleNotes = useMemo(() => {
-    if (selectedFolder === "all") return notes;
-    return notes.filter((n) => n.folder === selectedFolder);
-  }, [notes, selectedFolder]);
+  const handleCollapseAllFolders = useCallback(() => {
+    setExpandedFolders(new Set());
+    setSelectedFolderPath(null);
+  }, []);
+
+  const vaultTree = useMemo(() => buildVaultTree(notes), [notes]);
 
   return (
     <div className="mx-auto max-w-7xl space-y-3">
@@ -641,21 +804,45 @@ export const VaultDashboard: React.FC = () => {
               />
             </div>
 
-            {/* Compact Folder Filter Select */}
+            {/* Sidebar Explorer View Toggle */}
             {!searchQuery.trim() && (
-              <select
-                aria-label="Lọc theo thư mục"
-                value={selectedFolder}
-                onChange={(e) => setSelectedFolder(e.target.value)}
-                className="w-full cursor-pointer rounded-lg border border-[#1D263B] bg-[#080B12] px-2.5 py-1.5 text-xs text-zinc-200 focus:border-[#2F6BFF] focus:outline-none"
-              >
-                <option value="all">Tất cả thư mục ({notes.length})</option>
-                {folderOptions.map((opt) => (
-                  <option key={opt.folder} value={opt.folder} title={opt.folder}>
-                    {opt.label} ({opt.count})
-                  </option>
-                ))}
-              </select>
+              <div className="flex items-center justify-between gap-1.5">
+                <div className="flex-1 grid grid-cols-2 rounded-lg border border-[#1D263B] bg-[#080B12] p-0.5 text-[11px]">
+                  <button
+                    type="button"
+                    onClick={() => setSidebarView("tree")}
+                    className={`rounded-md px-2 py-1 font-medium transition-colors cursor-pointer ${
+                      sidebarView === "tree"
+                        ? "bg-[#151C2C] text-[#6B9BFF]"
+                        : "text-zinc-400 hover:text-zinc-200"
+                    }`}
+                  >
+                    Cây thư mục
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSidebarView("recent")}
+                    className={`rounded-md px-2 py-1 font-medium transition-colors cursor-pointer ${
+                      sidebarView === "recent"
+                        ? "bg-[#151C2C] text-[#6B9BFF]"
+                        : "text-zinc-400 hover:text-zinc-200"
+                    }`}
+                  >
+                    Gần đây
+                  </button>
+                </div>
+                {sidebarView === "tree" && expandedFolders.size > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleCollapseAllFolders}
+                    title="Thu gọn tất cả thư mục"
+                    aria-label="Thu gọn tất cả thư mục"
+                    className="rounded-lg border border-[#1D263B] bg-[#080B12] hover:bg-[#151C2C] p-1.5 text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer shrink-0"
+                  >
+                    <ChevronsDownUp className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
             )}
           </div>
 
@@ -699,13 +886,29 @@ export const VaultDashboard: React.FC = () => {
                 <Loader2 className="h-4 w-4 animate-spin text-[#6B9BFF]" />
                 <span>Đang tải ghi chú...</span>
               </div>
-            ) : visibleNotes.length === 0 ? (
+            ) : notes.length === 0 ? (
               <div className="py-8 px-3 text-center text-xs text-zinc-500 space-y-2">
                 <FileText className="mx-auto h-6 w-6 text-zinc-600" />
                 <p>Chưa có ghi chú nào. Bấm &ldquo;Ghi chú mới&rdquo; để bắt đầu viết ngay.</p>
               </div>
+            ) : sidebarView === "tree" ? (
+              <div className="space-y-0.5">
+                <VaultTreeBranch
+                  nodes={vaultTree}
+                  depth={0}
+                  expandedFolders={expandedFolders}
+                  selectedFolderPath={selectedFolderPath}
+                  activeNoteId={activeNoteId}
+                  confirmDeleteId={confirmDeleteId}
+                  onToggleFolder={handleToggleFolder}
+                  onOpenNote={(id) => void openNoteById(id)}
+                  onRequestDelete={setConfirmDeleteId}
+                  onConfirmDelete={(id) => void handleDeleteNote(id)}
+                  onCancelDelete={() => setConfirmDeleteId(null)}
+                />
+              </div>
             ) : (
-              visibleNotes.map((item) => {
+              notes.map((item) => {
                 const isSelected = activeNoteId === item.id;
                 const isConfirming = confirmDeleteId === item.id;
                 return (
