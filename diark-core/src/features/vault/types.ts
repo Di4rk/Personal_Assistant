@@ -103,3 +103,9 @@ export interface VaultGraphDto {
   nodes: VaultGraphNodeDto[];
   edges: VaultGraphEdgeDto[];
 }
+
+export interface VaultLatexNormalizeResultDto {
+  scannedFiles: number;
+  updatedFiles: number;
+  convertedExpressions: number;
+}

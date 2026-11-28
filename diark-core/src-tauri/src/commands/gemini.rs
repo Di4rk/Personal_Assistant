@@ -86,6 +86,30 @@ pub async fn extract_moodle_tasks(
 }
 
 #[tauri::command]
+pub async fn complete_vault_note_inline(
+    db: State<'_, SharedDb>,
+    note_title: String,
+    prefix: String,
+    suffix: String,
+) -> Result<String, String> {
+    let config = {
+        let conn = db.lock().map_err(|e| format!("DB lock error: {e}"))?;
+        gemini::query_gemini_config(&conn)
+            .map_err(|e| format!("Không thể đọc cấu hình AI: {e}"))?
+    };
+
+    gemini::complete_vault_inline_suggestion(
+        &config.api_key,
+        &config.model,
+        &config.base_url,
+        &note_title,
+        &prefix,
+        &suffix,
+    )
+    .await
+}
+
+#[tauri::command]
 pub fn save_extracted_moodle_tasks(
     app: AppHandle,
     db: State<'_, SharedDb>,

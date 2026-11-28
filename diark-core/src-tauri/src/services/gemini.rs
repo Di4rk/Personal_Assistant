@@ -751,6 +751,175 @@ pub async fn stream_gemini_request(
     Ok(())
 }
 
+fn tail_chars(s: &str, max_chars: usize) -> String {
+    let total = s.chars().count();
+    if total <= max_chars {
+        return s.to_string();
+    }
+    s.chars().skip(total - max_chars).collect()
+}
+
+fn head_chars(s: &str, max_chars: usize) -> String {
+    s.chars().take(max_chars).collect()
+}
+
+fn clean_inline_completion_output(raw: &str) -> String {
+    let trimmed = raw.trim_start_matches(['\r', '\n']);
+    let trimmed_end = trimmed.trim_end();
+    if trimmed_end.starts_with("```") && trimmed_end.ends_with("```") {
+        let mut lines: Vec<&str> = trimmed_end.lines().collect();
+        if lines.len() >= 2 {
+            lines.remove(0);
+            lines.pop();
+            return lines.join("\n").trim().to_string();
+        }
+    }
+    trimmed_end.to_string()
+}
+
+pub async fn complete_vault_inline_suggestion(
+    api_key: &str,
+    model: &str,
+    base_url: &str,
+    note_title: &str,
+    prefix: &str,
+    suffix: &str,
+) -> Result<String, String> {
+    if api_key.trim().is_empty() && !is_local_endpoint(base_url) {
+        return Err("Chưa cấu hình AI API Key. Hãy nhập API Key trong Cài đặt -> Trợ lý AI.".to_string());
+    }
+
+    let safe_prefix = tail_chars(prefix, 1200);
+    let safe_suffix = head_chars(suffix, 300);
+    if safe_prefix.trim().is_empty() {
+        return Ok(String::new());
+    }
+
+    let title_hint = if note_title.trim().is_empty() {
+        "Ghi chú học tập UIT"
+    } else {
+        note_title.trim()
+    };
+
+    let prompt = format!(
+        "You are an inline writing autocomplete engine (like VS Code Copilot) inside a university student's Markdown/LaTeX note.\n\
+Note title: {title_hint}\n\n\
+Text immediately BEFORE the cursor:\n<<<PREFIX\n{safe_prefix}\nPREFIX>>>\n\n\
+Text immediately AFTER the cursor:\n<<<SUFFIX\n{safe_suffix}\nSUFFIX>>>\n\n\
+Rules:\n\
+- Output ONLY the exact continuation text to insert at the cursor (1 to 2 concise sentences, a bullet item, or a LaTeX formula using $...$).\n\
+- Match the language and tone of PREFIX (Vietnamese or English).\n\
+- Do NOT repeat words already at the end of PREFIX.\n\
+- Do NOT add explanations, labels, quotes, or markdown code fences around the reply."
+    );
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(12))
+        .build()
+        .map_err(|e| format!("Lỗi khởi tạo HTTP client: {e}"))?;
+
+    let raw_text = if is_gemini_native_endpoint(base_url) {
+        let url = format!(
+            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
+            model.trim(),
+            api_key.trim()
+        );
+        let body = GeminiRequestWire {
+            contents: vec![GeminiContentWire {
+                role: "user".to_string(),
+                parts: vec![GeminiPartWire { text: prompt }],
+            }],
+            generation_config: GeminiGenerationConfigWire {
+                temperature: 0.25,
+                max_output_tokens: 96,
+                response_mime_type: None,
+            },
+        };
+
+        let res = client
+            .post(&url)
+            .header("Content-Type", "application/json")
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| format!("Lỗi kết nối Gemini API: {e}"))?;
+
+        if !res.status().is_success() {
+            let status = res.status();
+            let err_text = res.text().await.unwrap_or_default();
+            return Err(format!("Gemini API từ chối ({status}): {err_text}"));
+        }
+
+        let api_resp: GeminiApiResponseWire = res
+            .json()
+            .await
+            .map_err(|e| format!("Lỗi đọc phản hồi Gemini: {e}"))?;
+
+        if let Some(err) = api_resp.error {
+            return Err(format!("Gemini Error: {}", err.message));
+        }
+
+        api_resp
+            .candidates
+            .and_then(|mut c| c.pop())
+            .and_then(|c| c.content)
+            .and_then(|c| c.parts)
+            .and_then(|mut p| p.pop())
+            .and_then(|p| p.text)
+            .unwrap_or_default()
+    } else {
+        let url = build_openai_chat_url(base_url);
+        let body = OpenAiChatRequestWire {
+            model: model.trim().to_string(),
+            messages: vec![OpenAiMessageWire {
+                role: "user".to_string(),
+                content: prompt,
+            }],
+            temperature: 0.25,
+            max_tokens: 96,
+            stream: false,
+        };
+
+        let mut req = client
+            .post(&url)
+            .header("Content-Type", "application/json")
+            .json(&body);
+        if !api_key.trim().is_empty() {
+            req = req.header("Authorization", format!("Bearer {}", api_key.trim()));
+        }
+
+        let res = req
+            .send()
+            .await
+            .map_err(|e| format!("Lỗi kết nối AI API: {e}"))?;
+
+        if !res.status().is_success() {
+            let status = res.status();
+            let err_text = res.text().await.unwrap_or_default();
+            return Err(format!("AI API từ chối ({status}): {err_text}"));
+        }
+
+        let api_resp: OpenAiResponseWire = res
+            .json()
+            .await
+            .map_err(|e| format!("Lỗi đọc phản hồi AI API: {e}"))?;
+
+        if let Some(err) = api_resp.error {
+            let msg = err.message.unwrap_or_else(|| "Unknown API error".to_string());
+            return Err(format!("AI API Error: {msg}"));
+        }
+
+        api_resp
+            .choices
+            .and_then(|mut c| c.pop())
+            .and_then(|c| c.message)
+            .and_then(|m| m.content)
+            .unwrap_or_default()
+    };
+
+    Ok(clean_inline_completion_output(&raw_text))
+}
+
 pub async fn extract_tasks_with_gemini(
     api_key: &str,
     model: &str,

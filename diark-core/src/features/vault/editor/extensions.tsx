@@ -14,6 +14,12 @@ import { readVaultAssetDataUrl } from "@/lib/tauri-client";
 
 const assetDataUrlCache = new Map<string, string>();
 
+function shouldStopNodeViewEvent({ event }: { event: Event }): boolean {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) return false;
+  return target.closest("input, textarea, select, button") !== null;
+}
+
 const WikilinkNodeView: React.FC<NodeViewProps> = ({ node, extension }) => {
   const target = typeof node.attrs.target === "string" ? node.attrs.target : "";
   const label = typeof node.attrs.label === "string" && node.attrs.label ? node.attrs.label : target;
@@ -112,6 +118,13 @@ const InlineMathNodeView: React.FC<NodeViewProps> = ({ node, updateAttributes, d
     });
   }, [latex]);
 
+  const draftPreviewHtml = useMemo(() => {
+    return katex.renderToString(draft.trim() || "\\text{...}", {
+      throwOnError: false,
+      displayMode: false,
+    });
+  }, [draft]);
+
   const commit = () => {
     const clean = draft.trim();
     if (!clean) {
@@ -127,29 +140,60 @@ const InlineMathNodeView: React.FC<NodeViewProps> = ({ node, updateAttributes, d
       {editing ? (
         <span
           contentEditable={false}
-          className="inline-flex items-center gap-1 rounded border border-[#2F6BFF]/60 bg-[#080B12] px-1.5 py-0.5"
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+          onBlur={(e) => {
+            if (!e.currentTarget.contains(e.relatedTarget as globalThis.Node | null)) {
+              commit();
+            }
+          }}
+          className="inline-flex flex-col gap-1.5 rounded-lg border border-[#2F6BFF]/60 bg-[#080B12] p-2 shadow-lg"
         >
-          <span className="font-mono text-[11px] text-[#6B9BFF]">$</span>
-          <input
-            ref={inputRef}
-            type="text"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                commit();
-              } else if (e.key === "Escape") {
-                e.preventDefault();
-                if (!latex.trim()) deleteNode();
-                else setEditing(false);
-              }
-            }}
-            onBlur={commit}
-            placeholder="x^2 + y^2"
-            className="w-36 bg-transparent font-mono text-xs text-zinc-100 focus:outline-none"
+          <span className="inline-flex items-center gap-1.5">
+            <span className="font-mono text-[11px] text-[#6B9BFF]">$</span>
+            <input
+              ref={inputRef}
+              type="text"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onMouseDown={(e) => e.stopPropagation()}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  commit();
+                } else if (e.key === "Escape") {
+                  e.preventDefault();
+                  if (!latex.trim()) deleteNode();
+                  else {
+                    setDraft(latex);
+                    setEditing(false);
+                  }
+                }
+              }}
+              placeholder="x^2 + y^2"
+              className="w-52 rounded border border-[#1D263B] bg-[#0F1420] px-2 py-0.5 font-mono text-xs text-zinc-100 focus:border-[#2F6BFF] focus:outline-none"
+            />
+            <span className="font-mono text-[11px] text-[#6B9BFF]">$</span>
+            <button
+              type="button"
+              onClick={commit}
+              className="rounded bg-[#2F6BFF] px-2 py-0.5 text-[11px] font-medium text-white hover:bg-[#2558DB] cursor-pointer"
+            >
+              Xong
+            </button>
+            <button
+              type="button"
+              onClick={deleteNode}
+              className="rounded border border-rose-800/50 bg-rose-950/30 px-1.5 py-0.5 text-[11px] text-rose-300 hover:bg-rose-900/40 cursor-pointer"
+            >
+              Xóa
+            </button>
+          </span>
+          <span
+            className="rounded border border-[#1D263B]/70 bg-[#0F1420]/70 px-2 py-1 text-xs text-zinc-200"
+            dangerouslySetInnerHTML={{ __html: draftPreviewHtml }}
           />
-          <span className="font-mono text-[11px] text-[#6B9BFF]">$</span>
         </span>
       ) : (
         <span
@@ -196,7 +240,9 @@ export const InlineMathNode = Node.create({
   },
 
   addNodeView() {
-    return ReactNodeViewRenderer(InlineMathNodeView);
+    return ReactNodeViewRenderer(InlineMathNodeView, {
+      stopEvent: shouldStopNodeViewEvent,
+    });
   },
 });
 
@@ -216,6 +262,13 @@ const BlockMathNodeView: React.FC<NodeViewProps> = ({ node, updateAttributes, de
     });
   }, [latex]);
 
+  const draftPreviewHtml = useMemo(() => {
+    return katex.renderToString(draft.trim() || "\\text{...}", {
+      throwOnError: false,
+      displayMode: true,
+    });
+  }, [draft]);
+
   const commit = () => {
     const clean = draft.trim();
     if (!clean) {
@@ -230,12 +283,14 @@ const BlockMathNodeView: React.FC<NodeViewProps> = ({ node, updateAttributes, de
     <NodeViewWrapper className="my-3">
       <div
         contentEditable={false}
+        onMouseDown={(e) => e.stopPropagation()}
+        onClick={(e) => e.stopPropagation()}
         className="group relative rounded-lg border border-[#1D263B] bg-[#080B12] px-4 py-3"
       >
         {editing ? (
           <div className="space-y-2">
             <div className="flex items-center justify-between text-[11px] text-zinc-400">
-              <span className="font-mono text-[#6B9BFF]">Công thức toán (LaTeX)</span>
+              <span className="font-mono text-[#6B9BFF]">Công thức toán (LaTeX) · Ctrl+Enter để lưu</span>
               <div className="flex items-center gap-1.5">
                 <button
                   type="button"
@@ -258,18 +313,27 @@ const BlockMathNodeView: React.FC<NodeViewProps> = ({ node, updateAttributes, de
               rows={2}
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
+              onMouseDown={(e) => e.stopPropagation()}
               onKeyDown={(e) => {
+                e.stopPropagation();
                 if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
                   e.preventDefault();
                   commit();
                 } else if (e.key === "Escape") {
                   e.preventDefault();
                   if (!latex.trim()) deleteNode();
-                  else setEditing(false);
+                  else {
+                    setDraft(latex);
+                    setEditing(false);
+                  }
                 }
               }}
               placeholder="Ví dụ: \sum_{i=1}^n x_i^2"
               className="w-full rounded border border-[#1D263B] bg-[#0F1420] p-2 font-mono text-xs text-zinc-100 focus:border-[#2F6BFF] focus:outline-none"
+            />
+            <div
+              className="overflow-x-auto rounded border border-[#1D263B]/70 bg-[#0F1420]/60 px-3 py-2 text-center text-zinc-100"
+              dangerouslySetInnerHTML={{ __html: draftPreviewHtml }}
             />
           </div>
         ) : (
@@ -312,7 +376,9 @@ export const BlockMathNode = Node.create({
   },
 
   addNodeView() {
-    return ReactNodeViewRenderer(BlockMathNodeView);
+    return ReactNodeViewRenderer(BlockMathNodeView, {
+      stopEvent: shouldStopNodeViewEvent,
+    });
   },
 });
 
@@ -422,7 +488,9 @@ export const CalloutNode = Node.create({
   },
 
   addNodeView() {
-    return ReactNodeViewRenderer(CalloutNodeView);
+    return ReactNodeViewRenderer(CalloutNodeView, {
+      stopEvent: shouldStopNodeViewEvent,
+    });
   },
 });
 

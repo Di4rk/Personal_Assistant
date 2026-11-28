@@ -49,7 +49,7 @@ function renderImageTag(alt: string, src: string): string {
 }
 
 const INLINE_REGEX =
-  /(\[\[[^\]|]+(?:\|[^\]]+)?\]\]|!\[[^\]]*\]\([^)]+\)|\[[^\]]+\]\([^)]+\)|`[^`]+`|<u>[^<]+<\/u>|\*\*[^*]+\*\*|~~[^~]+~~|==[^=]+==|\*[^*]+\*|\$(?:[^\s$](?:[^$\n]*?[^\s$])?)\$)/g;
+  /(\[\[[^\]|]+(?:\|[^\]]+)?\]\]|!\[[^\]]*\]\([^)]+\)|\[[^\]]+\]\([^)]+\)|`[^`]+`|<u>[^<]+<\/u>|\*\*[^*]+\*\*|~~[^~]+~~|==[^=]+==|\*[^*]+\*|\\\([^\n]+?\\\)|\\\[[^\n]+?\\\]|\$(?:[^\s$](?:[^$\n]*?[^\s$])?)\$)/g;
 
 export function renderInlineMarkdownToHtml(text: string): string {
   let out = "";
@@ -99,6 +99,12 @@ export function renderInlineMarkdownToHtml(text: string): string {
       out += `<mark>${escapeHtml(token.slice(2, -2))}</mark>`;
     } else if (token.startsWith("*") && token.endsWith("*")) {
       out += `<em>${escapeHtml(token.slice(1, -1))}</em>`;
+    } else if (
+      (token.startsWith("\\(") && token.endsWith("\\)")) ||
+      (token.startsWith("\\[") && token.endsWith("\\]"))
+    ) {
+      const latex = token.slice(2, -2).trim();
+      out += `<span data-inline-math="${escapeAttr(latex)}"></span>`;
     } else if (token.startsWith("$") && token.endsWith("$")) {
       const latex = token.slice(1, -1).trim();
       out += `<span data-inline-math="${escapeAttr(latex)}"></span>`;
@@ -128,6 +134,7 @@ function isBlockStart(lines: string[], idx: number): boolean {
   return (
     trimmed.startsWith("```") ||
     trimmed.startsWith("$$") ||
+    trimmed.startsWith("\\[") ||
     HR_RE.test(trimmed) ||
     HEADING_RE.test(trimmed) ||
     trimmed.startsWith(">") ||
@@ -158,6 +165,33 @@ export function markdownToEditorHtml(markdown: string): string {
 
     if (trimmed.length === 0) {
       i += 1;
+      continue;
+    }
+
+    if (trimmed.startsWith("\\[")) {
+      if (trimmed.length > 4 && trimmed.endsWith("\\]")) {
+        const latex = trimmed.slice(2, -2).trim();
+        htmlParts.push(`<div data-block-math="${escapeAttr(latex)}"></div>`);
+        i += 1;
+        continue;
+      }
+      const mathLines: string[] = [];
+      const firstAfter = trimmed.slice(2).trim();
+      if (firstAfter) mathLines.push(firstAfter);
+      i += 1;
+      while (i < lines.length) {
+        const cur = lines[i];
+        const closeIdx = cur.indexOf("\\]");
+        if (closeIdx !== -1) {
+          const beforeClose = cur.slice(0, closeIdx).trim();
+          if (beforeClose) mathLines.push(beforeClose);
+          i += 1;
+          break;
+        }
+        mathLines.push(cur);
+        i += 1;
+      }
+      htmlParts.push(`<div data-block-math="${escapeAttr(mathLines.join("\n").trim())}"></div>`);
       continue;
     }
 

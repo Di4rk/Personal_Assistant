@@ -158,6 +158,7 @@ macro_rules! registered_commands {
             commands::vault::save_vault_asset,
             commands::vault::read_vault_asset_data_url,
             commands::vault::get_vault_graph,
+            commands::vault::normalize_vault_latex,
             commands::open_external_url,
             commands::hide_hud,
             // Settings & Identity
@@ -188,6 +189,7 @@ macro_rules! registered_commands {
             commands::gemini::trigger_socratic_debug,
             commands::gemini::extract_moodle_tasks,
             commands::gemini::save_extracted_moodle_tasks,
+            commands::gemini::complete_vault_note_inline,
             // System, Hotkey & Autostart
             commands::system::get_system_preferences,
             commands::system::update_autostart_setting,

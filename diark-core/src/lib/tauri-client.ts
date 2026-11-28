@@ -24,6 +24,7 @@ import type {
   SaveVaultNoteDto,
   ScaffoldResultDto,
   VaultGraphDto,
+  VaultLatexNormalizeResultDto,
   VaultNoteDetailDto,
   VaultNoteSummaryDto,
   VaultSearchResultDto,
@@ -1090,6 +1091,18 @@ export async function readVaultAssetDataUrl(
 
 export async function getVaultGraph(): Promise<VaultGraphDto> {
   return invoke<VaultGraphDto>("get_vault_graph");
+}
+
+export async function normalizeVaultLatex(): Promise<VaultLatexNormalizeResultDto> {
+  return invoke<VaultLatexNormalizeResultDto>("normalize_vault_latex");
+}
+
+export async function completeVaultNoteInline(
+  noteTitle: string,
+  prefix: string,
+  suffix: string
+): Promise<string> {
+  return invoke<string>("complete_vault_note_inline", { noteTitle, prefix, suffix });
 }
 
 export interface DrlSemesterScore {

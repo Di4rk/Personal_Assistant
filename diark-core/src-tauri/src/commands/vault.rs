@@ -87,6 +87,14 @@ pub struct VaultGraphDto {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct VaultLatexNormalizeResultDto {
+    pub scanned_files: usize,
+    pub updated_files: usize,
+    pub converted_expressions: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SaveVaultNoteDto {
     pub id: Option<String>,
     pub folder: Option<String>,
@@ -1396,6 +1404,232 @@ pub(crate) fn get_vault_graph_blocking(
     Ok(VaultGraphDto { nodes, edges })
 }
 
+fn convert_inline_latex_outside_code(line: &str) -> (String, usize) {
+    let mut out = String::with_capacity(line.len());
+    let mut count = 0usize;
+    let mut in_inline_code = false;
+    let mut i = 0usize;
+    let bytes = line.as_bytes();
+
+    while i < bytes.len() {
+        let rest = &line[i..];
+        if rest.starts_with('`') {
+            in_inline_code = !in_inline_code;
+            out.push('`');
+            i += 1;
+            continue;
+        }
+
+        if !in_inline_code && (rest.starts_with("\\(") || rest.starts_with("\\[")) {
+            let close_delim = if rest.starts_with("\\(") { "\\)" } else { "\\]" };
+            if let Some(end_rel) = rest[2..].find(close_delim) {
+                let inner = rest[2..2 + end_rel].trim();
+                if !inner.is_empty() {
+                    out.push('$');
+                    out.push_str(inner);
+                    out.push('$');
+                    count += 1;
+                    i += 2 + end_rel + 2;
+                    continue;
+                }
+            }
+        }
+
+        if let Some(ch) = rest.chars().next() {
+            out.push(ch);
+            i += ch.len_utf8();
+        } else {
+            break;
+        }
+    }
+
+    (out, count)
+}
+
+pub(crate) fn normalize_latex_in_markdown(raw: &str) -> (String, usize) {
+    let has_trailing_nl = raw.ends_with('\n');
+    let lines: Vec<&str> = raw.lines().collect();
+    let mut out_lines: Vec<String> = Vec::with_capacity(lines.len());
+    let mut total_converted = 0usize;
+    let mut i = 0usize;
+    let mut in_fenced_code = false;
+
+    if !lines.is_empty() && lines[0].trim() == "---" {
+        out_lines.push(lines[0].to_string());
+        i = 1;
+        while i < lines.len() {
+            out_lines.push(lines[i].to_string());
+            let is_end = lines[i].trim() == "---";
+            i += 1;
+            if is_end {
+                break;
+            }
+        }
+    }
+
+    while i < lines.len() {
+        let line = lines[i];
+        let trimmed = line.trim();
+
+        if trimmed.starts_with("```") {
+            in_fenced_code = !in_fenced_code;
+            out_lines.push(line.to_string());
+            i += 1;
+            continue;
+        }
+
+        if !in_fenced_code && trimmed.starts_with("\\[") {
+            if trimmed.len() > 4 && trimmed.ends_with("\\]") {
+                let inner = trimmed[2..trimmed.len() - 2].trim();
+                if !inner.is_empty() {
+                    out_lines.push("$$".to_string());
+                    out_lines.push(inner.to_string());
+                    out_lines.push("$$".to_string());
+                    total_converted += 1;
+                    i += 1;
+                    continue;
+                }
+            } else {
+                let mut math_lines: Vec<String> = Vec::new();
+                let first_after = trimmed[2..].trim();
+                if !first_after.is_empty() {
+                    math_lines.push(first_after.to_string());
+                }
+                let mut j = i + 1;
+                let mut found_close = false;
+                while j < lines.len() {
+                    let cur = lines[j];
+                    if cur.trim().starts_with("```") {
+                        break;
+                    }
+                    if let Some(close_idx) = cur.find("\\]") {
+                        let before_close = cur[..close_idx].trim();
+                        if !before_close.is_empty() {
+                            math_lines.push(before_close.to_string());
+                        }
+                        found_close = true;
+                        j += 1;
+                        break;
+                    }
+                    math_lines.push(cur.to_string());
+                    j += 1;
+                }
+
+                if found_close {
+                    let body = math_lines.join("\n").trim().to_string();
+                    out_lines.push("$$".to_string());
+                    if !body.is_empty() {
+                        for b_line in body.lines() {
+                            out_lines.push(b_line.to_string());
+                        }
+                    }
+                    out_lines.push("$$".to_string());
+                    total_converted += 1;
+                    i = j;
+                    continue;
+                }
+            }
+        }
+
+        if in_fenced_code {
+            out_lines.push(line.to_string());
+        } else {
+            let (converted_line, n) = convert_inline_latex_outside_code(line);
+            total_converted += n;
+            out_lines.push(converted_line);
+        }
+        i += 1;
+    }
+
+    let mut result = out_lines.join("\n");
+    if has_trailing_nl && !result.ends_with('\n') {
+        result.push('\n');
+    }
+    (result, total_converted)
+}
+
+pub(crate) fn normalize_vault_latex_blocking(
+    conn: &mut Connection,
+    default_dir: &Path,
+) -> Result<VaultLatexNormalizeResultDto, String> {
+    let vault_root = ensure_vault_path_with_default(conn, default_dir)?;
+    let policy = crate::modules::vault::watcher::VaultWatchPolicy::default();
+
+    let mut scanned_files = 0usize;
+    let mut updated_files = 0usize;
+    let mut converted_expressions = 0usize;
+
+    for entry in walkdir::WalkDir::new(&vault_root)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(|e| {
+            if e.depth() == 0 {
+                return true;
+            }
+            if e.file_type().is_dir() {
+                return !crate::modules::vault::watcher::is_ignored_dir_name(e.file_name(), &policy);
+            }
+            true
+        })
+    {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let path = entry.path();
+        if !crate::modules::vault::watcher::is_indexable_md_file(&vault_root, path, &policy) {
+            continue;
+        }
+        if let Ok(rel) = path.strip_prefix(&vault_root) {
+            let rel_str = rel.to_string_lossy().replace('\\', "/");
+            if crate::modules::vault::watcher::is_ignored_rel_path(&rel_str, &policy) {
+                continue;
+            }
+        }
+
+        scanned_files += 1;
+        let raw = match std::fs::read_to_string(path) {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
+        let (normalized, count) = normalize_latex_in_markdown(&raw);
+        if count > 0 && normalized != raw {
+            if std::fs::write(path, &normalized).is_ok() {
+                updated_files += 1;
+                converted_expressions += count;
+            }
+        }
+    }
+
+    if updated_files > 0 {
+        let _ = scan_and_sync_vault(conn, &vault_root);
+    }
+
+    Ok(VaultLatexNormalizeResultDto {
+        scanned_files,
+        updated_files,
+        converted_expressions,
+    })
+}
+
+#[tauri::command]
+pub async fn normalize_vault_latex(
+    app: tauri::AppHandle,
+    db: tauri::State<'_, SharedDb>,
+) -> Result<VaultLatexNormalizeResultDto, String> {
+    let default_dir = default_vault_dir(&app)?;
+    let db_arc = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut conn = db_arc.lock().map_err(|_| "DB mutex bị poisoned".to_string())?;
+        normalize_vault_latex_blocking(&mut conn, &default_dir)
+    })
+    .await
+    .map_err(|e| format!("Lỗi runtime worker normalize_vault_latex: {e}"))?
+}
+
 #[tauri::command]
 pub async fn save_vault_asset(
     app: tauri::AppHandle,
@@ -1736,5 +1970,59 @@ mod tests {
         assert!(graph.nodes.iter().any(|n| n.id == note_b.id && !n.is_unresolved && n.link_count == 2));
         assert!(graph.nodes.iter().any(|n| n.is_unresolved && n.title == "Missing Note"));
         assert_eq!(graph.edges.len(), 3);
+    }
+
+    #[test]
+    fn test_normalize_latex_in_markdown_preserves_code_and_converts_math() {
+        let input = "\
+---
+title: Spectral
+---
+
+Centroid \\(C_1\\) va \\(C_2\\).
+
+\\[ Cluster(x)=\\arg\\min_{j}||x-C_j||^2 \\]
+
+\\[
+||x-C_1||^2=||x-C_2||^2 \\]
+
+Cong thuc RBF: \\[ W_{ij}=\\exp(-\\gamma\\|x_i-x_j\\|^2) \\]
+
+```cpp
+// \\(keep_code\\)
+```
+";
+        let (out, count) = normalize_latex_in_markdown(input);
+        assert_eq!(count, 5);
+        assert!(out.contains("Centroid $C_1$ va $C_2$."));
+        assert!(out.contains("$$\nCluster(x)=\\arg\\min_{j}||x-C_j||^2\n$$"));
+        assert!(out.contains("$$\n||x-C_1||^2=||x-C_2||^2\n$$"));
+        assert!(out.contains("Cong thuc RBF: $W_{ij}=\\exp(-\\gamma\\|x_i-x_j\\|^2)$"));
+        assert!(out.contains("// \\(keep_code\\)"));
+    }
+
+    #[test]
+    fn test_normalize_vault_latex_blocking() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let mut conn = Connection::open_in_memory().expect("in-memory sqlite");
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+            [],
+        )
+        .expect("settings table");
+        crate::db::vault_schema::init_vault_tables(&conn).expect("vault schema");
+
+        let note_dir = temp_dir.path().join("notes");
+        std::fs::create_dir_all(&note_dir).expect("create dir");
+        let file_path = note_dir.join("rbf.md");
+        std::fs::write(&file_path, "Gia tri \\(X\\) va \\[ a = b \\]\n").expect("write md");
+
+        let res = normalize_vault_latex_blocking(&mut conn, temp_dir.path()).expect("normalize");
+        assert_eq!(res.scanned_files, 1);
+        assert_eq!(res.updated_files, 1);
+        assert_eq!(res.converted_expressions, 2);
+
+        let disk = std::fs::read_to_string(&file_path).expect("read md");
+        assert_eq!(disk, "Gia tri $X$ va $a = b$\n");
     }
 }

@@ -22,6 +22,8 @@ import {
   X,
   LayoutTemplate,
   Keyboard,
+  Sparkles,
+  Sigma,
 } from "lucide-react";
 import { useSettingsStore } from "@/stores/useSettingsStore";
 import { useVaultShortcutsStore } from "@/stores/useVaultShortcutsStore";
@@ -45,6 +47,7 @@ import {
   openOnenoteLink,
   openExternalUrl,
   getVaultGraph,
+  normalizeVaultLatex,
   VaultSyncEvent,
 } from "@/lib/tauri-client";
 import { useTauriEvent } from "@/hooks/useTauriEvent";
@@ -130,8 +133,28 @@ export const VaultDashboard: React.FC = () => {
   // Secondary vault tools
   const [showVaultTools, setShowVaultTools] = useState<boolean>(false);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  const [isNormalizingLatex, setIsNormalizingLatex] = useState<boolean>(false);
   const [isQuickCaptureOpen, setIsQuickCaptureOpen] = useState<boolean>(false);
   const [toolMessage, setToolMessage] = useState<string | null>(null);
+  const [aiCopilotEnabled, setAiCopilotEnabled] = useState<boolean>(() => {
+    try {
+      return window.localStorage.getItem("diark_vault_ai_copilot_v1") !== "false";
+    } catch {
+      return true;
+    }
+  });
+
+  const toggleAiCopilot = useCallback(() => {
+    setAiCopilotEnabled((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem("diark_vault_ai_copilot_v1", String(next));
+      } catch {
+        // ignore storage errors
+      }
+      return next;
+    });
+  }, []);
 
   const autosaveTimerRef = useRef<number | null>(null);
   const activeNoteIdRef = useRef<string | null>(null);
@@ -498,6 +521,28 @@ export const VaultDashboard: React.FC = () => {
     }
   };
 
+  const handleNormalizeVaultLatex = async () => {
+    setIsNormalizingLatex(true);
+    setEditorError(null);
+    try {
+      const res = await normalizeVaultLatex();
+      setToolMessage(
+        res.convertedExpressions > 0
+          ? `Đã chuyển ${res.convertedExpressions} công thức LaTeX trong ${res.updatedFiles}/${res.scannedFiles} file.`
+          : `Đã duyệt ${res.scannedFiles} file: toàn bộ công thức đã đúng chuẩn.`
+      );
+      setShowVaultTools(true);
+      await refreshNotesList(false);
+      if (activeNoteIdRef.current) {
+        await openNoteById(activeNoteIdRef.current);
+      }
+    } catch (err) {
+      setEditorError(typeof err === "string" ? err : "Không thể chuẩn hóa LaTeX.");
+    } finally {
+      setIsNormalizingLatex(false);
+    }
+  };
+
   const handleScaffoldFolders = async () => {
     if (!vaultPath.trim()) return;
     setIsSyncing(true);
@@ -788,6 +833,15 @@ export const VaultDashboard: React.FC = () => {
                     <Keyboard className="h-3 w-3 text-[#6B9BFF]" />
                     <span>Chỉnh phím tắt</span>
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleNormalizeVaultLatex()}
+                    disabled={isNormalizingLatex || isSyncing}
+                    className="inline-flex items-center gap-1 rounded border border-[#1D263B] bg-[#080B12] hover:bg-[#151C2C] px-2 py-1 text-zinc-200 cursor-pointer disabled:opacity-50"
+                  >
+                    <Sigma className={`h-3 w-3 text-[#6B9BFF] ${isNormalizingLatex ? "animate-pulse" : ""}`} />
+                    <span>{isNormalizingLatex ? "Đang duyệt LaTeX..." : "Chuẩn hóa LaTeX"}</span>
+                  </button>
                 </div>
               </div>
             )}
@@ -873,6 +927,31 @@ export const VaultDashboard: React.FC = () => {
                     >
                       <GitBranch className="h-3.5 w-3.5" />
                       <span>Đồ thị</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={toggleAiCopilot}
+                      title="Bật/tắt gợi ý viết tiếp bằng AI (dùng API Key trong Cài đặt, nhấn Tab để nhận hoặc Alt+\ để gọi)"
+                      className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-xs font-medium transition-colors cursor-pointer ${
+                        aiCopilotEnabled
+                          ? "border-[#2F6BFF]/50 bg-[#2F6BFF]/20 text-[#6B9BFF]"
+                          : "border-[#1D263B] bg-[#080B12] text-zinc-400 hover:bg-[#151C2C]"
+                      }`}
+                    >
+                      <Sparkles className="h-3.5 w-3.5" />
+                      <span>AI Gợi ý</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => void handleNormalizeVaultLatex()}
+                      disabled={isNormalizingLatex || isSyncing}
+                      title="Duyệt toàn bộ thư mục ghi chú và chuyển \\(...\\), \\[...\\] thành công thức chuẩn"
+                      className="inline-flex items-center gap-1 rounded-lg border border-[#1D263B] bg-[#080B12] hover:bg-[#151C2C] px-2 py-1 text-xs text-zinc-300 transition-colors cursor-pointer disabled:opacity-50"
+                    >
+                      <Sigma className="h-3.5 w-3.5 text-[#6B9BFF]" />
+                      <span>{isNormalizingLatex ? "Đang quét..." : "LaTeX"}</span>
                     </button>
 
                     <button
@@ -969,8 +1048,10 @@ export const VaultDashboard: React.FC = () => {
                 {viewMode === "wysiwyg" ? (
                   <NotionNoteEditor
                     noteId={activeNoteId}
+                    noteTitle={title}
                     content={content}
                     notes={notes}
+                    aiCopilotEnabled={aiCopilotEnabled}
                     onChangeMarkdown={(md) => {
                       setContent(md);
                       setSaveState("dirty");

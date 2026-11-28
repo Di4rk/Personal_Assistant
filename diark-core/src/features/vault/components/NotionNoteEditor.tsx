@@ -37,7 +37,7 @@ import {
   Trash2,
   Underline as UnderlineIcon,
 } from "lucide-react";
-import { saveVaultAsset } from "@/lib/tauri-client";
+import { completeVaultNoteInline, saveVaultAsset } from "@/lib/tauri-client";
 import type { VaultNoteSummaryDto } from "../types";
 import {
   BlockMathNode,
@@ -55,8 +55,10 @@ import { VAULT_TEMPLATES, formatTodayShort } from "../utils/vaultTemplates";
 
 interface NotionNoteEditorProps {
   noteId: string | null;
+  noteTitle: string;
   content: string;
   notes: VaultNoteSummaryDto[];
+  aiCopilotEnabled: boolean;
   onChangeMarkdown: (markdown: string) => void;
   onOpenWikilink: (target: string) => void;
   onExportPdf: () => void;
@@ -254,14 +256,22 @@ const SLASH_ITEMS: SlashItem[] = [
 
 export const NotionNoteEditor: React.FC<NotionNoteEditorProps> = ({
   noteId,
+  noteTitle,
   content,
   notes,
+  aiCopilotEnabled,
   onChangeMarkdown,
   onOpenWikilink,
   onExportPdf,
 }) => {
   const noteIdRef = useRef<string | null>(noteId);
   noteIdRef.current = noteId;
+
+  const noteTitleRef = useRef<string>(noteTitle);
+  noteTitleRef.current = noteTitle;
+
+  const aiCopilotEnabledRef = useRef<boolean>(aiCopilotEnabled);
+  aiCopilotEnabledRef.current = aiCopilotEnabled;
 
   const onChangeMarkdownRef = useRef(onChangeMarkdown);
   onChangeMarkdownRef.current = onChangeMarkdown;
@@ -280,6 +290,18 @@ export const NotionNoteEditor: React.FC<NotionNoteEditorProps> = ({
   const [selectionBubble, setSelectionBubble] = useState<SelectionBubbleState | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [uploadNotice, setUploadNotice] = useState<string | null>(null);
+
+  const [ghostSuggestion, setGhostSuggestion] = useState<{
+    text: string;
+    pos: number;
+    left: number;
+    top: number;
+  } | null>(null);
+  const [isFetchingGhost, setIsFetchingGhost] = useState<boolean>(false);
+  const ghostSuggestionRef = useRef<typeof ghostSuggestion>(null);
+  ghostSuggestionRef.current = ghostSuggestion;
+  const ghostTimerRef = useRef<number | null>(null);
+  const ghostSeqRef = useRef<number>(0);
 
   const uploadAndInsertImage = useCallback(async (ed: Editor, file: File) => {
     try {
@@ -412,6 +434,79 @@ export const NotionNoteEditor: React.FC<NotionNoteEditorProps> = ({
     setTriggerPopup(null);
   }, []);
 
+  const clearGhostSuggestion = useCallback(() => {
+    ghostSeqRef.current += 1;
+    if (ghostTimerRef.current) {
+      window.clearTimeout(ghostTimerRef.current);
+      ghostTimerRef.current = null;
+    }
+    setGhostSuggestion(null);
+    setIsFetchingGhost(false);
+  }, []);
+
+  const acceptGhostSuggestion = useCallback(() => {
+    const ed = editorRef.current;
+    const ghost = ghostSuggestionRef.current;
+    if (!ed || !ghost) return;
+    ed.chain().focus().insertContentAt(ghost.pos, ghost.text).run();
+    setGhostSuggestion(null);
+  }, []);
+
+  const requestAiSuggestion = useCallback(async (ed: Editor, showErrors: boolean) => {
+    const { selection } = ed.state;
+    if (!selection.empty || triggerRef.current) return;
+    if (!ed.isFocused && !showErrors) return;
+
+    const pos = selection.from;
+    const docSize = ed.state.doc.content.size;
+    const prefix = ed.state.doc.textBetween(Math.max(0, pos - 1600), pos, "\n", "\ufffc");
+    const suffix = ed.state.doc.textBetween(pos, Math.min(docSize, pos + 400), "\n", "\ufffc");
+
+    if (prefix.trim().length < (showErrors ? 2 : 18)) {
+      if (showErrors) {
+        setUploadNotice("Hãy viết thêm vài chữ trước khi gọi gợi ý AI.");
+        window.setTimeout(() => setUploadNotice(null), 2400);
+      }
+      return;
+    }
+
+    const wrapEl = wrapperRef.current;
+    if (!wrapEl) return;
+    const wrapRect = wrapEl.getBoundingClientRect();
+    let left = 24;
+    let top = 48;
+    try {
+      const coords = ed.view.coordsAtPos(pos);
+      left = Math.max(12, Math.min(wrapRect.width - 340, coords.left - wrapRect.left));
+      top = Math.max(12, Math.min(wrapRect.height - 90, coords.bottom - wrapRect.top + 8));
+    } catch {
+      // use fallback coordinates
+    }
+
+    const seq = ++ghostSeqRef.current;
+    setIsFetchingGhost(true);
+    try {
+      const raw = await completeVaultNoteInline(noteTitleRef.current, prefix, suffix);
+      if (seq !== ghostSeqRef.current) return;
+      const clean = raw.trimEnd();
+      if (!clean.trim() || ed.state.selection.from !== pos) {
+        setGhostSuggestion(null);
+        return;
+      }
+      setGhostSuggestion({ text: clean, pos, left, top });
+    } catch (err) {
+      if (seq !== ghostSeqRef.current) return;
+      if (showErrors) {
+        setUploadNotice(typeof err === "string" ? err : "Không thể lấy gợi ý AI.");
+        window.setTimeout(() => setUploadNotice(null), 3200);
+      }
+    } finally {
+      if (seq === ghostSeqRef.current) {
+        setIsFetchingGhost(false);
+      }
+    }
+  }, []);
+
   const updateFloatingMenus = useCallback((ed: Editor) => {
     const { selection } = ed.state;
     const wrapEl = wrapperRef.current;
@@ -501,7 +596,28 @@ export const NotionNoteEditor: React.FC<NotionNoteEditorProps> = ({
       },
       handleKeyDown: (_view, event) => {
         const trig = triggerRef.current;
-        if (!trig) return false;
+        if (!trig) {
+          const ghost = ghostSuggestionRef.current;
+          if (ghost) {
+            if (event.key === "Tab") {
+              event.preventDefault();
+              acceptGhostSuggestion();
+              return true;
+            }
+            if (event.key === "Escape") {
+              event.preventDefault();
+              clearGhostSuggestion();
+              return true;
+            }
+          }
+          if (event.altKey && (event.key === "\\" || event.code === "Backslash")) {
+            event.preventDefault();
+            const ed = editorRef.current;
+            if (ed) void requestAiSuggestion(ed, true);
+            return true;
+          }
+          return false;
+        }
 
         const optionCount =
           trig.kind === "slash"
@@ -582,9 +698,19 @@ export const NotionNoteEditor: React.FC<NotionNoteEditorProps> = ({
       lastEmittedMdRef.current = md;
       onChangeMarkdownRef.current(md);
       updateFloatingMenus(ed);
+      clearGhostSuggestion();
+      if (aiCopilotEnabledRef.current && ed.state.selection.empty && !triggerRef.current) {
+        ghostTimerRef.current = window.setTimeout(() => {
+          void requestAiSuggestion(ed, false);
+        }, 950);
+      }
     },
     onSelectionUpdate: ({ editor: ed }) => {
       updateFloatingMenus(ed);
+      const ghost = ghostSuggestionRef.current;
+      if (ghost && ed.state.selection.from !== ghost.pos) {
+        clearGhostSuggestion();
+      }
     },
   });
 
@@ -601,8 +727,17 @@ export const NotionNoteEditor: React.FC<NotionNoteEditorProps> = ({
       setTriggerPopup(null);
       setSelectionBubble(null);
       setContextMenu(null);
+      clearGhostSuggestion();
     }
-  }, [content, editor, noteId]);
+  }, [clearGhostSuggestion, content, editor, noteId]);
+
+  useEffect(() => {
+    return () => {
+      if (ghostTimerRef.current) {
+        window.clearTimeout(ghostTimerRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!contextMenu) return;
@@ -694,9 +829,47 @@ export const NotionNoteEditor: React.FC<NotionNoteEditorProps> = ({
         </div>
       )}
 
+      {isFetchingGhost && !ghostSuggestion && (
+        <div className="pointer-events-none sticky top-2 z-20 ml-auto mr-4 w-fit rounded-md border border-[#1D263B] bg-[#0F1420]/90 px-2.5 py-0.5 text-[11px] text-[#6B9BFF]">
+          AI đang gợi ý...
+        </div>
+      )}
+
       <div className="mx-auto max-w-3xl">
         <EditorContent editor={editor} />
       </div>
+
+      {/* Copilot-style Ghost Autocomplete Banner */}
+      {ghostSuggestion && (
+        <div
+          style={{ left: ghostSuggestion.left, top: ghostSuggestion.top }}
+          onMouseDown={(e) => e.preventDefault()}
+          className="absolute z-30 max-w-md rounded-xl border border-[#2F6BFF]/45 bg-[#0F1420]/95 p-2.5 shadow-2xl backdrop-blur-xs"
+        >
+          <div className="flex items-start gap-2">
+            <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#6B9BFF]" />
+            <p className="text-xs italic leading-relaxed text-zinc-300 whitespace-pre-wrap">
+              {ghostSuggestion.text}
+            </p>
+          </div>
+          <div className="mt-2 flex items-center justify-end gap-1.5 border-t border-[#1D263B] pt-1.5 text-[10px]">
+            <button
+              type="button"
+              onClick={clearGhostSuggestion}
+              className="rounded border border-[#1D263B] bg-[#080B12] px-2 py-0.5 text-zinc-400 hover:bg-[#151C2C] hover:text-zinc-200 cursor-pointer"
+            >
+              Esc Bỏ
+            </button>
+            <button
+              type="button"
+              onClick={acceptGhostSuggestion}
+              className="rounded bg-[#2F6BFF] px-2.5 py-0.5 font-semibold text-white hover:bg-[#2558DB] cursor-pointer"
+            >
+              Tab Nhận gợi ý
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Floating selection toolbar */}
       {editor && selectionBubble && (
@@ -1149,6 +1322,17 @@ export const NotionNoteEditor: React.FC<NotionNoteEditorProps> = ({
           )}
 
           <div className="my-1 border-t border-[#1D263B]" />
+          <button
+            type="button"
+            onClick={() => {
+              setContextMenu(null);
+              void requestAiSuggestion(editor, true);
+            }}
+            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[#6B9BFF] hover:bg-[#151C2C] cursor-pointer"
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            <span>Gợi ý viết tiếp bằng AI (Alt+\)</span>
+          </button>
           <button
             type="button"
             onClick={() => void handleCopyMarkdown()}

@@ -53,6 +53,26 @@ describe("vaultMarkdownCodec", () => {
     assert.doesNotMatch(html, /<table>/);
   });
 
+  it("parses \\(...\\) inline math and \\[...\\] display math blocks", () => {
+    const md = [
+      "Centroid \\(C_1\\) va \\(x_i, x_j\\).",
+      "",
+      "\\[ Cluster(x)=\\arg\\min_{j}||x-C_j||^2 \\]",
+      "",
+      "\\[",
+      "||x-C_1||^2=||x-C_2||^2 \\]",
+      "",
+      "Cong thuc RBF: \\[ W_{ij}=\\exp(-\\gamma\\|x_i-x_j\\|^2) \\]",
+    ].join("\n");
+
+    const html = markdownToEditorHtml(md);
+    assert.match(html, /data-inline-math="C_1"/);
+    assert.match(html, /data-inline-math="x_i, x_j"/);
+    assert.match(html, /data-block-math="Cluster\(x\)=\\arg\\min_\{j\}\|\|x-C_j\|\|\^2"/);
+    assert.match(html, /data-block-math="\|\|x-C_1\|\|\^2=\|\|x-C_2\|\|\^2"/);
+    assert.match(html, /data-inline-math="W_\{ij\}=\\exp\(-\\gamma\\\|x_i-x_j\\\|\^2\)"/);
+  });
+
   it("serializes TipTap JSON back to clean Obsidian Markdown", () => {
     const doc: EditorJsonNode = {
       type: "doc",
