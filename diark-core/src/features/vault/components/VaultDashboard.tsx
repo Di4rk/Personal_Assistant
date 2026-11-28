@@ -173,6 +173,12 @@ export const VaultDashboard: React.FC = () => {
     }
   }, []);
 
+  useEffect(() => {
+    if (isGraphOpen) {
+      void refreshGraph();
+    }
+  }, [isGraphOpen, refreshGraph]);
+
   const refreshNotesList = useCallback(
     async (selectIdIfEmpty = true) => {
       try {

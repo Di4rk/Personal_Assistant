@@ -138,6 +138,7 @@ export const VaultGraphView = forwardRef<VaultGraphViewHandle, VaultGraphViewPro
   }, []);
 
   const drawRef = useRef<() => void>(() => {});
+  const reheatRef = useRef<() => void>(() => {});
 
   useEffect(() => {
     const sim = simRef.current;
@@ -146,8 +147,8 @@ export const VaultGraphView = forwardRef<VaultGraphViewHandle, VaultGraphViewPro
       prevPos.set(oldNode.data.id, { x: oldNode.x, y: oldNode.y });
     }
 
-    const count = Math.max(1, filtered.nodes.length);
-    const radius = mode === "local" ? Math.min(88, 28 + count * 8) : Math.min(220, 60 + count * 6);
+    const spreadStep = mode === "local" ? 64 : 84;
+    const goldenAngle = 2.399963229728653;
 
     const nextNodes: SimNode[] = filtered.nodes.map((node, idx) => {
       const prev = prevPos.get(node.id);
@@ -157,7 +158,8 @@ export const VaultGraphView = forwardRef<VaultGraphViewHandle, VaultGraphViewPro
       if (node.id === activeNoteId && mode === "local") {
         return { data: node, x: 0, y: 0, vx: 0, vy: 0, pinned: false };
       }
-      const angle = (idx / count) * Math.PI * 2;
+      const angle = idx * goldenAngle;
+      const radius = spreadStep * Math.sqrt(idx + 1);
       return {
         data: node,
         x: Math.cos(angle) * radius,
@@ -312,29 +314,38 @@ export const VaultGraphView = forwardRef<VaultGraphViewHandle, VaultGraphViewPro
       const sim = simRef.current;
       const n = sim.nodes.length;
       if (n === 0) {
+        rafId = 0;
         draw();
         return;
       }
 
-      const repulsion = mode === "local" ? 1350 : 2100;
-      const springLen = mode === "local" ? 68 : 90;
-      const springK = 0.045;
-      const gravity = 0.018;
-      const damping = 0.84;
+      const repulsion = mode === "local" ? 2600 : 6800;
+      const springLen = mode === "local" ? 95 : 135;
+      const springK = 0.04;
+      const gravity = mode === "local" ? 0.012 : 0.0085;
+      const damping = 0.86;
+      const minSpacing = mode === "local" ? 76 : 108;
+      const maxSpeedCap = 14;
 
       for (let i = 0; i < n; i += 1) {
         const a = sim.nodes[i];
-        if (a.pinned) continue;
-        a.vx += -a.x * gravity;
-        a.vy += -a.y * gravity;
+        if (!a.pinned) {
+          a.vx += -a.x * gravity;
+          a.vy += -a.y * gravity;
+        }
 
         for (let j = i + 1; j < n; j += 1) {
           const b = sim.nodes[j];
-          const dx = b.x - a.x || 0.5;
-          const dy = b.y - a.y || 0.5;
-          const distSq = Math.max(36, dx * dx + dy * dy);
+          const dx = b.x - a.x || (i % 2 === 0 ? 0.8 : -0.8);
+          const dy = b.y - a.y || (j % 2 === 0 ? 0.8 : -0.8);
+          const distSq = Math.max(64, dx * dx + dy * dy);
           const dist = Math.sqrt(distSq);
-          const force = repulsion / distSq;
+
+          let force = repulsion / distSq;
+          if (dist < minSpacing) {
+            force += (minSpacing - dist) * 0.14;
+          }
+
           const fx = (dx / dist) * force;
           const fy = (dy / dist) * force;
 
@@ -373,8 +384,8 @@ export const VaultGraphView = forwardRef<VaultGraphViewHandle, VaultGraphViewPro
           node.vy = 0;
           continue;
         }
-        node.vx *= damping;
-        node.vy *= damping;
+        node.vx = Math.max(-maxSpeedCap, Math.min(maxSpeedCap, node.vx * damping));
+        node.vy = Math.max(-maxSpeedCap, Math.min(maxSpeedCap, node.vy * damping));
         node.x += node.vx;
         node.y += node.vy;
         const speed = Math.abs(node.vx) + Math.abs(node.vy);
@@ -384,16 +395,25 @@ export const VaultGraphView = forwardRef<VaultGraphViewHandle, VaultGraphViewPro
       sim.energy = maxSpeed;
       draw();
 
-      if (running && (sim.energy > 0.08 || dragStateRef.current.kind === "node")) {
+      if (running && (sim.energy > 0.03 || dragStateRef.current.kind === "node")) {
         rafId = window.requestAnimationFrame(stepPhysics);
       } else {
         rafId = 0;
       }
     };
 
+    reheatRef.current = () => {
+      if (!running) return;
+      simRef.current.energy = Math.max(simRef.current.energy, 1);
+      if (rafId === 0) {
+        rafId = window.requestAnimationFrame(stepPhysics);
+      }
+    };
+
     rafId = window.requestAnimationFrame(stepPhysics);
     return () => {
       running = false;
+      reheatRef.current = () => {};
       if (rafId) window.cancelAnimationFrame(rafId);
     };
   }, [activeNoteId, filtered, mode, size]);
@@ -416,7 +436,7 @@ export const VaultGraphView = forwardRef<VaultGraphViewHandle, VaultGraphViewPro
   };
 
   const hitTestNode = (worldX: number, worldY: number): SimNode | null => {
-    const hitR = 14 / simRef.current.zoom;
+    const hitR = 16 / simRef.current.zoom;
     for (let i = simRef.current.nodes.length - 1; i >= 0; i -= 1) {
       const node = simRef.current.nodes[i];
       const dx = worldX - node.x;
@@ -444,6 +464,7 @@ export const VaultGraphView = forwardRef<VaultGraphViewHandle, VaultGraphViewPro
         startCamY: simRef.current.camY,
         moved: false,
       };
+      reheatRef.current();
     } else {
       dragStateRef.current = {
         kind: "pan",
@@ -470,7 +491,7 @@ export const VaultGraphView = forwardRef<VaultGraphViewHandle, VaultGraphViewPro
       }
       drag.node.x = world.x;
       drag.node.y = world.y;
-      drawRef.current();
+      reheatRef.current();
       return;
     }
 
@@ -500,6 +521,8 @@ export const VaultGraphView = forwardRef<VaultGraphViewHandle, VaultGraphViewPro
       drag.node.pinned = false;
       if (!drag.moved) {
         onSelectNode(drag.node.data);
+      } else {
+        reheatRef.current();
       }
     }
     dragStateRef.current.kind = "none";
