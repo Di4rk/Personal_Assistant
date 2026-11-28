@@ -51,6 +51,7 @@ import {
   markdownToEditorHtml,
   type EditorJsonNode,
 } from "../utils/vaultMarkdownCodec";
+import { VAULT_TEMPLATES, formatTodayShort } from "../utils/vaultTemplates";
 
 interface NotionNoteEditorProps {
   noteId: string | null;
@@ -238,6 +239,17 @@ const SLASH_ITEMS: SlashItem[] = [
     icon: <Minus className="h-3.5 w-3.5" />,
     run: (ed) => ed.chain().focus().setHorizontalRule().run(),
   },
+  ...VAULT_TEMPLATES.filter((t) => t.id !== "blank").map((tpl) => ({
+    id: `tpl-${tpl.id}`,
+    label: `Mẫu: ${tpl.shortLabel}`,
+    hint: tpl.description,
+    keywords: `mau template uit ${tpl.id} ${tpl.shortLabel.toLowerCase()} ${tpl.name.toLowerCase()}`,
+    icon: <Sparkles className="h-3.5 w-3.5 text-[#6B9BFF]" />,
+    run: (ed: Editor) => {
+      const html = markdownToEditorHtml(tpl.buildContent(formatTodayShort()));
+      ed.chain().focus().insertContent(html).run();
+    },
+  })),
 ];
 
 export const NotionNoteEditor: React.FC<NotionNoteEditorProps> = ({
@@ -834,7 +846,7 @@ export const NotionNoteEditor: React.FC<NotionNoteEditorProps> = ({
           ) : (
             <>
               <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-zinc-500">
-                Liên kết ghi chú (Obsidian)
+                Liên kết ghi chú
               </div>
               {filteredMentionNotes.map((item, idx) => (
                 <button
@@ -879,7 +891,7 @@ export const NotionNoteEditor: React.FC<NotionNoteEditorProps> = ({
         </div>
       )}
 
-      {/* Right-click Word / Notion context menu */}
+      {/* Right-click context menu */}
       {editor && contextMenu && (
         <div
           style={{ left: contextMenu.x, top: contextMenu.y }}

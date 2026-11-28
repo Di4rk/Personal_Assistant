@@ -20,7 +20,17 @@ import {
   Printer,
   Hash,
   X,
+  LayoutTemplate,
+  Keyboard,
 } from "lucide-react";
+import { useSettingsStore } from "@/stores/useSettingsStore";
+import { useVaultShortcutsStore } from "@/stores/useVaultShortcutsStore";
+import { matchesShortcut } from "../utils/vaultShortcuts";
+import {
+  VAULT_TEMPLATES,
+  formatTodayShort,
+  type VaultTemplateSpec,
+} from "../utils/vaultTemplates";
 import {
   ensureDefaultVaultPath,
   listVaultNotes,
@@ -101,8 +111,14 @@ export const VaultDashboard: React.FC = () => {
   const [viewMode, setViewMode] = useState<EditorViewMode>("wysiwyg");
   const [showGraphInspector, setShowGraphInspector] = useState<boolean>(true);
   const [isGlobalGraphOpen, setIsGlobalGraphOpen] = useState<boolean>(false);
+  const [isTemplateModalOpen, setIsTemplateModalOpen] = useState<boolean>(false);
   const [vaultGraph, setVaultGraph] = useState<VaultGraphDto>({ nodes: [], edges: [] });
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+
+  const shortcuts = useVaultShortcutsStore((s) => s.shortcuts);
+  const isSettingsOpen = useSettingsStore((s) => s.isOpen);
+  const openSettings = useSettingsStore((s) => s.openSettings);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
 
   // Search state
   const [searchQuery, setSearchQuery] = useState<string>("");
@@ -267,17 +283,103 @@ export const VaultDashboard: React.FC = () => {
     };
   }, [activeNoteId, content, handleSaveNote, saveState, tagsInput, title]);
 
-  // Ctrl+S shortcut
+  const handleCreateNewNote = useCallback(() => {
+    if (autosaveTimerRef.current) {
+      window.clearTimeout(autosaveTimerRef.current);
+      autosaveTimerRef.current = null;
+    }
+    setActiveNoteId(null);
+    setTitle("");
+    setFolder(selectedFolder !== "all" ? selectedFolder : "notes");
+    setTagsInput("");
+    setNoteType("GENERAL");
+    setExternalUri("");
+    setContent("# Ghi chú mới\n\n- [ ] Việc cần làm đầu tiên\n");
+    setBacklinks([]);
+    setSaveState("dirty");
+    setEditorError(null);
+    setViewMode("wysiwyg");
+  }, [selectedFolder]);
+
+  const handleCreateFromTemplate = useCallback(
+    (tpl: VaultTemplateSpec) => {
+      if (autosaveTimerRef.current) {
+        window.clearTimeout(autosaveTimerRef.current);
+        autosaveTimerRef.current = null;
+      }
+      const today = formatTodayShort();
+      setActiveNoteId(null);
+      setTitle(tpl.buildTitle(today));
+      setFolder(
+        selectedFolder !== "all" ? selectedFolder : tpl.defaultFolder || "notes"
+      );
+      setTagsInput(tpl.defaultTags.join(", "));
+      setNoteType(tpl.noteType);
+      setExternalUri("");
+      setContent(tpl.buildContent(today));
+      setBacklinks([]);
+      setSaveState("dirty");
+      setEditorError(null);
+      setViewMode("wysiwyg");
+      setIsTemplateModalOpen(false);
+    },
+    [selectedFolder]
+  );
+
+  // Customizable Vault keyboard shortcuts
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+      if (isSettingsOpen) return;
+      if (e.key === "Escape") {
+        if (isTemplateModalOpen) {
+          e.preventDefault();
+          setIsTemplateModalOpen(false);
+          return;
+        }
+        if (isGlobalGraphOpen) {
+          e.preventDefault();
+          setIsGlobalGraphOpen(false);
+          return;
+        }
+      }
+
+      if (matchesShortcut(e, shortcuts.saveNote)) {
         e.preventDefault();
         void handleSaveNote();
+      } else if (matchesShortcut(e, shortcuts.newNote)) {
+        e.preventDefault();
+        handleCreateNewNote();
+      } else if (matchesShortcut(e, shortcuts.openTemplates)) {
+        e.preventDefault();
+        setIsTemplateModalOpen((prev) => !prev);
+      } else if (matchesShortcut(e, shortcuts.toggleSource)) {
+        e.preventDefault();
+        setViewMode((prev) => (prev === "wysiwyg" ? "source" : "wysiwyg"));
+      } else if (matchesShortcut(e, shortcuts.toggleGraph)) {
+        e.preventDefault();
+        setShowGraphInspector((prev) => !prev);
+      } else if (matchesShortcut(e, shortcuts.openGlobalGraph)) {
+        e.preventDefault();
+        setIsGlobalGraphOpen((prev) => !prev);
+      } else if (matchesShortcut(e, shortcuts.focusSearch)) {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+      } else if (matchesShortcut(e, shortcuts.exportPdf)) {
+        e.preventDefault();
+        window.print();
       }
     };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [handleSaveNote]);
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [
+    handleCreateNewNote,
+    handleSaveNote,
+    isGlobalGraphOpen,
+    isSettingsOpen,
+    isTemplateModalOpen,
+    shortcuts,
+  ]);
 
   // FTS5 Search debounce
   useEffect(() => {
@@ -302,24 +404,6 @@ export const VaultDashboard: React.FC = () => {
 
     return () => window.clearTimeout(timer);
   }, [searchQuery]);
-
-  const handleCreateNewNote = () => {
-    if (autosaveTimerRef.current) {
-      window.clearTimeout(autosaveTimerRef.current);
-      autosaveTimerRef.current = null;
-    }
-    setActiveNoteId(null);
-    setTitle("");
-    setFolder(selectedFolder !== "all" ? selectedFolder : "notes");
-    setTagsInput("");
-    setNoteType("GENERAL");
-    setExternalUri("");
-    setContent("# Ghi chú mới\n\n- [ ] Việc cần làm đầu tiên\n");
-    setBacklinks([]);
-    setSaveState("dirty");
-    setEditorError(null);
-    setViewMode("wysiwyg");
-  };
 
   const handleDeleteNote = async (noteId: string) => {
     try {
@@ -381,7 +465,7 @@ export const VaultDashboard: React.FC = () => {
       const selected = await open({
         directory: true,
         multiple: false,
-        title: "Chọn thư mục lưu ghi chú (hỗ trợ Obsidian Vault)",
+        title: "Chọn thư mục lưu ghi chú",
       });
       if (selected && typeof selected === "string") {
         setIsSyncing(true);
@@ -466,25 +550,38 @@ export const VaultDashboard: React.FC = () => {
                 <h2 className="text-sm font-semibold text-zinc-100">Ghi chú học tập</h2>
                 <p className="text-[11px] text-zinc-500">{notes.length} ghi chú đã lưu</p>
               </div>
-              <button
-                type="button"
-                onClick={handleCreateNewNote}
-                className="inline-flex items-center gap-1 rounded-lg bg-[#2F6BFF] hover:bg-[#2558DB] px-2.5 py-1.5 text-xs font-semibold text-white transition-colors cursor-pointer"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                <span>Ghi chú mới</span>
-              </button>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setIsTemplateModalOpen(true)}
+                  title={`Tạo từ mẫu UIT (${shortcuts.openTemplates})`}
+                  className="inline-flex items-center gap-1 rounded-lg border border-[#1D263B] bg-[#080B12] hover:bg-[#151C2C] px-2 py-1.5 text-xs font-medium text-zinc-200 transition-colors cursor-pointer"
+                >
+                  <LayoutTemplate className="h-3.5 w-3.5 text-[#6B9BFF]" />
+                  <span>Mẫu</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCreateNewNote}
+                  title={`Ghi chú mới (${shortcuts.newNote})`}
+                  className="inline-flex items-center gap-1 rounded-lg bg-[#2F6BFF] hover:bg-[#2558DB] px-2.5 py-1.5 text-xs font-semibold text-white transition-colors cursor-pointer"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  <span>Mới</span>
+                </button>
+              </div>
             </div>
 
             {/* Instant Search */}
             <div className="relative">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-500" aria-hidden="true" />
               <input
+                ref={searchInputRef}
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 aria-label="Tìm kiếm ghi chú"
-                placeholder="Tìm nhanh tiêu đề, nội dung, code..."
+                placeholder={`Tìm nhanh (${shortcuts.focusSearch})...`}
                 className="w-full rounded-lg border border-[#1D263B] bg-[#080B12] pl-8 pr-3 py-1.5 text-xs text-zinc-200 placeholder-zinc-500 focus:border-[#2F6BFF] focus:outline-none"
               />
             </div>
@@ -627,7 +724,7 @@ export const VaultDashboard: React.FC = () => {
             )}
           </div>
 
-          {/* Bottom Secondary Tools (Vault directory & Obsidian) */}
+          {/* Bottom Secondary Tools */}
           <div className="border-t border-[#1D263B] p-2.5">
             <button
               type="button"
@@ -636,7 +733,7 @@ export const VaultDashboard: React.FC = () => {
             >
               <span className="flex items-center gap-1.5">
                 <FolderOpen className="h-3.5 w-3.5 text-zinc-500" />
-                <span>Thư mục lưu &amp; Obsidian</span>
+                <span>Thư mục &amp; Phím tắt</span>
               </span>
               {showVaultTools ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
             </button>
@@ -681,13 +778,21 @@ export const VaultDashboard: React.FC = () => {
                     <Zap className="h-3 w-3" />
                     <span>Lưu nhanh</span>
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => openSettings("system")}
+                    className="inline-flex items-center gap-1 rounded border border-[#1D263B] bg-[#080B12] hover:bg-[#151C2C] px-2 py-1 text-zinc-200 cursor-pointer"
+                  >
+                    <Keyboard className="h-3 w-3 text-[#6B9BFF]" />
+                    <span>Chỉnh phím tắt</span>
+                  </button>
                 </div>
               </div>
             )}
           </div>
         </aside>
 
-        {/* RIGHT PANE: Unified Notion Editor + Obsidian Graph Inspector */}
+        {/* RIGHT PANE: Unified Editor + Graph Inspector */}
         <section className="lg:col-span-8 xl:col-span-9 flex flex-col rounded-xl border border-[#1D263B] bg-[#0F1420] overflow-hidden vault-print-target">
           {isLoadingNote ? (
             <div className="flex-1 flex items-center justify-center gap-2 text-xs text-zinc-500">
@@ -731,6 +836,7 @@ export const VaultDashboard: React.FC = () => {
                     <button
                       type="button"
                       onClick={() => void handleSaveNote()}
+                      title={`Lưu ghi chú (${shortcuts.saveNote})`}
                       className="inline-flex items-center gap-1 rounded-lg border border-[#1D263B] bg-[#080B12] hover:bg-[#151C2C] px-2.5 py-1 text-xs font-medium text-zinc-200 transition-colors cursor-pointer"
                     >
                       <Save className="h-3.5 w-3.5 text-emerald-400" aria-hidden="true" />
@@ -742,7 +848,7 @@ export const VaultDashboard: React.FC = () => {
                       onClick={() =>
                         setViewMode((prev) => (prev === "wysiwyg" ? "source" : "wysiwyg"))
                       }
-                      title="Chuyển giữa giao diện Notion và mã Markdown gốc"
+                      title={`Chuyển giữa soạn thảo trực quan và mã nguồn .md (${shortcuts.toggleSource})`}
                       className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer ${
                         viewMode === "source"
                           ? "border-[#2F6BFF]/50 bg-[#2F6BFF]/20 text-[#6B9BFF]"
@@ -756,7 +862,7 @@ export const VaultDashboard: React.FC = () => {
                     <button
                       type="button"
                       onClick={() => setShowGraphInspector((prev) => !prev)}
-                      title="Bật/tắt bảng mạng liên kết Obsidian"
+                      title={`Bật/tắt bảng mạng liên kết (${shortcuts.toggleGraph})`}
                       className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer ${
                         showGraphInspector
                           ? "border-[#2F6BFF]/50 bg-[#2F6BFF]/20 text-[#6B9BFF]"
@@ -770,10 +876,19 @@ export const VaultDashboard: React.FC = () => {
                     <button
                       type="button"
                       onClick={handleExportPdf}
-                      title="In hoặc Xuất PDF"
+                      title={`In hoặc Xuất PDF (${shortcuts.exportPdf})`}
                       className="inline-flex items-center gap-1 rounded-lg border border-[#1D263B] bg-[#080B12] hover:bg-[#151C2C] px-2 py-1 text-xs text-zinc-300 transition-colors cursor-pointer"
                     >
                       <Printer className="h-3.5 w-3.5" />
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => openSettings("system")}
+                      title="Chỉnh phím tắt ghi chú trong Cài đặt"
+                      className="inline-flex items-center gap-1 rounded-lg border border-[#1D263B] bg-[#080B12] hover:bg-[#151C2C] px-2 py-1 text-xs text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer"
+                    >
+                      <Keyboard className="h-3.5 w-3.5" />
                     </button>
                   </div>
                 </div>
@@ -886,7 +1001,7 @@ export const VaultDashboard: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => setIsGlobalGraphOpen(true)}
-                        title="Mở toàn bộ đồ thị Vault"
+                        title={`Mở toàn bộ đồ thị (${shortcuts.openGlobalGraph})`}
                         className="inline-flex items-center gap-1 rounded border border-[#1D263B] bg-[#0F1420] hover:bg-[#151C2C] px-2 py-1 text-[11px] text-[#6B9BFF] cursor-pointer"
                       >
                         <Maximize2 className="h-3 w-3" />
@@ -946,7 +1061,7 @@ export const VaultDashboard: React.FC = () => {
             <div className="flex items-center justify-between border-b border-[#1D263B] px-5 py-3">
               <div>
                 <h3 className="text-sm font-semibold text-zinc-100">
-                  Đồ thị tri thức Vault (Obsidian Graph)
+                  Đồ thị liên kết ghi chú
                 </h3>
                 <p className="text-[11px] text-zinc-400">
                   {vaultGraph.nodes.length} ghi chú · {vaultGraph.edges.length} liên kết · Nhấp vào nút để mở hoặc tạo ghi chú
@@ -970,6 +1085,69 @@ export const VaultDashboard: React.FC = () => {
               }}
               className="flex-1 rounded-none border-0"
             />
+          </div>
+        </div>
+      )}
+
+      {isTemplateModalOpen && (
+        <div
+          onClick={() => setIsTemplateModalOpen(false)}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-xs vault-no-print"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-2xl overflow-hidden rounded-xl border border-[#2B3957] bg-[#0F1420] shadow-2xl"
+          >
+            <div className="flex items-center justify-between border-b border-[#1D263B] px-5 py-3.5">
+              <div>
+                <h3 className="text-sm font-semibold text-zinc-100">
+                  Tạo ghi chú từ mẫu học tập UIT
+                </h3>
+                <p className="text-[11px] text-zinc-400">
+                  Chọn cấu trúc sẵn để ghi nhanh bài giảng, code, việc nhóm, ôn thi hoặc báo cáo Lab.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsTemplateModalOpen(false)}
+                className="rounded-lg border border-[#1D263B] bg-[#080B12] p-1.5 text-zinc-400 hover:bg-[#151C2C] hover:text-zinc-100 cursor-pointer"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 gap-2.5 p-4 sm:grid-cols-2">
+              {VAULT_TEMPLATES.map((tpl) => (
+                <button
+                  key={tpl.id}
+                  type="button"
+                  onClick={() => handleCreateFromTemplate(tpl)}
+                  className="flex flex-col items-start gap-1.5 rounded-xl border border-[#1D263B] bg-[#080B12] p-3.5 text-left transition-colors hover:border-[#2F6BFF]/60 hover:bg-[#151C2C] cursor-pointer"
+                >
+                  <div className="flex w-full items-center justify-between gap-2">
+                    <span className="text-xs font-semibold text-zinc-100">{tpl.name}</span>
+                    <span className="rounded border border-[#1D263B] bg-[#0F1420] px-1.5 py-0.5 font-mono text-[10px] text-[#6B9BFF]">
+                      {tpl.defaultFolder}
+                    </span>
+                  </div>
+                  <p className="text-[11px] leading-relaxed text-zinc-400">
+                    {tpl.description}
+                  </p>
+                  {tpl.defaultTags.length > 0 && (
+                    <div className="flex flex-wrap gap-1 pt-0.5">
+                      {tpl.defaultTags.map((tag) => (
+                        <span
+                          key={tag}
+                          className="rounded bg-[#0F1420] px-1.5 py-0.5 font-mono text-[10px] text-zinc-400"
+                        >
+                          #{tag}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       )}

@@ -1,6 +1,12 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useSettingsStore } from '../stores/useSettingsStore';
 import { usePrivacyStore } from '../stores/usePrivacyStore';
+import { useVaultShortcutsStore } from '../stores/useVaultShortcutsStore';
+import {
+  VAULT_SHORTCUT_META,
+  normalizeShortcutFromEvent,
+  type VaultShortcutAction,
+} from '../features/vault/utils/vaultShortcuts';
 import {
   addGoogleCalendar,
   connectGoogleCalendarOAuth,
@@ -212,6 +218,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [isResettingShortcut, setIsResettingShortcut] = useState<boolean>(false);
   const [systemPrefError, setSystemPrefError] = useState<string | null>(null);
 
+  const {
+    shortcuts: vaultShortcuts,
+    setShortcut: setVaultShortcut,
+    resetShortcuts: resetVaultShortcuts,
+  } = useVaultShortcutsStore();
+  const [recordingVaultAction, setRecordingVaultAction] = useState<VaultShortcutAction | null>(null);
+  const [vaultShortcutHint, setVaultShortcutHint] = useState<string | null>(null);
+
   const loadCalendarConnections = useCallback(async () => {
     const [calsRes, oauthRes] = await Promise.allSettled([
       listGoogleCalendars(),
@@ -238,13 +252,43 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isOpen) {
+      if (e.key === 'Escape' && isOpen && !recordingVaultAction) {
         closeSettings();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, closeSettings]);
+  }, [isOpen, closeSettings, recordingVaultAction]);
+
+  useEffect(() => {
+    if (!recordingVaultAction) return;
+    const handleRecord = (e: KeyboardEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.key === 'Escape') {
+        setRecordingVaultAction(null);
+        setVaultShortcutHint(null);
+        return;
+      }
+      const combo = normalizeShortcutFromEvent(e);
+      if (!combo) {
+        setVaultShortcutHint('Hãy nhấn tổ hợp có Ctrl / Alt (hoặc phím F1-F12).');
+        return;
+      }
+      const conflict = VAULT_SHORTCUT_META.find(
+        (m) => m.action !== recordingVaultAction && vaultShortcuts[m.action] === combo
+      );
+      setVaultShortcut(recordingVaultAction, combo);
+      setRecordingVaultAction(null);
+      setVaultShortcutHint(
+        conflict
+          ? `Đã lưu ${combo}. Lưu ý: đang trùng với "${conflict.label}".`
+          : `Đã cập nhật phím tắt: ${combo}`
+      );
+    };
+    window.addEventListener('keydown', handleRecord, true);
+    return () => window.removeEventListener('keydown', handleRecord, true);
+  }, [recordingVaultAction, setVaultShortcut, vaultShortcuts]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -1378,6 +1422,74 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         setSystemPrefError(null);
                       }}
                     />
+                  </div>
+                </div>
+
+                {/* 1.5 Vault Notes Shortcuts */}
+                <div className="space-y-3 rounded-xl border border-[#1D263B] bg-[#080B12] p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="flex items-center gap-2 font-mono text-xs font-semibold text-zinc-100">
+                        <Keyboard className="h-4 w-4 text-[#6B9BFF]" />
+                        <span>PHÍM TẮT GHI CHÚ</span>
+                      </div>
+                      <p className="mt-1 text-[11px] text-zinc-400">
+                        Nhấp vào ô phím tắt rồi bấm tổ hợp mới để đổi, nhấn Esc để hủy ghi.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        resetVaultShortcuts();
+                        setRecordingVaultAction(null);
+                        setVaultShortcutHint('Đã khôi phục toàn bộ phím tắt ghi chú mặc định.');
+                      }}
+                      className={`${secondaryBtnCls} py-1.5 px-3`}
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" />
+                      <span>Khôi phục mặc định</span>
+                    </button>
+                  </div>
+
+                  {vaultShortcutHint && (
+                    <div className="rounded-lg border border-[#2F6BFF]/40 bg-[#2F6BFF]/10 px-3 py-1.5 text-[11px] text-[#6B9BFF]">
+                      {vaultShortcutHint}
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 gap-2 border-t border-[#1D263B]/80 pt-3 sm:grid-cols-2">
+                    {VAULT_SHORTCUT_META.map((item) => {
+                      const isRec = recordingVaultAction === item.action;
+                      return (
+                        <div
+                          key={item.action}
+                          className="flex items-center justify-between gap-2 rounded-lg border border-[#1D263B] bg-[#0F1420] px-3 py-2"
+                        >
+                          <div className="min-w-0">
+                            <div className="truncate text-xs font-medium text-zinc-200">
+                              {item.label}
+                            </div>
+                            <div className="truncate text-[10px] text-zinc-500">
+                              {item.description}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setRecordingVaultAction(isRec ? null : item.action);
+                              setVaultShortcutHint(null);
+                            }}
+                            className={`shrink-0 rounded-md border px-2 py-1 font-mono text-[11px] font-semibold transition-colors cursor-pointer ${
+                              isRec
+                                ? 'border-[#2F6BFF] bg-[#2F6BFF]/25 text-[#6B9BFF]'
+                                : 'border-[#2B3957] bg-[#080B12] text-zinc-200 hover:border-[#2F6BFF]/60 hover:text-[#6B9BFF]'
+                            }`}
+                          >
+                            {isRec ? 'Nhấn tổ hợp...' : vaultShortcuts[item.action]}
+                          </button>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
 
