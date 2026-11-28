@@ -6,7 +6,7 @@ export function maskStudentId(id: string): string {
 
 /**
  * Che giấu họ tên phục vụ Demo Mode (P0 Privacy Invariant).
- * Chuyển đổi "Phạm Hoàng Gia" -> "P. H. G."
+ * Chuyển đổi "Nguyễn Văn An" -> "N. V. A."
  */
 export function maskFullName(name: string): string {
   if (!name) return '';

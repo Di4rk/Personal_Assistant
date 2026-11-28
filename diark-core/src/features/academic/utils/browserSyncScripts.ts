@@ -207,7 +207,7 @@ export const WECODE_BROWSER_SYNC_SCRIPT = `(async () => {
     try {
         showBanner("Đang kiểm tra đăng nhập Wecode...", true);
 
-        // 1. Trích xuất Wecode User ID số (ví dụ: 2429, KHÔNG lấy MSSV như 25520458)
+        // 1. Trích xuất Wecode User ID số (ví dụ: 2429, KHÔNG lấy MSSV như 21520001)
         let wecodeUserId = null;
         const profileUserLink = document.querySelector('a[href*="/users/"]');
         if (profileUserLink) {

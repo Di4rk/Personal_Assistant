@@ -7,16 +7,16 @@ import {
 import { getTimeBucket, pickRandomGreeting } from "../src/features/home/greetings.ts";
 
 test("formatVietnameseName normalizes Western-ordered Vietnamese student names", () => {
-  assert.equal(formatVietnameseName("Gia Phạm Hoàng"), "Phạm Hoàng Gia");
-  assert.equal(formatVietnameseName("Phạm Hoàng Gia"), "Phạm Hoàng Gia");
+  assert.equal(formatVietnameseName("Huy Lê Quốc"), "Lê Quốc Huy");
+  assert.equal(formatVietnameseName("Lê Quốc Huy"), "Lê Quốc Huy");
   assert.equal(formatVietnameseName("Minh Nguyễn Văn"), "Nguyễn Văn Minh");
   assert.equal(formatVietnameseName("An Trần Thị Thu"), "Trần Thị Thu An");
   assert.equal(formatVietnameseName(""), "");
 });
 
 test("extractVietnameseGivenName returns the proper given name regardless of SSO order", () => {
-  assert.equal(extractVietnameseGivenName("Gia Phạm Hoàng"), "Gia");
-  assert.equal(extractVietnameseGivenName("Phạm Hoàng Gia"), "Gia");
+  assert.equal(extractVietnameseGivenName("Huy Lê Quốc"), "Huy");
+  assert.equal(extractVietnameseGivenName("Lê Quốc Huy"), "Huy");
   assert.equal(extractVietnameseGivenName("Minh Nguyễn Văn"), "Minh");
   assert.equal(extractVietnameseGivenName("An Trần Thị Thu"), "An");
   assert.equal(extractVietnameseGivenName(""), "");
@@ -36,12 +36,12 @@ test("pickRandomGreeting varies across seeds and works with or without student n
   const sampleHours = [5, 9, 12, 15, 19, 23, 2];
 
   for (const hour of sampleHours) {
-    const g1 = pickRandomGreeting(hour, "Gia Phạm Hoàng", 0.01);
-    const g2 = pickRandomGreeting(hour, "Gia Phạm Hoàng", 0.55);
-    const g3 = pickRandomGreeting(hour, "Gia Phạm Hoàng", 0.95);
+    const g1 = pickRandomGreeting(hour, "Huy Lê Quốc", 0.01);
+    const g2 = pickRandomGreeting(hour, "Huy Lê Quốc", 0.55);
+    const g3 = pickRandomGreeting(hour, "Huy Lê Quốc", 0.95);
 
-    assert.ok(g1.includes("Gia"), `Expected given name in greeting for hour ${hour}: ${g1}`);
-    assert.ok(!g1.includes("Phạm Hoàng"), `Should not split middle/surname as given name: ${g1}`);
+    assert.ok(g1.includes("Huy"), `Expected given name in greeting for hour ${hour}: ${g1}`);
+    assert.ok(!g1.includes("Lê Quốc"), `Should not split middle/surname as given name: ${g1}`);
     assert.notEqual(g1, g2);
     assert.notEqual(g2, g3);
 

@@ -891,8 +891,8 @@ mod tests {
 
     #[test]
     fn test_build_sso_verify_script_escapes_credentials() {
-        let script = build_sso_verify_script("25520458", "pass\"with\\quote");
-        assert!(script.contains("\"25520458\""));
+        let script = build_sso_verify_script("21520001", "pass\"with\\quote");
+        assert!(script.contains("\"21520001\""));
         assert!(script.contains("pass\\\"with\\\\quote"));
         assert!(script.contains("diark-sso://verify?status="));
     }

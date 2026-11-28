@@ -1,4 +1,4 @@
-export const APP_VERSION = 'v1.2.0';
+export const APP_VERSION = 'v1.2.1';
 export const DEFAULT_NICKNAME = 'Diark';
 export const DEFAULT_MAJOR = 'CS';
 export const APP_SUBTITLE = 'Personal Operations & Academic Engine';

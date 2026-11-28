@@ -648,7 +648,7 @@ Dưới đây là danh mục toàn bộ các Tauri IPC Commands đã được đ
   - $TK < 4.0 \implies \text{F} \ (0.0)$ (Không đạt)
 
 ### B. Student Identity Mini Card & P0 Privacy Masking
-- **Định dạng Tên Tiếng Việt**: Chuẩn hóa đảo ngược thứ tự tên phương Tây (`Gia Phạm Hoàng` $\rightarrow$ `Phạm Hoàng Gia`) qua `formatVietnameseName`.
+- **Định dạng Tên Tiếng Việt**: Chuẩn hóa đảo ngược thứ tự tên phương Tây (`Huy Lê Quốc` $\rightarrow$ `Lê Quốc Huy`) qua `formatVietnameseName`.
 - **Cấu trúc Mini Card 2 tầng**:
   - Tầng 1: Họ tên in đậm (`text-base font-semibold`) + Badge trạng thái đào tạo (`Đang học - Học kỳ X`).
   - Tầng 2: Metadata súc tích (`MSSV • Lớp • Hệ: Chuẩn • Khóa YYYY`), loại bỏ hiển thị trùng lặp tên khoa/ngành cạnh mã lớp.

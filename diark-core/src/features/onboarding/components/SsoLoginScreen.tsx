@@ -315,7 +315,7 @@ export const SsoLoginScreen: React.FC<SsoLoginScreenProps> = ({
                 type="text"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                placeholder="Ví dụ: 25520458"
+                placeholder="Ví dụ: 21520001"
                 autoFocus
                 autoComplete="username"
                 className="w-full rounded-xl border border-[#27272A] bg-[#0B0B0D] px-3.5 py-2.5 text-sm text-zinc-100 placeholder-zinc-500 outline-none transition-[border-color,box-shadow] duration-150 focus:border-[#2F6BFF]/70 focus:shadow-[0_0_0_3px_rgba(47,107,255,0.14)]"
