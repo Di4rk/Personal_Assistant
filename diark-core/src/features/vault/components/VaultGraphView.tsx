@@ -1,12 +1,26 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { RotateCcw, ZoomIn, ZoomOut } from "lucide-react";
 import type { VaultGraphDto, VaultGraphNodeDto } from "../types";
+
+export interface VaultGraphViewHandle {
+  zoomIn: () => void;
+  zoomOut: () => void;
+  resetCamera: () => void;
+}
 
 interface VaultGraphViewProps {
   graph: VaultGraphDto;
   activeNoteId: string | null;
   mode: "local" | "global";
   onSelectNode: (node: VaultGraphNodeDto) => void;
+  hideFloatingControls?: boolean;
   className?: string;
 }
 
@@ -39,13 +53,11 @@ function colorForNode(node: VaultGraphNodeDto, isActive: boolean): string {
   return FOLDER_COLORS[Math.abs(hash) % FOLDER_COLORS.length];
 }
 
-export const VaultGraphView: React.FC<VaultGraphViewProps> = ({
-  graph,
-  activeNoteId,
-  mode,
-  onSelectNode,
-  className = "",
-}) => {
+export const VaultGraphView = forwardRef<VaultGraphViewHandle, VaultGraphViewProps>(
+  (
+    { graph, activeNoteId, mode, onSelectNode, hideFloatingControls = false, className = "" },
+    ref
+  ) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
@@ -516,6 +528,12 @@ export const VaultGraphView: React.FC<VaultGraphViewProps> = ({
     adjustZoom(e.deltaY < 0 ? 1.12 : 0.89);
   };
 
+  useImperativeHandle(ref, () => ({
+    zoomIn: () => adjustZoom(1.2),
+    zoomOut: () => adjustZoom(0.84),
+    resetCamera,
+  }));
+
   return (
     <div
       ref={containerRef}
@@ -533,32 +551,34 @@ export const VaultGraphView: React.FC<VaultGraphViewProps> = ({
         }`}
       />
 
-      <div className="pointer-events-auto absolute right-2 top-2 flex items-center gap-1 rounded-md border border-[#1D263B] bg-[#0F1420]/90 p-0.5">
-        <button
-          type="button"
-          onClick={() => adjustZoom(1.2)}
-          title="Phóng to"
-          className="rounded p-1 text-zinc-400 hover:bg-[#151C2C] hover:text-zinc-100 cursor-pointer"
-        >
-          <ZoomIn className="h-3 w-3" />
-        </button>
-        <button
-          type="button"
-          onClick={() => adjustZoom(0.84)}
-          title="Thu nhỏ"
-          className="rounded p-1 text-zinc-400 hover:bg-[#151C2C] hover:text-zinc-100 cursor-pointer"
-        >
-          <ZoomOut className="h-3 w-3" />
-        </button>
-        <button
-          type="button"
-          onClick={resetCamera}
-          title="Đặt lại góc nhìn"
-          className="rounded p-1 text-zinc-400 hover:bg-[#151C2C] hover:text-zinc-100 cursor-pointer"
-        >
-          <RotateCcw className="h-3 w-3" />
-        </button>
-      </div>
+      {!hideFloatingControls && (
+        <div className="pointer-events-auto absolute right-2 top-2 flex items-center gap-1 rounded-md border border-[#1D263B] bg-[#0F1420]/90 p-0.5">
+          <button
+            type="button"
+            onClick={() => adjustZoom(1.2)}
+            title="Phóng to"
+            className="rounded p-1 text-zinc-400 hover:bg-[#151C2C] hover:text-zinc-100 cursor-pointer"
+          >
+            <ZoomIn className="h-3 w-3" />
+          </button>
+          <button
+            type="button"
+            onClick={() => adjustZoom(0.84)}
+            title="Thu nhỏ"
+            className="rounded p-1 text-zinc-400 hover:bg-[#151C2C] hover:text-zinc-100 cursor-pointer"
+          >
+            <ZoomOut className="h-3 w-3" />
+          </button>
+          <button
+            type="button"
+            onClick={resetCamera}
+            title="Đặt lại góc nhìn"
+            className="rounded p-1 text-zinc-400 hover:bg-[#151C2C] hover:text-zinc-100 cursor-pointer"
+          >
+            <RotateCcw className="h-3 w-3" />
+          </button>
+        </div>
+      )}
 
       {filtered.nodes.length <= 1 && mode === "local" && (
         <div className="pointer-events-none absolute inset-x-3 bottom-2 text-center text-[10px] text-zinc-500">
@@ -567,4 +587,6 @@ export const VaultGraphView: React.FC<VaultGraphViewProps> = ({
       )}
     </div>
   );
-};
+});
+
+VaultGraphView.displayName = "VaultGraphView";

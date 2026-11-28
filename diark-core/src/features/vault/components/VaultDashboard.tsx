@@ -11,12 +11,10 @@ import {
   Search,
   Trash2,
   Zap,
-  ChevronDown,
-  ChevronUp,
+  ChevronRight,
   ExternalLink,
   Code2,
   GitBranch,
-  Maximize2,
   Printer,
   Hash,
   X,
@@ -24,6 +22,9 @@ import {
   Keyboard,
   Sparkles,
   Sigma,
+  ZoomIn,
+  ZoomOut,
+  RotateCcw,
 } from "lucide-react";
 import { useSettingsStore } from "@/stores/useSettingsStore";
 import { useVaultShortcutsStore } from "@/stores/useVaultShortcutsStore";
@@ -59,7 +60,7 @@ import type {
   VaultSearchResultDto,
 } from "../types";
 import { NotionNoteEditor } from "./NotionNoteEditor";
-import { VaultGraphView } from "./VaultGraphView";
+import { VaultGraphView, type VaultGraphViewHandle } from "./VaultGraphView";
 import { QuickCaptureModal } from "./QuickCaptureModal";
 import { renderHighlightedSnippet } from "@/lib/snippet";
 
@@ -113,8 +114,8 @@ export const VaultDashboard: React.FC = () => {
   const [saveState, setSaveState] = useState<"saved" | "dirty" | "saving">("saved");
   const [editorError, setEditorError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<EditorViewMode>("wysiwyg");
-  const [showGraphInspector, setShowGraphInspector] = useState<boolean>(true);
-  const [isGlobalGraphOpen, setIsGlobalGraphOpen] = useState<boolean>(false);
+  const [isGraphOpen, setIsGraphOpen] = useState<boolean>(false);
+  const [showBacklinks, setShowBacklinks] = useState<boolean>(false);
   const [isTemplateModalOpen, setIsTemplateModalOpen] = useState<boolean>(false);
   const [templateCategory, setTemplateCategory] = useState<"all" | VaultTemplateCategory>("all");
   const [vaultGraph, setVaultGraph] = useState<VaultGraphDto>({ nodes: [], edges: [] });
@@ -124,6 +125,7 @@ export const VaultDashboard: React.FC = () => {
   const isSettingsOpen = useSettingsStore((s) => s.isOpen);
   const openSettings = useSettingsStore((s) => s.openSettings);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const graphViewRef = useRef<VaultGraphViewHandle | null>(null);
 
   // Search state
   const [searchQuery, setSearchQuery] = useState<string>("");
@@ -361,9 +363,9 @@ export const VaultDashboard: React.FC = () => {
           setIsTemplateModalOpen(false);
           return;
         }
-        if (isGlobalGraphOpen) {
+        if (isGraphOpen) {
           e.preventDefault();
-          setIsGlobalGraphOpen(false);
+          setIsGraphOpen(false);
           return;
         }
       }
@@ -380,12 +382,12 @@ export const VaultDashboard: React.FC = () => {
       } else if (matchesShortcut(e, shortcuts.toggleSource)) {
         e.preventDefault();
         setViewMode((prev) => (prev === "wysiwyg" ? "source" : "wysiwyg"));
-      } else if (matchesShortcut(e, shortcuts.toggleGraph)) {
+      } else if (
+        matchesShortcut(e, shortcuts.toggleGraph) ||
+        matchesShortcut(e, shortcuts.openGlobalGraph)
+      ) {
         e.preventDefault();
-        setShowGraphInspector((prev) => !prev);
-      } else if (matchesShortcut(e, shortcuts.openGlobalGraph)) {
-        e.preventDefault();
-        setIsGlobalGraphOpen((prev) => !prev);
+        setIsGraphOpen((prev) => !prev);
       } else if (matchesShortcut(e, shortcuts.focusSearch)) {
         e.preventDefault();
         searchInputRef.current?.focus();
@@ -400,7 +402,7 @@ export const VaultDashboard: React.FC = () => {
   }, [
     handleCreateNewNote,
     handleSaveNote,
-    isGlobalGraphOpen,
+    isGraphOpen,
     isSettingsOpen,
     isTemplateModalOpen,
     shortcuts,
@@ -772,79 +774,86 @@ export const VaultDashboard: React.FC = () => {
           </div>
 
           {/* Bottom Secondary Tools */}
-          <div className="border-t border-[#1D263B] p-2.5">
+          <div className="border-t border-[#1D263B] px-3 py-2">
             <button
               type="button"
               onClick={() => setShowVaultTools((prev) => !prev)}
-              className="flex w-full items-center justify-between text-[11px] font-medium text-zinc-400 hover:text-zinc-200 cursor-pointer"
+              aria-expanded={showVaultTools}
+              className="flex w-full items-center justify-between text-[11px] font-medium text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer"
             >
               <span className="flex items-center gap-1.5">
                 <FolderOpen className="h-3.5 w-3.5 text-zinc-500" />
                 <span>Thư mục &amp; Phím tắt</span>
               </span>
-              {showVaultTools ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+              <ChevronRight
+                className={`h-3.5 w-3.5 transition-transform duration-150 ${
+                  showVaultTools ? "rotate-90 text-[#6B9BFF]" : ""
+                }`}
+              />
             </button>
 
-            {showVaultTools && (
-              <div className="mt-2.5 space-y-2 text-[11px]">
-                <div className="truncate font-mono text-[10px] text-zinc-500" title={vaultPath}>
-                  {vaultPath || "Chưa thiết lập thư mục"}
-                </div>
-                {toolMessage && <div className="text-[#6B9BFF]">{toolMessage}</div>}
-                <div className="flex flex-wrap gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => void handleSelectVaultDir()}
-                    disabled={isSyncing}
-                    className="rounded border border-[#1D263B] bg-[#080B12] hover:bg-[#151C2C] px-2 py-1 text-zinc-200 cursor-pointer"
-                  >
-                    Đổi thư mục
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void handleRescan()}
-                    disabled={isSyncing}
-                    className="inline-flex items-center gap-1 rounded border border-[#1D263B] bg-[#080B12] hover:bg-[#151C2C] px-2 py-1 text-zinc-200 cursor-pointer"
-                  >
-                    <RefreshCw className={`h-3 w-3 ${isSyncing ? "animate-spin" : ""}`} />
-                    <span>Quét lại</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void handleScaffoldFolders()}
-                    disabled={isSyncing}
-                    className="rounded border border-[#1D263B] bg-[#080B12] hover:bg-[#151C2C] px-2 py-1 text-zinc-200 cursor-pointer"
-                  >
-                    Tạo theo môn học
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setIsQuickCaptureOpen(true)}
-                    className="inline-flex items-center gap-1 rounded border border-[#2F6BFF]/45 bg-[#2F6BFF]/[0.14] hover:bg-[#2F6BFF]/[0.24] px-2 py-1 text-[#6B9BFF] cursor-pointer"
-                  >
-                    <Zap className="h-3 w-3" />
-                    <span>Lưu nhanh</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => openSettings("system")}
-                    className="inline-flex items-center gap-1 rounded border border-[#1D263B] bg-[#080B12] hover:bg-[#151C2C] px-2 py-1 text-zinc-200 cursor-pointer"
-                  >
-                    <Keyboard className="h-3 w-3 text-[#6B9BFF]" />
-                    <span>Chỉnh phím tắt</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void handleNormalizeVaultLatex()}
-                    disabled={isNormalizingLatex || isSyncing}
-                    className="inline-flex items-center gap-1 rounded border border-[#1D263B] bg-[#080B12] hover:bg-[#151C2C] px-2 py-1 text-zinc-200 cursor-pointer disabled:opacity-50"
-                  >
-                    <Sigma className={`h-3 w-3 text-[#6B9BFF] ${isNormalizingLatex ? "animate-pulse" : ""}`} />
-                    <span>{isNormalizingLatex ? "Đang duyệt LaTeX..." : "Chuẩn hóa LaTeX"}</span>
-                  </button>
+            <div className="vault-accordion" data-open={showVaultTools ? "true" : "false"}>
+              <div className="vault-accordion-inner">
+                <div className="mt-2.5 space-y-2 pb-0.5 text-[11px]">
+                  <div className="truncate font-mono text-[10px] text-zinc-500" title={vaultPath}>
+                    {vaultPath || "Chưa thiết lập thư mục"}
+                  </div>
+                  {toolMessage && <div className="text-[#6B9BFF]">{toolMessage}</div>}
+                  <div className="flex flex-wrap gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => void handleSelectVaultDir()}
+                      disabled={isSyncing}
+                      className="rounded border border-[#1D263B] bg-[#080B12] hover:bg-[#151C2C] px-2 py-1 text-zinc-200 cursor-pointer"
+                    >
+                      Đổi thư mục
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleRescan()}
+                      disabled={isSyncing}
+                      className="inline-flex items-center gap-1 rounded border border-[#1D263B] bg-[#080B12] hover:bg-[#151C2C] px-2 py-1 text-zinc-200 cursor-pointer"
+                    >
+                      <RefreshCw className={`h-3 w-3 ${isSyncing ? "animate-spin" : ""}`} />
+                      <span>Quét lại</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleScaffoldFolders()}
+                      disabled={isSyncing}
+                      className="rounded border border-[#1D263B] bg-[#080B12] hover:bg-[#151C2C] px-2 py-1 text-zinc-200 cursor-pointer"
+                    >
+                      Tạo theo môn học
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsQuickCaptureOpen(true)}
+                      className="inline-flex items-center gap-1 rounded border border-[#2F6BFF]/45 bg-[#2F6BFF]/[0.14] hover:bg-[#2F6BFF]/[0.24] px-2 py-1 text-[#6B9BFF] cursor-pointer"
+                    >
+                      <Zap className="h-3 w-3" />
+                      <span>Lưu nhanh</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openSettings("system")}
+                      className="inline-flex items-center gap-1 rounded border border-[#1D263B] bg-[#080B12] hover:bg-[#151C2C] px-2 py-1 text-zinc-200 cursor-pointer"
+                    >
+                      <Keyboard className="h-3 w-3 text-[#6B9BFF]" />
+                      <span>Chỉnh phím tắt</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleNormalizeVaultLatex()}
+                      disabled={isNormalizingLatex || isSyncing}
+                      className="inline-flex items-center gap-1 rounded border border-[#1D263B] bg-[#080B12] hover:bg-[#151C2C] px-2 py-1 text-zinc-200 cursor-pointer disabled:opacity-50"
+                    >
+                      <Sigma className="h-3 w-3 text-[#6B9BFF]" />
+                      <span>{isNormalizingLatex ? "Đang duyệt LaTeX..." : "Chuẩn hóa LaTeX"}</span>
+                    </button>
+                  </div>
                 </div>
               </div>
-            )}
+            </div>
           </div>
         </aside>
 
@@ -917,10 +926,10 @@ export const VaultDashboard: React.FC = () => {
 
                     <button
                       type="button"
-                      onClick={() => setShowGraphInspector((prev) => !prev)}
-                      title={`Bật/tắt bảng mạng liên kết (${shortcuts.toggleGraph})`}
+                      onClick={() => setIsGraphOpen((prev) => !prev)}
+                      title={`Mở mạng liên kết (${shortcuts.toggleGraph})`}
                       className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer ${
-                        showGraphInspector
+                        isGraphOpen
                           ? "border-[#2F6BFF]/50 bg-[#2F6BFF]/20 text-[#6B9BFF]"
                           : "border-[#1D263B] bg-[#080B12] text-zinc-300 hover:bg-[#151C2C]"
                       }`}
@@ -1043,8 +1052,8 @@ export const VaultDashboard: React.FC = () => {
                 )}
               </div>
 
-              {/* Main Single-Pane Workspace + Optional Right Graph Inspector */}
-              <div className="flex-1 min-h-0 flex flex-col xl:flex-row overflow-hidden">
+              {/* Full-Width Single-Pane Editor + Collapsible Bottom Backlinks Bar */}
+              <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
                 {viewMode === "wysiwyg" ? (
                   <NotionNoteEditor
                     noteId={activeNoteId}
@@ -1072,99 +1081,117 @@ export const VaultDashboard: React.FC = () => {
                   />
                 )}
 
-                {showGraphInspector && (
-                  <aside className="xl:w-72 shrink-0 border-t xl:border-t-0 xl:border-l border-[#1D263B] bg-[#080B12] p-3 flex flex-col gap-3 overflow-y-auto vault-no-print">
-                    <div className="flex items-center justify-between gap-2">
-                      <div>
-                        <h3 className="text-xs font-semibold text-zinc-200">Mạng liên kết</h3>
-                        <p className="text-[10px] text-zinc-500">
-                          {vaultGraph.nodes.length} nút · {vaultGraph.edges.length} liên kết
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setIsGlobalGraphOpen(true)}
-                        title={`Mở toàn bộ đồ thị (${shortcuts.openGlobalGraph})`}
-                        className="inline-flex items-center gap-1 rounded border border-[#1D263B] bg-[#0F1420] hover:bg-[#151C2C] px-2 py-1 text-[11px] text-[#6B9BFF] cursor-pointer"
-                      >
-                        <Maximize2 className="h-3 w-3" />
-                        <span>Toàn đồ thị</span>
-                      </button>
-                    </div>
-
-                    <VaultGraphView
-                      graph={vaultGraph}
-                      activeNoteId={activeNoteId}
-                      mode="local"
-                      onSelectNode={handleGraphSelectNode}
-                      className="h-56 w-full"
+                <div className="border-t border-[#1D263B] bg-[#080B12] px-5 py-2 vault-no-print">
+                  <button
+                    type="button"
+                    onClick={() => setShowBacklinks((prev) => !prev)}
+                    aria-expanded={showBacklinks}
+                    className="flex w-full items-center justify-between text-xs text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer"
+                  >
+                    <span className="inline-flex items-center gap-1.5 font-medium">
+                      <Link2 className="h-3.5 w-3.5 text-[#6B9BFF]" />
+                      <span>Liên kết trỏ tới ({backlinks.length})</span>
+                    </span>
+                    <ChevronRight
+                      className={`h-3.5 w-3.5 transition-transform duration-150 ${
+                        showBacklinks ? "rotate-90 text-[#6B9BFF]" : ""
+                      }`}
                     />
+                  </button>
 
-                    <div className="space-y-1.5 border-t border-[#1D263B] pt-2.5">
-                      <div className="flex items-center gap-1.5 text-[11px] font-medium text-zinc-300">
-                        <Link2 className="h-3.5 w-3.5 text-[#6B9BFF]" />
-                        <span>Liên kết trỏ tới ({backlinks.length})</span>
+                  <div className="vault-accordion" data-open={showBacklinks ? "true" : "false"}>
+                    <div className="vault-accordion-inner">
+                      <div className="pt-2 pb-0.5">
+                        {backlinks.length === 0 ? (
+                          <p className="text-[11px] text-zinc-500">
+                            Chưa có ghi chú nào nhắc tới [[{title || "..."}]].
+                          </p>
+                        ) : (
+                          <div className="flex flex-wrap gap-1.5">
+                            {backlinks.map((bl) => (
+                              <button
+                                key={bl.id}
+                                type="button"
+                                onClick={() => void openNoteById(bl.id)}
+                                className="rounded-md border border-[#1D263B] bg-[#0F1420] hover:border-[#2F6BFF]/45 hover:text-[#6B9BFF] px-2.5 py-1 text-xs text-zinc-300 transition-colors cursor-pointer"
+                              >
+                                {bl.title}
+                              </button>
+                            ))}
+                          </div>
+                        )}
                       </div>
-                      {backlinks.length === 0 ? (
-                        <p className="text-[11px] text-zinc-500">
-                          Chưa có ghi chú nào nhắc tới [[{title || "..."}]].
-                        </p>
-                      ) : (
-                        <div className="space-y-1">
-                          {backlinks.map((bl) => (
-                            <button
-                              key={bl.id}
-                              type="button"
-                              onClick={() => void openNoteById(bl.id)}
-                              className="w-full truncate rounded-md border border-[#1D263B] bg-[#0F1420] hover:border-[#2F6BFF]/45 hover:text-[#6B9BFF] px-2.5 py-1.5 text-left text-xs text-zinc-300 transition-colors cursor-pointer"
-                            >
-                              {bl.title}
-                            </button>
-                          ))}
-                        </div>
-                      )}
                     </div>
-                  </aside>
-                )}
+                  </div>
+                </div>
               </div>
             </>
           )}
         </section>
       </div>
 
-      {isGlobalGraphOpen && (
+      {isGraphOpen && (
         <div
-          onClick={() => setIsGlobalGraphOpen(false)}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-6 backdrop-blur-xs vault-no-print"
+          onClick={() => setIsGraphOpen(false)}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-[#080B12]/[0.82] p-6 vault-no-print"
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="flex h-[80vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-[#2B3957] bg-[#0F1420] shadow-2xl"
+            className="vault-overlay-panel flex h-[80vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-[#1D263B] bg-[#0F1420] shadow-2xl"
           >
-            <div className="flex items-center justify-between border-b border-[#1D263B] px-5 py-3">
-              <div>
-                <h3 className="text-sm font-semibold text-zinc-100">
-                  Đồ thị liên kết ghi chú
-                </h3>
-                <p className="text-[11px] text-zinc-400">
-                  {vaultGraph.nodes.length} ghi chú · {vaultGraph.edges.length} liên kết · Nhấp vào nút để mở hoặc tạo ghi chú
-                </p>
+            <div className="flex items-center justify-between gap-3 border-b border-[#1D263B] px-5 py-3">
+              <div className="flex items-baseline gap-3">
+                <h3 className="text-sm font-semibold text-zinc-100">Mạng liên kết</h3>
+                <span className="text-xs text-zinc-400">
+                  {vaultGraph.nodes.length} nút · {vaultGraph.edges.length} liên kết
+                </span>
               </div>
-              <button
-                type="button"
-                onClick={() => setIsGlobalGraphOpen(false)}
-                className="rounded-lg border border-[#1D263B] bg-[#080B12] p-1.5 text-zinc-400 hover:bg-[#151C2C] hover:text-zinc-100 cursor-pointer"
-              >
-                <X className="h-4 w-4" />
-              </button>
+
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => graphViewRef.current?.zoomIn()}
+                  title="Phóng to"
+                  className="rounded-lg border border-[#1D263B] bg-[#080B12] p-1.5 text-zinc-400 hover:bg-[#151C2C] hover:text-zinc-100 cursor-pointer"
+                >
+                  <ZoomIn className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => graphViewRef.current?.zoomOut()}
+                  title="Thu nhỏ"
+                  className="rounded-lg border border-[#1D263B] bg-[#080B12] p-1.5 text-zinc-400 hover:bg-[#151C2C] hover:text-zinc-100 cursor-pointer"
+                >
+                  <ZoomOut className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => graphViewRef.current?.resetCamera()}
+                  title="Đặt lại góc nhìn"
+                  className="rounded-lg border border-[#1D263B] bg-[#080B12] p-1.5 text-zinc-400 hover:bg-[#151C2C] hover:text-zinc-100 cursor-pointer"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsGraphOpen(false)}
+                  title="Đóng (Esc)"
+                  className="ml-1 rounded-lg border border-[#1D263B] bg-[#080B12] p-1.5 text-zinc-400 hover:bg-[#151C2C] hover:text-zinc-100 cursor-pointer"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
             </div>
+
             <VaultGraphView
+              ref={graphViewRef}
               graph={vaultGraph}
               activeNoteId={activeNoteId}
               mode="global"
+              hideFloatingControls
               onSelectNode={(node) => {
                 handleGraphSelectNode(node);
-                setIsGlobalGraphOpen(false);
+                setIsGraphOpen(false);
               }}
               className="flex-1 rounded-none border-0"
             />
@@ -1175,11 +1202,11 @@ export const VaultDashboard: React.FC = () => {
       {isTemplateModalOpen && (
         <div
           onClick={() => setIsTemplateModalOpen(false)}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-xs vault-no-print"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-[#080B12]/[0.82] p-4 vault-no-print"
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="flex max-h-[86vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-[#2B3957] bg-[#0F1420] shadow-2xl"
+            className="vault-overlay-panel flex max-h-[86vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-[#1D263B] bg-[#0F1420] shadow-2xl"
           >
             <div className="flex items-center justify-between border-b border-[#1D263B] px-5 py-3.5">
               <div>
@@ -1261,18 +1288,6 @@ export const VaultDashboard: React.FC = () => {
                   )}
                 </button>
               ))}
-            </div>
-
-            <div className="flex items-center justify-between border-t border-[#1D263B] bg-[#080B12] px-5 py-2.5 text-[11px] text-zinc-400">
-              <span>Cần file Word (.docx) hoặc LaTeX gốc chuẩn UIT?</span>
-              <button
-                type="button"
-                onClick={() => void openExternalUrl("https://svuit.org/mmtt/docs/Templates/")}
-                className="inline-flex items-center gap-1 font-medium text-[#6B9BFF] hover:underline cursor-pointer"
-              >
-                <ExternalLink className="h-3.5 w-3.5" />
-                <span>Mở kho mẫu SVUIT</span>
-              </button>
             </div>
           </div>
         </div>
