@@ -370,8 +370,8 @@ mod tests {
 
         assert_eq!(plugins.len(), 6);
         assert!(plugins.iter().any(|p| p.plugin_id == "cp-codeforces" && p.trust_tier == "first_party"));
-        assert!(plugins.iter().any(|p| p.plugin_id == "uit-wecode" && p.is_enabled));
-        assert!(plugins.iter().any(|p| p.plugin_id == "uit-courses" && p.is_enabled));
+        assert!(plugins.iter().any(|p| p.plugin_id == "uit-wecode" && !p.is_enabled));
+        assert!(plugins.iter().any(|p| p.plugin_id == "uit-courses" && !p.is_enabled));
     }
 
     #[test]

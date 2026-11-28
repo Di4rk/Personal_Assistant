@@ -105,6 +105,75 @@ dialog::backdrop {
   }
 }
 
+@keyframes uit-mono-aura {
+  0%,
+  100% {
+    opacity: 0.09;
+  }
+  50% {
+    opacity: 0.16;
+  }
+}
+
+@keyframes uit-ridge-wave-1 {
+  0%,
+  100% {
+    transform: translate3d(-1.8%, 0px, 0);
+  }
+  50% {
+    transform: translate3d(1.8%, -14px, 0);
+  }
+}
+
+@keyframes uit-ridge-wave-2 {
+  0%,
+  100% {
+    transform: translate3d(2%, -10px, 0);
+  }
+  50% {
+    transform: translate3d(-2%, 8px, 0);
+  }
+}
+
+@keyframes uit-ridge-wave-3 {
+  0%,
+  100% {
+    transform: translate3d(-1.4%, 6px, 0);
+  }
+  50% {
+    transform: translate3d(1.4%, -9px, 0);
+  }
+}
+
+@keyframes uit-ridge-wave-4 {
+  0%,
+  100% {
+    transform: translate3d(0.8%, -4px, 0);
+  }
+  50% {
+    transform: translate3d(-0.8%, 4px, 0);
+  }
+}
+
+@keyframes uit-logo-scan {
+  0% {
+    transform: translate3d(0, -110%, 0);
+    opacity: 0;
+  }
+  12% {
+    opacity: 1;
+  }
+  72% {
+    transform: translate3d(0, 110%, 0);
+    opacity: 1;
+  }
+  84%,
+  100% {
+    transform: translate3d(0, 125%, 0);
+    opacity: 0;
+  }
+}
+
 /* Opt-in discrete UI animations: static by default, animate only when user allows motion */
 @media (prefers-reduced-motion: no-preference) {
   .uit-shimmer-once {
@@ -126,6 +195,38 @@ dialog::backdrop {
   .uit-day-flash {
     animation: uit-day-flash 800ms ease-out 1;
   }
+
+  .uit-mono-aura {
+    animation: uit-mono-aura 7s ease-in-out infinite;
+  }
+
+  .uit-ridge-wave-1 {
+    animation: uit-ridge-wave-1 15s ease-in-out infinite;
+    will-change: transform;
+  }
+
+  .uit-ridge-wave-2 {
+    animation: uit-ridge-wave-2 12s ease-in-out infinite;
+    animation-delay: -3.5s;
+    will-change: transform;
+  }
+
+  .uit-ridge-wave-3 {
+    animation: uit-ridge-wave-3 9.8s ease-in-out infinite;
+    animation-delay: -1.8s;
+    will-change: transform;
+  }
+
+  .uit-ridge-wave-4 {
+    animation: uit-ridge-wave-4 7.8s ease-in-out infinite;
+    animation-delay: -1.1s;
+    will-change: transform;
+  }
+
+  .uit-logo-scan {
+    animation: uit-logo-scan 6.4s cubic-bezier(0.42, 0, 0.58, 1) infinite;
+    will-change: transform, opacity;
+  }
 }
 
 /* Decorative ambient classes kept static to protect WebView2 idle GPU/RAM (<100MB budget) */
@@ -136,17 +237,8 @@ dialog::backdrop {
 .uit-hero-logo-glow,
 .uit-hero-mist-1,
 .uit-hero-mist-2,
-.uit-hero-beam,
-.uit-mono-aura,
-.uit-ridge-wave-1,
-.uit-ridge-wave-2,
-.uit-ridge-wave-3,
-.uit-ridge-wave-4 {
+.uit-hero-beam {
   animation: none;
-}
-
-.uit-logo-scan {
-  opacity: 0;
 }
 
 .kpi-spotlight-border {
@@ -422,6 +514,19 @@ dialog::backdrop {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .uit-mono-aura,
+  .uit-ridge-wave-1,
+  .uit-ridge-wave-2,
+  .uit-ridge-wave-3,
+  .uit-ridge-wave-4,
+  .uit-logo-scan {
+    animation: none;
+  }
+
+  .uit-logo-scan {
+    opacity: 0;
+  }
+
   .vault-overlay-panel {
     animation: none;
   }

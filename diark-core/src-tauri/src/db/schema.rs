@@ -1084,8 +1084,8 @@ pub fn ensure_plugin_and_activity_schema(conn: &Connection) -> SqlResult<()> {
         VALUES 
             ('cp-codeforces', 'Codeforces Engine', '1.0.0', 'Diark', 'competitive_programming', 1, 1),
             ('cp-leetcode', 'LeetCode Tracker', '1.0.0', 'Diark', 'competitive_programming', 0, 1),
-            ('uit-wecode', 'Wecode UIT Tracker', '1.0.0', 'Diark', 'education', 1, 1),
-            ('uit-courses', 'Courses Engine (Moodle)', '1.0.0', 'Diark', 'education', 1, 1),
+            ('uit-wecode', 'Wecode UIT Tracker', '1.0.0', 'Diark', 'education', 0, 1),
+            ('uit-courses', 'Courses Engine (Moodle)', '1.0.0', 'Diark', 'education', 0, 1),
             ('sec-ctf', 'CTF Log & Writeups', '1.0.0', 'Diark', 'cyber_security', 0, 1),
             ('ai-lab', 'AI & Kaggle Hub', '1.0.0', 'Diark', 'ai_datascience', 0, 1);
         "#,

@@ -81,16 +81,6 @@ export const SsoLoginScreen: React.FC<SsoLoginScreenProps> = ({
 
   if (!isOpen) return null;
 
-  const enableDefaultStudentPlugins = async () => {
-    const defaults = [
-      { pluginId: "uit-courses", enabled: true },
-      { pluginId: "uit-wecode", enabled: true },
-    ];
-    for (const item of defaults) {
-      await invoke("toggle_plugin", item).catch(() => undefined);
-    }
-  };
-
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setErrorMsg(null);
@@ -115,7 +105,6 @@ export const SsoLoginScreen: React.FC<SsoLoginScreenProps> = ({
       if (mode === "onboarding") {
         await saveUserProfile(cleanUser, "CS");
         await invoke("save_setting", { key: "user_nickname", value: cleanUser }).catch(() => undefined);
-        await enableDefaultStudentPlugins();
       }
 
       if (autoLogin) {
@@ -153,7 +142,6 @@ export const SsoLoginScreen: React.FC<SsoLoginScreenProps> = ({
     try {
       const fallbackName = username.trim() || "Sinh viên UIT";
       await saveUserProfile(fallbackName, "CS");
-      await enableDefaultStudentPlugins();
       if (onComplete) {
         await onComplete(fallbackName, "CS");
       }

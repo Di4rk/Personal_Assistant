@@ -676,6 +676,7 @@ pub fn build_sso_verify_script(username: &str, password: &str) -> String {
         r#"(() => {{
   if (window.__DIARK_SSO_VERIFY_ACTIVE__) return;
   window.__DIARK_SSO_VERIFY_ACTIVE__ = true;
+  window.__DIARK_SUBMITTED_THIS_DOC__ = false;
 
   const VERIFY_USER = {user_json};
   const VERIFY_PASS = {pass_json};
@@ -683,6 +684,9 @@ pub fn build_sso_verify_script(username: &str, password: &str) -> String {
   function sendVerify(status, msg) {{
     if (window.__DIARK_VERIFY_REPORTED__) return;
     window.__DIARK_VERIFY_REPORTED__ = true;
+    try {{
+      sessionStorage.removeItem("__diark_verify_submitted");
+    }} catch (_) {{}}
     const encoded = msg ? "&msg=" + encodeURIComponent(msg) : "";
     window.location.href = "diark-sso://verify?status=" + status + encoded;
   }}
@@ -756,6 +760,8 @@ pub fn build_sso_verify_script(username: &str, password: &str) -> String {
       return;
     }}
 
+    if (window.__DIARK_SUBMITTED_THIS_DOC__) return;
+
     if (sessionStorage.getItem("__diark_verify_submitted") === "1") {{
       setTimeout(() => {{
         const lateErr = document.querySelector('.alert-error, .alert-danger, #input-error, .kc-feedback-text, .pf-m-error');
@@ -772,6 +778,7 @@ pub fn build_sso_verify_script(username: &str, password: &str) -> String {
 
     if (!passInput || !userInput) return;
 
+    window.__DIARK_SUBMITTED_THIS_DOC__ = true;
     setInputValue(userInput, VERIFY_USER);
     setInputValue(passInput, VERIFY_PASS);
     sessionStorage.setItem("__diark_verify_submitted", "1");
@@ -895,5 +902,6 @@ mod tests {
         assert!(script.contains("\"21520001\""));
         assert!(script.contains("pass\\\"with\\\\quote"));
         assert!(script.contains("diark-sso://verify?status="));
+        assert!(script.contains("__DIARK_SUBMITTED_THIS_DOC__"));
     }
 }

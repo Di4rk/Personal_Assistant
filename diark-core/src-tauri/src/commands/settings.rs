@@ -188,7 +188,27 @@ pub fn execute_reset_user_data_to_genesis(conn: &mut rusqlite::Connection) -> Re
     tx.execute("DELETE FROM moodle_courses;", [])?;
 
     // Xóa các bảng tùy chọn/tương thích nếu tồn tại
-    for opt_table in &["student_profile", "daily_life_matrix", "academic_curriculum", "sync_state", "academic_exams"] {
+    for opt_table in &[
+        "student_profile",
+        "daily_life_matrix",
+        "academic_curriculum",
+        "sync_state",
+        "academic_exams",
+        "exam_checklist_items",
+        "portal_registered_classes",
+        "portal_timetable",
+        "portal_tuition",
+        "portal_certificates",
+        "portal_class_activities",
+        "course_syllabus_weights",
+        "moodle_grades",
+        "moodle_notifications",
+        "calendar_events",
+        "google_calendars",
+        "vault_links",
+        "vault_notes",
+        "vault_fts",
+    ] {
         let exists: bool = tx
             .query_row(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
@@ -202,17 +222,19 @@ pub fn execute_reset_user_data_to_genesis(conn: &mut rusqlite::Connection) -> Re
         }
     }
 
-    // Xóa cài đặt cá nhân và thông tin hồ sơ sinh viên, giữ lại cấu hình hệ thống tĩnh nếu có
+    // Xóa cài đặt cá nhân và thông tin hồ sơ sinh viên, giữ lại cấu hình hệ thống tĩnh (và vault_path)
     tx.execute(
         "DELETE FROM settings WHERE key IN (
             'genesis_completed',
             'system_initialized',
             'user_nickname',
+            'user_profile',
             'user_handle',
             'signature_handle',
             'codeforces_handle',
             'avatar_path',
             'demo_mode_enabled',
+            'last_briefing_ts',
             'student_id',
             'student_name',
             'faculty',
@@ -228,7 +250,15 @@ pub fn execute_reset_user_data_to_genesis(conn: &mut rusqlite::Connection) -> Re
             'admission_year',
             'user_major',
             'cf_handle'
-        );",
+        )
+        OR key LIKE 'sso_%'
+        OR key LIKE 'gcal_%'
+        OR key LIKE 'gemini_%';",
+        [],
+    )?;
+
+    tx.execute(
+        "UPDATE plugin_registry SET is_enabled = 0 WHERE plugin_id IN ('uit-wecode', 'uit-courses');",
         [],
     )?;
 
@@ -406,6 +436,10 @@ mod tests {
             "INSERT INTO settings (key, value) VALUES ('curriculum_slug', 'cu-nhan-nganh-khoa-hoc-may-tinh-khoa-20-2025')",
             [],
         ).unwrap();
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('sso_username', '21520001'), ('sso_password_enc', 'secret')",
+            [],
+        ).unwrap();
 
         // Thêm community plugin (is_builtin = 0)
         conn.execute(
@@ -470,7 +504,7 @@ mod tests {
         assert_eq!(drl_count, 0);
 
         let nick_count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM settings WHERE key IN ('user_nickname', 'student_id')",
+            "SELECT COUNT(*) FROM settings WHERE key IN ('user_nickname', 'student_id', 'sso_username', 'sso_password_enc')",
             [],
             |r| r.get(0),
         ).unwrap();
