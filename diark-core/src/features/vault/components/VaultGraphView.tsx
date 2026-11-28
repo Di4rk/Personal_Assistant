@@ -27,6 +27,7 @@ interface VaultGraphViewProps {
   mode: "local" | "global";
   onSelectNode: (node: VaultGraphNodeDto) => void;
   noteTagsById?: ReadonlyMap<string, readonly string[]>;
+  onVisibleCountsChange?: (counts: { nodes: number; edges: number }) => void;
   hideFloatingControls?: boolean;
   className?: string;
 }
@@ -72,6 +73,7 @@ export const VaultGraphView = forwardRef<VaultGraphViewHandle, VaultGraphViewPro
       mode,
       onSelectNode,
       noteTagsById,
+      onVisibleCountsChange,
       hideFloatingControls = false,
       className = "",
     },
@@ -183,6 +185,13 @@ export const VaultGraphView = forwardRef<VaultGraphViewHandle, VaultGraphViewPro
     showOrphans,
     showTagNodes,
   ]);
+
+  useEffect(() => {
+    onVisibleCountsChange?.({
+      nodes: filtered.nodes.length,
+      edges: filtered.edges.length,
+    });
+  }, [filtered.edges.length, filtered.nodes.length, onVisibleCountsChange]);
 
   useEffect(() => {
     const el = containerRef.current;

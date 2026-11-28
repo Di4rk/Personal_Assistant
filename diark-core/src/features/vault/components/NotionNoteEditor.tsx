@@ -720,6 +720,10 @@ export const NotionNoteEditor: React.FC<NotionNoteEditorProps> = ({
     if (!editor) return;
     const noteSwitched = lastLoadedNoteIdRef.current !== noteId;
     const externalChanged = content !== lastEmittedMdRef.current;
+    if (noteSwitched && lastLoadedNoteIdRef.current === null && !externalChanged) {
+      lastLoadedNoteIdRef.current = noteId;
+      return;
+    }
     if (noteSwitched || externalChanged) {
       lastLoadedNoteIdRef.current = noteId;
       lastEmittedMdRef.current = content;

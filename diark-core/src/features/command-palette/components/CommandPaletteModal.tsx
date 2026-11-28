@@ -215,6 +215,16 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
         console.error("Failed to open OneNote link:", err);
       }
     } else {
+      try {
+        window.sessionStorage.setItem("diark_pending_vault_note_id", item.id);
+      } catch {
+        // ignore storage errors
+      }
+      window.dispatchEvent(
+        new CustomEvent<{ noteId: string }>("diark:open-vault-note", {
+          detail: { noteId: item.id },
+        })
+      );
       onNavigateTab?.("vault");
     }
     setIsOpen(false);

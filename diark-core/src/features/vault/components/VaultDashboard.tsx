@@ -274,6 +274,10 @@ export const VaultDashboard: React.FC = () => {
   const [isTemplateModalOpen, setIsTemplateModalOpen] = useState<boolean>(false);
   const [templateCategory, setTemplateCategory] = useState<"all" | VaultTemplateCategory>("all");
   const [vaultGraph, setVaultGraph] = useState<VaultGraphDto>({ nodes: [], edges: [] });
+  const [graphDisplayCounts, setGraphDisplayCounts] = useState<{
+    nodes: number;
+    edges: number;
+  } | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   const shortcuts = useVaultShortcutsStore((s) => s.shortcuts);
@@ -295,9 +299,9 @@ export const VaultDashboard: React.FC = () => {
   const [toolMessage, setToolMessage] = useState<string | null>(null);
   const [aiCopilotEnabled, setAiCopilotEnabled] = useState<boolean>(() => {
     try {
-      return window.localStorage.getItem("diark_vault_ai_copilot_v1") !== "false";
+      return window.localStorage.getItem("diark_vault_ai_copilot_v1") === "true";
     } catch {
-      return true;
+      return false;
     }
   });
 
@@ -331,6 +335,8 @@ export const VaultDashboard: React.FC = () => {
   useEffect(() => {
     if (isGraphOpen) {
       void refreshGraph();
+    } else {
+      setGraphDisplayCounts(null);
     }
   }, [isGraphOpen, refreshGraph]);
 
@@ -365,32 +371,6 @@ export const VaultDashboard: React.FC = () => {
     [refreshGraph]
   );
 
-  useEffect(() => {
-    let mounted = true;
-    const init = async () => {
-      setIsLoadingList(true);
-      try {
-        const path = await ensureDefaultVaultPath();
-        if (mounted) setVaultPath(path);
-        await refreshNotesList(true);
-      } catch (err) {
-        if (mounted) {
-          setEditorError(typeof err === "string" ? err : "Không thể khởi tạo thư mục ghi chú.");
-        }
-      } finally {
-        if (mounted) setIsLoadingList(false);
-      }
-    };
-    void init();
-    return () => {
-      mounted = false;
-    };
-  }, [refreshNotesList]);
-
-  useTauriEvent<VaultSyncEvent>("vault-synced", () => {
-    void refreshNotesList(false);
-  });
-
   const openNoteById = useCallback(async (noteId: string) => {
     if (autosaveTimerRef.current) {
       window.clearTimeout(autosaveTimerRef.current);
@@ -417,6 +397,59 @@ export const VaultDashboard: React.FC = () => {
     }
   }, []);
 
+  useEffect(() => {
+    let mounted = true;
+    const init = async () => {
+      setIsLoadingList(true);
+      let pendingId: string | null = null;
+      try {
+        pendingId = window.sessionStorage.getItem("diark_pending_vault_note_id");
+        if (pendingId) {
+          window.sessionStorage.removeItem("diark_pending_vault_note_id");
+        }
+      } catch {
+        // ignore storage errors
+      }
+      try {
+        const path = await ensureDefaultVaultPath();
+        if (mounted) setVaultPath(path);
+        await refreshNotesList(!pendingId);
+        if (mounted && pendingId) {
+          await openNoteById(pendingId);
+        }
+      } catch (err) {
+        if (mounted) {
+          setEditorError(typeof err === "string" ? err : "Không thể khởi tạo thư mục ghi chú.");
+        }
+      } finally {
+        if (mounted) setIsLoadingList(false);
+      }
+    };
+    void init();
+    return () => {
+      mounted = false;
+    };
+  }, [openNoteById, refreshNotesList]);
+
+  useEffect(() => {
+    const onOpenPendingNote = (e: Event) => {
+      const noteId = (e as CustomEvent<{ noteId?: string }>).detail?.noteId;
+      if (!noteId) return;
+      try {
+        window.sessionStorage.removeItem("diark_pending_vault_note_id");
+      } catch {
+        // ignore storage errors
+      }
+      void openNoteById(noteId);
+    };
+    window.addEventListener("diark:open-vault-note", onOpenPendingNote);
+    return () => window.removeEventListener("diark:open-vault-note", onOpenPendingNote);
+  }, [openNoteById]);
+
+  useTauriEvent<VaultSyncEvent>("vault-synced", () => {
+    void refreshNotesList(false);
+  });
+
   const handleSaveNote = useCallback(
     async (overrideContent?: string) => {
       const bodyToSave = overrideContent ?? content;
@@ -439,7 +472,9 @@ export const VaultDashboard: React.FC = () => {
           externalUri: externalUri || undefined,
         });
         setActiveNoteId(saved.id);
-        setTitle(saved.title);
+        if (title.trim().length > 0) {
+          setTitle(saved.title);
+        }
         setFolder(saved.folder);
         setBacklinks(saved.backlinks);
         setSaveState("saved");
@@ -904,7 +939,7 @@ export const VaultDashboard: React.FC = () => {
             ) : notes.length === 0 ? (
               <div className="py-8 px-3 text-center text-xs text-zinc-500 space-y-2">
                 <FileText className="mx-auto h-6 w-6 text-zinc-600" />
-                <p>Chưa có ghi chú nào. Bấm &ldquo;Ghi chú mới&rdquo; để bắt đầu viết ngay.</p>
+                <p>Chưa có ghi chú nào. Bấm &ldquo;+ Mới&rdquo; hoặc &ldquo;Mẫu&rdquo; để bắt đầu viết ngay.</p>
               </div>
             ) : sidebarView === "tree" ? (
               <div className="space-y-0.5">
@@ -1367,7 +1402,8 @@ export const VaultDashboard: React.FC = () => {
               <div className="flex items-baseline gap-3">
                 <h3 className="text-sm font-semibold text-zinc-100">Mạng liên kết</h3>
                 <span className="text-xs text-zinc-400">
-                  {vaultGraph.nodes.length} nút · {vaultGraph.edges.length} liên kết
+                  {graphDisplayCounts?.nodes ?? vaultGraph.nodes.length} nút ·{" "}
+                  {graphDisplayCounts?.edges ?? vaultGraph.edges.length} liên kết
                 </span>
               </div>
 
@@ -1412,6 +1448,7 @@ export const VaultDashboard: React.FC = () => {
               graph={vaultGraph}
               activeNoteId={activeNoteId}
               noteTagsById={noteTagsById}
+              onVisibleCountsChange={setGraphDisplayCounts}
               mode="global"
               hideFloatingControls
               onSelectNode={(node) => {

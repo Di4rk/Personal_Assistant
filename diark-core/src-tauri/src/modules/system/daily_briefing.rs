@@ -284,7 +284,7 @@ mod tests {
         let briefing = generate_daily_briefing_content(&conn).unwrap();
         assert_eq!(briefing.urgent_tasks_count, 0);
         assert_eq!(briefing.new_materials_count, 0);
-        assert!(briefing.message.contains("không có deadline nào"));
+        assert!(briefing.message.contains("chưa có deadline"));
     }
 
     #[test]
