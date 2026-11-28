@@ -1,4 +1,4 @@
-# Diark (v1.2.1)
+# Diark (v1.2.2)
 
 Local-first desktop workspace for UIT students built with Tauri v2, Rust, SQLite, and React 19.
 
