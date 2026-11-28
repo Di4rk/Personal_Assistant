@@ -1,4 +1,4 @@
-# Diark (v1.1.2)
+# Diark (v1.2.0)
 
 Local-first desktop workspace for UIT students built with Tauri v2, Rust, SQLite, and React 19.
 
@@ -37,11 +37,14 @@ Tauri v2 / Rust (Tokio runtime)
 - Local post-mortem editor indexed with SQLite FTS5 for notes and edge-case breakdowns.
 
 ### Study Notes & Vault
-- Markdown notes stored as plain `.md` files on disk (compatible with Obsidian vaults), with split edit/preview, wikilinks (`[[note]]`), backlinks, and FTS5 search.
+- Single-pane rich Markdown editor (TipTap v2 + KaTeX) stored as plain `.md` files on disk, with `/` block commands, `@` and `[[` wikilink autocomplete, right-click context menu, drag-and-drop/paste local images (`_assets/`), and a toggleable raw `.md` source view.
+- Built-in UIT study and academic report templates, customizable note keyboard shortcuts in Settings, and a one-click batch LaTeX normalizer for `\(...\)` and `\[...\]` formulas.
+- Collapsible folder explorer tree with a recent-notes toggle, direct note navigation from `Ctrl+K`, a bottom backlinks bar, and FTS5 full-text search.
+- Interactive force-directed Graph View overlay with Hub sizing, `#tag` and folder clustering, search and orphan filters, and live physics force controls.
 - Ignores `.git`, `.obsidian`, `node_modules`, `.venv`, `site-packages`, and build artifacts during scanning and file watching.
 
 ### Gemini Copilot (BYOK) & Auto-Updater
-- Uses your own Google Gemini API key stored locally in SQLite to extract Moodle announcement deadlines or ask Socratic debugging questions.
+- Uses your own Google Gemini API key stored locally in SQLite for inline note autocomplete (`Tab` to accept, `Alt+\` to trigger), Moodle announcement deadline extraction, and Socratic debugging questions.
 - Checks GitHub Releases via `@tauri-apps/plugin-updater` with Minisign signature verification.
 
 ## Getting Started

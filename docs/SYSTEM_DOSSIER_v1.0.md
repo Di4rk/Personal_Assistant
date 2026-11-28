@@ -1,4 +1,4 @@
-# DIARK // OS — MASTER ARCHITECTURAL DOSSIER (v1.1.0 CANONICAL BASELINE)
+# DIARK // OS — MASTER ARCHITECTURAL DOSSIER (v1.2.0 BASELINE)
 
 ## 1. TỔNG QUAN HỆ THỐNG & NHÂN THỨC NGƯỜI DÙNG (PERSONA & HARDWARE)
 - **Chủ sở hữu hệ thống:** Sinh viên CS/IT năm 2 (UIT - ĐHQG-HCM), định hướng Competitive Programming (ICPC), Nghiên cứu AI và An toàn thông tin; Visual Designer thương hiệu Diark.
@@ -23,7 +23,7 @@
   ```
 - **Database Connection Pooling:** Tuần tự hóa truy cập qua `Arc<Mutex<Connection>>` (SharedDb) tránh database locks giữa background workers và IPC handlers. Định kỳ 15 phút thực thi `PRAGMA wal_checkpoint(PASSIVE)` nhằm dọn dẹp dung lượng file `-wal`.
 - **Local AI & Text Embeddings:** FastEmbed v4 (Pure Rust ONNX Engine cục bộ) & Google Gemini REST API qua SSE Streaming với giao thức BYOK (Bring Your Own Key).
-- **Frontend Layer:** React 19 (`^19.1.0`), Vite 7 (`^7.0.4`), TypeScript (`~5.8.3`), Tailwind CSS v4 (`^4.3.3`), Zustand Stores (`^5.0.15`), Lucide Icons (`^1.32.0`), Visx Charts (`^4.0.0`).
+- **Frontend Layer:** React 19 (`^19.1.0`), Vite 7 (`^7.0.4`), TypeScript (`~5.8.3`), Tailwind CSS v4 (`^4.3.3`), TipTap v2 (`2.11.5`), KaTeX (`^0.19.1`), Zustand Stores (`^5.0.15`), Lucide Icons (`^1.32.0`), Visx Charts (`^4.0.0`).
 - **Timezone Invariant:** Toàn bộ timestamp được chuẩn hóa về Unix Epoch UTC+7 (`Asia/Ho_Chi_Minh`).
 
 ### B. Security & Safety Invariants (P0 Rules)
@@ -867,7 +867,7 @@ pub struct GeminiStreamChunk {
 - **Tự Động Khởi Động Lại**: Sau khi giải nén và cập nhật thành công, gọi `relaunch()` từ `@tauri-apps/plugin-process` để khởi động lại ứng dụng tức thì với phiên bản mới nhất.
 
 ### B. CI/CD Release Pipeline (`.github/workflows/release.yml`)
-- Trigger tự động khi có tag Git mới dạng `v*` (ví dụ `v1.1.0`).
+- Trigger tự động khi có tag Git mới dạng `v*` (ví dụ `v1.2.0`).
 - Môi trường build: `windows-latest`, Node.js 22, pnpm 11, Rust stable toolchain với `x86_64-pc-windows-msvc`.
 - Tự động ký số file binary bằng private key bảo mật lưu tại GitHub Secrets (`TAURI_SIGNING_PRIVATE_KEY`).
 - Đẩy trực tiếp release assets, file `latest.json` chứa manifest phiên bản và changelog lên GitHub Releases.
@@ -884,7 +884,7 @@ pub struct GeminiStreamChunk {
 | `cf_handle` | Handle thi đấu Codeforces của sinh viên | `"Diark"` |
 | `total_degree_credits` | Tổng chỉ tiêu tín chỉ tốt nghiệp chuẩn (SSOT) | `"126"` |
 | `gemini_api_key` | Khóa API Google Gemini cá nhân (BYOK) | `"AIzaSy..."` |
-| `gemini_model` | Model AI đang được sử dụng cho Socratic Copilot | `"gemini-1.5-flash"` |
+| `gemini_model` | Model AI đang được sử dụng cho Socratic Copilot | `"gemini-2.5-flash"` |
 | `last_briefing_ts` | Timestamp lần gần nhất phát thông báo Daily Briefing | `"1711800000"` |
 | `auto_update_enabled` | Cờ bật/tắt tự động kiểm tra bản cập nhật mới | `"true"` |
 | `demo_privacy_mode` | Cờ kích hoạt che mờ thông tin cá nhân Demo Mode | `"false"` |
